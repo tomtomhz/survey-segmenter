@@ -973,10 +973,35 @@ def _typing_line(typing, rule_file="typing_rule.json", unit="segment"):
             f"with `--classify new.csv --rule {rule_file}`).")
 
 
+
+def _hopkins_caveat(distinct_share, n_items):
+    """Warn when the Hopkins statistic cannot be trusted for THIS data.
+
+    Hopkins compares distances between real points to distances from uniformly sampled ones, so
+    it is inflated wherever real points sit exactly on top of each other. On a short Likert
+    survey that happens constantly: two 1-to-5 questions admit only 25 answer patterns, so 120
+    respondents pile onto duplicates and Hopkins reads 0.78 — "strong tendency to cluster" — on
+    data with no structure whatsoever. It is also biased upward in very low dimensions. Both
+    cases would tell a reader the opposite of the truth, so say so next to the number rather
+    than leaving it to be discovered."""
+    reasons = []
+    if distinct_share is not None and distinct_share < 0.5:
+        reasons.append(f"only {distinct_share:.0%} of respondents have a distinct combination of "
+                       "answers, so many sit exactly on top of each other")
+    if n_items and n_items <= 3:
+        reasons.append(f"there are only {n_items} questions, and this statistic reads high in "
+                       "very few dimensions")
+    if not reasons:
+        return ""
+    return ("\n> **Do not lean on the Hopkins number here:** " + "; and ".join(reasons) +
+            ". Both inflate it, so a high value is not evidence of real segments in this "
+            "dataset. Judge this run on the replication and per-segment stability figures "
+            "below, which are not affected.\n")
+
 def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccard,
                 sizes, defining, differentiating, centroids, hopkins, mb_agreement,
                 var_importance, consensus_agreement, cfg, typing=None, varsel=None,
-                k_agreement=None, ward_ari=None):
+                k_agreement=None, ward_ari=None, distinct_share=None):
     method_name = ("a Gaussian mixture / latent-class model (" + cfg.gmm_covariance +
                    " covariance)" if getattr(cfg, "method", "kmeans") == "gmm" else "k-means")
     _keys = list(defining.keys())
@@ -994,7 +1019,8 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
          f"Hopkins statistic = **{hopkins:.2f}** — {hopkins_reading(hopkins)}. "
          "A value near 0.5 means the data are essentially random and any segments will be "
          "constructed by the method rather than discovered; above ~0.75 signals a real tendency "
-         "to cluster. Read the rest of this report in that light.\n",
+         "to cluster. Read the rest of this report in that light.\n"
+         + _hopkins_caveat(distinct_share, centroids.shape[1] if centroids is not None else 0),
          "## Choosing the number of segments\n", rationale, "\n",
          _md(diag.round(3)),
          "\n**How to read this table.** The two columns to trust most are **prediction_strength** "
@@ -4044,6 +4070,9 @@ class Segmenter:
             + [len(np.unique(_Xa[_rng.choice(n, n // 2, replace=False)], axis=0))
                for _ in range(5)])
         max_valid_k = max(2, min(n // 2, n_distinct))
+        # Kept for the report: Hopkins is inflated when many respondents share an identical
+        # answer pattern, so the reader needs to know how common that is here.
+        self.distinct_share = float(len(np.unique(_Xa, axis=0)) / n)
         if cfg.k_min > max_valid_k:
             raise ValueError(f"k_min={cfg.k_min} is too large for n={n} (the most segments the "
                              f"validation can support is {max_valid_k}).")
@@ -4138,7 +4167,8 @@ class Segmenter:
                                             sizes, defining, differentiating, centroids,
                                             self.hopkins, self.mb_agreement, self.var_importance,
                                             self.consensus_agreement, cfg, self.typing, self.varsel,
-                                            k_agree, self.ward_ari)
+                                            k_agree, self.ward_ari,
+                                            getattr(self, 'distinct_share', None))
         if demographics is not None and (not isinstance(demographics, pd.DataFrame) or not demographics.empty):
             self.report_markdown += "\n\n" + self._profile_external(demographics, id_col)
         if outdir:

@@ -1751,3 +1751,33 @@ def test_actions_still_work_after_a_session_is_evicted_from_memory(tmp_path, mon
     assert recovered["raw"] == raw                  # re-grouping needs the original upload
     assert "typing_rule.json" in recovered["files"]  # scoring needs the rule
     assert recovered["charts"], "charts must come back too, or the card reopens empty"
+
+
+def test_hopkins_is_caveated_when_it_cannot_be_trusted():
+    """Hopkins reads "strong tendency to cluster" on short Likert surveys of pure noise.
+
+    It compares distances between real points to distances from uniformly sampled ones, so it is
+    inflated wherever real points coincide. Two 1-to-5 questions admit 25 answer patterns, so 120
+    respondents pile onto duplicates and the statistic reports 0.78 on structureless data —
+    telling the reader the opposite of the truth, in the one section devoted to "is there
+    anything here at all". The number stays; the caveat sits next to it.
+    """
+    rng = np.random.default_rng(0)
+    n = 120
+    noise = pd.DataFrame({"respondent_id": [f"R{i}" for i in range(n)],
+                          "q1": rng.integers(1, 6, n), "q2": rng.integers(1, 6, n)})
+    r = sk.run_analysis(noise.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=8, **FAST))
+    assert "Do not lean on the Hopkins number" in r["digest"]
+
+    # It must stay quiet on data where the statistic IS meaningful — a caveat printed on every
+    # run teaches people to skip it, which costs more than it saves.
+    rows = []
+    for i in range(240):
+        base = {0: [5, 1, 5, 2, 4, 1], 1: [1, 5, 2, 4, 1, 5], 2: [3, 3, 4, 5, 2, 3]}[i % 3]
+        rows.append([f"R{i}"] + [int(np.clip(round(b + rng.normal(0, 0.7)), 1, 5)) for b in base])
+    wide = pd.DataFrame(rows, columns=["respondent_id"] + [f"q{i}" for i in range(1, 7)])
+    r2 = sk.run_analysis(wide.to_csv(index=False).encode(),
+                         cfg=sk.SegmentationConfig(k_min=2, k_max=5, **FAST))
+    assert "Do not lean on the Hopkins number" not in r2["digest"]
+    assert r2["confidence"] == "high"
