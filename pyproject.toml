@@ -26,6 +26,11 @@ tables = ["tabulate>=0.9"]        # prettier Markdown tables in the report
 ai = ["anthropic>=0.40"]          # "ask Claude about your segments" chat (optional; bring your own key)
 dev = ["pytest>=7.0", "pyflakes>=3.0"]
 
+[project.urls]
+Homepage = "https://github.com/tomtomhz/survey-segmenter"
+Repository = "https://github.com/tomtomhz/survey-segmenter"
+Changelog = "https://github.com/tomtomhz/survey-segmenter/blob/main/CHANGELOG.md"
+
 [project.scripts]
 segment-kmeans = "segment_kmeans:_cli"
 

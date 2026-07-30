@@ -1,6 +1,6 @@
 # Survey Segmenter
 
-[![CI](https://github.com/OWNER/survey-segmenter/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/survey-segmenter/actions/workflows/ci.yml)
+[![CI](https://github.com/tomtomhz/survey-segmenter/actions/workflows/ci.yml/badge.svg)](https://github.com/tomtomhz/survey-segmenter/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-informational.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
 
