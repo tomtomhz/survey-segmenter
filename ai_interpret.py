@@ -220,7 +220,16 @@ def build_messages(report_markdown: str, question: "str | None", history: "list 
         msgs = list(history)
         msgs.append({"role": "user", "content": (question or "Please continue.").strip()})
         return msgs
-    return [{"role": "user", "content": _first_turn_content(report_markdown, question)}]
+    # The report is the large, unchanging part of every request in this conversation — each
+    # follow-up question resends the whole thing. Marking it cacheable means later turns are
+    # billed at roughly a tenth of the input rate and come back faster. Caching is a prefix
+    # match, so the marker belongs on this first block: everything before it (the system prompt)
+    # is cached with it, and the varying question is appended after it on later turns.
+    return [{"role": "user", "content": [{
+        "type": "text",
+        "text": _first_turn_content(report_markdown, question),
+        "cache_control": {"type": "ephemeral"},
+    }]}]
 
 
 def chat_once(history: "list | None", report_markdown: str, question: "str | None" = None,

@@ -737,7 +737,12 @@ def test_ai_build_messages_embeds_report_then_appends():
     """Turn 1 embeds the full report in the user message; later turns carry the running history and
     append only the new question (the report is not re-sent every turn)."""
     first = ai.build_messages("REPORT_TEXT", None, None)
-    assert len(first) == 1 and first[0]["role"] == "user" and "REPORT_TEXT" in first[0]["content"]
+    assert len(first) == 1 and first[0]["role"] == "user"
+    # The report rides in a content block rather than a bare string so it can carry a cache
+    # breakpoint — it is the large, unchanging part resent on every follow-up.
+    block = first[0]["content"][0]
+    assert "REPORT_TEXT" in block["text"]
+    assert block["cache_control"] == {"type": "ephemeral"}
     hist = [{"role": "user", "content": "...REPORT..."},
             {"role": "assistant", "content": "an interpretation"}]
     nxt = ai.build_messages("REPORT_TEXT", "which segment first?", hist)
@@ -1120,8 +1125,10 @@ def test_ai_request_is_well_formed_against_a_mock_anthropic_server(monkeypatch):
     # model we would have to maintain.
     assert body["fallbacks"] == "default"
     assert "beta=true" in captured["path"]            # fallbacks require the beta endpoint
-    sent = body["messages"][0]["content"]
+    sent = body["messages"][0]["content"][0]["text"]
     assert "Segment 1 is 41% of students" in sent    # the aggregate report really reaches Claude
+    # Cached so follow-up questions are not billed for the whole report again.
+    assert body["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
     assert body["messages"][0]["role"] == "user"
 
 
@@ -1529,7 +1536,10 @@ def test_the_ai_digest_contains_no_individual_respondent_data():
 
     # The digest is the whole of what gets transmitted, so pin that too: what ai.build_messages
     # puts on the wire is the digest and nothing else drawn from the raw file.
-    sent = ai.build_messages(payload, None, None)[0]["content"]
+    # Serialise the whole message list rather than indexing into it: content is a list of blocks,
+    # so a substring check against the raw object silently tests nothing, and this assertion is
+    # the one standing between a respondent identifier and a third party.
+    sent = json.dumps(ai.build_messages(payload, None, None))
     assert not [x for x in ids if x in sent]
     assert not [c for c in comments if c in sent]
 
