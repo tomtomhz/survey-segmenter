@@ -7,7 +7,14 @@
 # macOS app as a v1.0.0 release asset (the app is deliberately not in git history — 190 MB of
 # rebuildable binary does not belong in every clone).
 set -euo pipefail
-OWNER="${1:?usage: ./finish-setup.sh <your-github-username>}"
+# Take the username from the argument if given, otherwise ask GitHub who you are logged in as.
+# One less thing to type, and one less thing to typo.
+OWNER="${1:-}"
+if [ -z "$OWNER" ]; then
+  OWNER="$(gh api user --jq .login 2>/dev/null || true)"
+fi
+[ -n "$OWNER" ] || { echo "Could not determine your GitHub username. Run: gh auth login"; exit 1; }
+echo "Publishing as: $OWNER"
 REPO="survey-segmenter"
 
 command -v gh >/dev/null || { echo "GitHub CLI not found. Install it, then re-run."; exit 1; }
