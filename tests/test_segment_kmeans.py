@@ -1719,3 +1719,35 @@ def test_k_is_capped_by_the_number_of_distinct_answer_patterns():
     impossible = [w for w in caught if "found smaller than n_clusters" in str(w.message)]
     assert len(impossible) <= 3, (
         f"{len(impossible)} fits asked for more clusters than the data can hold")
+
+
+def test_actions_still_work_after_a_session_is_evicted_from_memory(tmp_path, monkeypatch):
+    """Only the last few sessions stay in memory, but the buttons stay on screen.
+
+    A user who analysed several files and then clicked Re-group on an earlier card was told to
+    "analyse a survey file first". The work was safely on disk the whole time — the button was
+    lying. Every session lookup now falls back to the store, so an action behaves the same
+    whether or not the session happens to still be resident.
+    """
+    monkeypatch.setenv("SURVEY_SEGMENTER_PROJECTS", str(tmp_path / "projects"))
+    store = sk.ProjectStore()
+
+    rng = np.random.default_rng(5)
+    base = np.tile([5, 1], 40)
+    df = pd.DataFrame({"respondent_id": [f"P{i}" for i in range(80)],
+                       "q1": np.clip(base + rng.integers(-1, 2, 80), 1, 5),
+                       "q2": np.clip(6 - base + rng.integers(-1, 2, 80), 1, 5),
+                       "q3": np.clip(base + rng.integers(-1, 2, 80), 1, 5)})
+    raw = df.to_csv(index=False).encode()
+    r = sk.run_analysis(raw, cfg=sk.SegmentationConfig(k_min=2, k_max=3, **FAST))
+    store.save("evicted", {"title": "wave 1", "digest": r["digest"], "files": r["files"],
+                           "report_html": r["report_html"], "k": r["k"],
+                           "n_people": r["n_people"], "charts": r["charts"],
+                           "names": []}, raw=raw)
+
+    # Simulate eviction: nothing in memory, everything on disk.
+    recovered = store.load("evicted")
+    assert recovered is not None
+    assert recovered["raw"] == raw                  # re-grouping needs the original upload
+    assert "typing_rule.json" in recovered["files"]  # scoring needs the rule
+    assert recovered["charts"], "charts must come back too, or the card reopens empty"

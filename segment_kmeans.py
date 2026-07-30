@@ -3632,9 +3632,32 @@ def serve(port=8000):
     sessions = {}    # session_id -> {"digest": report_markdown, "messages": [...]}  (in-memory, local)
     store = ProjectStore()
 
+    _REHYDRATE = ("digest", "messages", "files", "title", "report_html", "columns", "k",
+                  "n_people", "confidence", "transcript", "raw", "names", "charts")
+
+    def session(sid):
+        """Look up a session, falling back to disk before giving up.
+
+        Only the last few sessions are held in memory. A user who analyses several files and then
+        clicks Re-group on a card still on screen would otherwise be told to 'analyse a survey
+        first' — the work is safely on disk, so the button was lying rather than the data being
+        lost. Rehydrating here makes every action behave the same whether the session happens to
+        be in memory or not."""
+        if not sid:
+            return None
+        live = sessions.get(sid)
+        if live:
+            return live
+        saved = store.load(sid)
+        if not saved:
+            return None
+        sessions.setdefault(sid, {}).update({k: saved.get(k) for k in _REHYDRATE})
+        sessions[sid].setdefault("messages", [])
+        return sessions[sid]
+
     def remember(sid):
         """Persist a project so it survives a refresh or a restart."""
-        s = sessions.get(sid)
+        s = session(sid)
         if not s:
             return
         store.save(sid, {"title": s.get("title"), "digest": s.get("digest"),
@@ -3686,12 +3709,7 @@ def serve(port=8000):
                     self._json({"ok": False, "error": "That project could not be found."}, 404)
                     return
                 # Re-open it in memory so chatting and downloading carry on where they left off.
-                sessions.setdefault(pid, {}).update(
-                    {k: saved.get(k) for k in ("digest", "messages", "files", "title",
-                                               "report_html", "columns", "k", "n_people",
-                                               "confidence", "transcript", "raw", "names",
-                                               "charts")})
-                sessions[pid].setdefault("messages", [])
+                session(pid)
                 st = _ai.status() if _ai else {}
                 self._json({"ok": True, "session_id": pid, "title": saved.get("title"),
                             "report_html": saved.get("report_html") or "",
@@ -3713,7 +3731,7 @@ def serve(port=8000):
             network fetch."""
             from urllib.parse import parse_qs, urlparse
             q = parse_qs(urlparse(self.path).query)
-            sess = sessions.get((q.get("session_id") or [""])[0])
+            sess = session((q.get("session_id") or [""])[0])
             name = (q.get("file") or [""])[0]
             if not sess or name not in sess.get("files", {}):
                 self._bytes("Not found — analyse a survey first.", "text/plain; charset=utf-8", 404)
@@ -3795,7 +3813,7 @@ def serve(port=8000):
             The detector's guess is a starting point, not a verdict."""
             body = self._read_json()
             sid = body.get("session_id")
-            sess = sessions.get(sid)
+            sess = session(sid)
             if not sess:
                 self._json({"ok": False, "error": "Please analyse a survey file first."})
                 return
@@ -3835,7 +3853,7 @@ def serve(port=8000):
             from urllib.parse import parse_qs, urlparse
             q = parse_qs(urlparse(self.path).query)
             sid = (q.get("session_id") or [""])[0]
-            sess = sessions.get(sid)
+            sess = session(sid)
             if not sess or "typing_rule.json" not in sess.get("files", {}):
                 self._json({"ok": False, "error": "Analyse a survey first, then score new people "
                                                   "against those groups."})
@@ -3877,7 +3895,7 @@ def serve(port=8000):
             auto-generated labels ("Q9 consideration BrandA + ...") are unusable in a campaign
             brief; this is what makes the exports shareable."""
             body = self._read_json()
-            sess = sessions.get(body.get("session_id"))
+            sess = session(body.get("session_id"))
             if not sess or "segment_assignments.csv" not in sess.get("files", {}):
                 self._json({"ok": False, "error": "Please analyse a survey file first."})
                 return
@@ -3919,7 +3937,7 @@ def serve(port=8000):
 
         def _do_chat(self):
             body = self._read_json()
-            sess = sessions.get(body.get("session_id"))
+            sess = session(body.get("session_id"))
             if not sess:
                 self._json({"ok": False, "error": "Please analyse a survey file first."})
                 return
