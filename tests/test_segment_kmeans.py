@@ -1,0 +1,1522 @@
+"""
+Test suite for segment_kmeans.py — encodes the professional guarantees as executable tests.
+
+Run:  pytest              (from tools/survey-segmenter/)
+
+The two tests that matter most:
+  - test_recovers_planted_structure : on data with real segments, it finds them.
+  - test_rejects_structureless_noise : on random noise, it does NOT manufacture stable segments.
+A segmentation tool that fails either of those is worse than useless, because it will mislead.
+"""
+import io
+import json
+import re
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
+# The module under test lives one level up (this file is in tests/), so put that on the path
+# rather than relying on the working directory pytest happened to be invoked from.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import segment_kmeans as sk
+from sklearn.metrics import adjusted_rand_score
+from sklearn.cluster import KMeans
+
+# Silence the known-spurious numpy-2.0/macOS-Accelerate "... encountered in matmul" warnings
+# (harmless, suppressed in normal runs but re-enabled by pytest) and third-party deprecations.
+pytestmark = [
+    pytest.mark.filterwarnings("ignore:.*encountered in matmul"),
+    pytest.mark.filterwarnings("ignore:.*deprecated - use"),
+]
+
+# Small, fast config so the suite runs in a few seconds while still exercising every path.
+# Consensus clustering is off here for speed and exercised by its own dedicated test below.
+FAST = dict(gap_B=8, stability_B=12, ps_splits=6, jaccard_B=25, n_init_final=10, n_init_search=8,
+            run_consensus=False, check_variable_selection=False)
+
+
+# ----------------------------------------------------------------------------- fixtures
+def structured(n_per=(120, 100, 100), n_items=10, sep=3.0, seed=0):
+    """Utilities with `len(n_per)` planted mind-sets + two pure-noise items (8 signal, 2 noise)."""
+    rng = np.random.default_rng(seed)
+    items = [f"item_{i}" for i in range(n_items)]
+    centers = rng.normal(0, sep, size=(len(n_per), n_items))
+    centers[:, -2:] = 0.0                                   # last two items carry no segment signal
+    rows, truth = [], []
+    for seg, cnt in enumerate(n_per):
+        for _ in range(cnt):
+            rows.append(centers[seg] + rng.normal(0, 1, n_items)); truth.append(seg)
+    df = pd.DataFrame(rows, columns=items); df.insert(0, "id", [f"r{i}" for i in range(len(df))])
+    return df, np.array(truth), items
+
+
+def null_data(n=320, n_items=10, seed=1):
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame(rng.uniform(0, 1, (n, n_items)), columns=[f"item_{i}" for i in range(n_items)])
+    df.insert(0, "id", [f"r{i}" for i in range(n)])
+    return df
+
+
+def _write(tmp_path, df, name="u.csv"):
+    p = tmp_path / name; df.to_csv(p, index=False); return str(p)
+
+
+# ----------------------------------------------------------------------------- headline tests
+def test_recovers_planted_structure(tmp_path):
+    df, truth, _ = structured()
+    cfg = sk.SegmentationConfig(k_min=2, k_max=6, **FAST)
+    seg = sk.Segmenter(cfg).run(_write(tmp_path, df), id_col="id")
+    assert seg.recommended_k == 3, "should recover the 3 planted segments"
+    assert adjusted_rand_score(truth, seg.labels) > 0.95, "should recover the planted membership"
+    assert min(seg.jaccard.values()) >= 0.75, "every real segment should be Jaccard-stable"
+    assert seg.hopkins > 0.6, "clustered data should show cluster tendency"
+    assert seg.split_half >= 0.8, "a real solution should replicate across halves"
+
+
+def test_rejects_structureless_noise(tmp_path):
+    cfg = sk.SegmentationConfig(k_min=2, k_max=6, **FAST)
+    seg = sk.Segmenter(cfg).run(_write(tmp_path, null_data()), id_col="id")
+    # On noise: no cluster tendency, and the forced segments must NOT all look stable.
+    assert seg.hopkins < 0.6, "uniform noise should not show a strong cluster tendency"
+    assert min(seg.jaccard.values()) < 0.75, "noise 'segments' must not all pass the stability bar"
+    # prediction strength should never strongly cross the 0.8 bar for k>=2 on noise
+    ps = seg.diagnostics.set_index("k")["prediction_strength"]
+    assert (ps[ps.index >= 3] < 0.8).all(), "noise should fail prediction strength for k>=3"
+
+
+# ----------------------------------------------------------------------------- component tests
+def test_gmm_method_recovers_structure(tmp_path):
+    """The first-class model-based (Gaussian-mixture / latent-class) path recovers structure too,
+    and the whole pipeline (stability, prediction strength, Jaccard) runs under it."""
+    df, truth, _ = structured(sep=4.5, seed=0)   # well-separated so the true k is unambiguous
+    cfg = sk.SegmentationConfig(k_min=2, k_max=5, method="gmm", **FAST)
+    seg = sk.Segmenter(cfg).run(_write(tmp_path, df), id_col="id")
+    assert seg.recommended_k == 3
+    assert adjusted_rand_score(truth, seg.labels) > 0.95
+    assert "gmm_ICL" in seg.diagnostics.columns, "ICL should be computed"
+    # cross-paradigm check should compare against k-means when the method is gmm
+    assert seg.mb_agreement["other_method"] == "k-means"
+
+
+def test_consensus_pac_and_partition():
+    """Monti consensus clustering: PAC is near zero on real structure and high on noise, and the
+    consensus ensemble partition recovers the planted structure."""
+    df, truth, items = structured(sep=4.0, seed=0)
+    X = df[items].to_numpy(float)
+    Xn = null_data()[[f"item_{i}" for i in range(10)]].to_numpy(float)
+    cfg = sk.SegmentationConfig(k_min=2, k_max=5, consensus_H=15, n_init_search=8)
+    pac_s = sk.consensus_pac(X, range(2, 6), cfg, np.random.default_rng(1)).set_index("k")["consensus_PAC"]
+    pac_n = sk.consensus_pac(Xn, range(2, 6), cfg, np.random.default_rng(1)).set_index("k")["consensus_PAC"]
+    assert pac_s.loc[3] < 0.10, "real 3-cluster structure should be nearly unambiguous at k=3"
+    assert pac_n.min() > 0.30, "noise should be ambiguous at every k"
+    lab, C = sk.consensus_partition(X, 3, cfg, np.random.default_rng(2))
+    assert adjusted_rand_score(truth, lab) > 0.90, "consensus ensemble partition recovers structure"
+    assert C.shape == (len(X), len(X)) and 0.0 <= C.min() and C.max() <= 1.0
+
+
+def test_consensus_end_to_end(tmp_path):
+    """The full pipeline runs with consensus on, adds the PAC column, and reports agreement."""
+    df, _, _ = structured(sep=4.0, seed=0)
+    cfg = sk.SegmentationConfig(k_min=2, k_max=4, gap_B=6, stability_B=8, ps_splits=4,
+                                jaccard_B=15, n_init_final=8, n_init_search=6,
+                                consensus_H=12)
+    seg = sk.Segmenter(cfg).run(_write(tmp_path, df), id_col="id")
+    assert "consensus_PAC" in seg.diagnostics.columns
+    assert seg.consensus_agreement is not None and 0.0 <= seg.consensus_agreement <= 1.0
+
+
+def test_variable_importance_flags_noise():
+    df, truth, items = structured()
+    X = df[items].to_numpy(float)
+    lab = KMeans(3, n_init=10, random_state=0).fit(X).labels_
+    vi = sk.variable_importance(df[items], lab).set_index("item")
+    assert vi.loc["item_8", "eta_squared"] < 0.05 and vi.loc["item_9", "eta_squared"] < 0.05
+    assert "near-noise" in vi.loc["item_9", "role"]
+    assert vi["eta_squared"].iloc[0] > 0.3, "the top signal item should have high eta-squared"
+
+
+def test_prediction_strength_drops_past_true_k():
+    df, _, items = structured()
+    Xr = df[items].to_numpy(float)
+    cfg = sk.SegmentationConfig(**FAST)
+    ps = sk.prediction_strength(Xr, range(2, 6), 6, np.random.default_rng(0), cfg).set_index("k")
+    assert ps.loc[3, "prediction_strength"] > 0.85, "prediction strength high at the true k"
+    assert ps.loc[5, "prediction_strength"] < ps.loc[3, "prediction_strength"], "and lower past it"
+
+
+def test_gmm_bic_icl_find_true_k():
+    df, _, items = structured()
+    tbl = sk.gmm_bic_icl(df[items].to_numpy(float), range(2, 6), np.random.default_rng(0))
+    assert int(tbl.loc[tbl["gmm_BIC"].idxmin(), "k"]) == 3
+    assert int(tbl.loc[tbl["gmm_ICL"].idxmin(), "k"]) == 3, "ICL should also find the true k"
+
+
+def test_clusterboot_jaccard_high_for_real_low_for_noise():
+    df, _, items = structured()
+    Xr = df[items].to_numpy(float)
+    lab = KMeans(3, n_init=10, random_state=0).fit(Xr).labels_
+    cfg = sk.SegmentationConfig(**FAST)
+    jr = sk.clusterboot_jaccard(Xr, lab, 3, cfg)
+    assert min(jr.values()) >= 0.75
+
+    Xn = null_data()[[f"item_{i}" for i in range(10)]].to_numpy(float)
+    labn = KMeans(3, n_init=10, random_state=0).fit(Xn).labels_
+    jn = sk.clusterboot_jaccard(Xn, labn, 3, cfg)
+    assert min(jn.values()) < 0.75
+
+
+def test_hopkins_bounds_and_ordering():
+    df, _, items = structured()
+    hs = sk.hopkins_statistic(df[items].to_numpy(float), np.random.default_rng(0))
+    hn = sk.hopkins_statistic(null_data()[[f"item_{i}" for i in range(10)]].to_numpy(float),
+                              np.random.default_rng(0))
+    assert 0.0 <= hs <= 1.0 and 0.0 <= hn <= 1.0
+    assert hs > hn, "structured data should be more clusterable than noise"
+
+
+def test_fdr_bh_helper():
+    sig = sk._fdr_bh({"a": 0.001, "b": 0.02, "c": 0.30, "d": 0.80})
+    assert sig["a"] is True and sig["d"] is False
+
+
+@pytest.mark.parametrize("scaling", ["range", "standardize", "robust", "none", "ipsative"])
+def test_all_scalings_run(tmp_path, scaling):
+    df, _, _ = structured(seed=2)
+    cfg = sk.SegmentationConfig(k_min=2, k_max=4, scaling=scaling, **FAST)
+    seg = sk.Segmenter(cfg).run(_write(tmp_path, df), id_col="id")
+    assert len(np.unique(seg.labels)) == seg.recommended_k
+
+
+def test_missing_data_imputed(tmp_path):
+    df, _, items = structured(seed=3)
+    df.loc[0, items[0]] = np.nan; df.loc[5, items[1]] = np.nan
+    cfg = sk.SegmentationConfig(k_min=2, k_max=4, **FAST)
+    seg = sk.Segmenter(cfg).run(_write(tmp_path, df), id_col="id")   # must not crash
+    assert len(seg.labels) == len(df)
+
+
+def test_constant_column_dropped(tmp_path):
+    df, _, items = structured(seed=4)
+    df[items[0]] = 42.0                                              # a constant item
+    cfg = sk.SegmentationConfig(k_min=2, k_max=4, **FAST)
+    seg = sk.Segmenter(cfg).run(_write(tmp_path, df), id_col="id")   # must not crash on zero variance
+    assert seg.recommended_k >= 2
+
+
+# ----------------------------------------------------------------------------- robustness / stress
+def test_clamps_k_when_n_small(tmp_path):
+    """k_max is clamped to what the resampling validation can support, rather than crashing."""
+    df, _, _ = structured(n_per=(4, 3, 3), seed=1)   # n=10
+    cfg = sk.SegmentationConfig(k_min=2, k_max=8, **FAST)
+    seg = sk.Segmenter(cfg).run(_write(tmp_path, df), id_col="id")
+    assert seg.recommended_k <= 10 // 2
+
+
+def test_single_k_collapse_is_warning_free(tmp_path):
+    """When n forces the search range down to a single k, normalisation must not divide by zero
+    (the elbow x-axis range is 0). Record warnings and assert none is a divide-by-zero from our
+    code (the known-spurious '... in matmul' warnings from numpy/Accelerate are excluded)."""
+    import warnings
+    df, _, _ = structured(n_per=(3, 3), n_items=6, sep=4, seed=2)   # n=6 -> k_max clamps to 3
+    cfg = sk.SegmentationConfig(k_min=3, k_max=3, **FAST)           # range is the single value {3}
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        seg = sk.Segmenter(cfg).run(_write(tmp_path, df), id_col="id")
+    divide = [str(w.message) for w in caught
+              if "divide" in str(w.message).lower() and "matmul" not in str(w.message).lower()]
+    assert not divide, f"divide-by-zero warning(s) from our code: {divide}"
+    assert seg.recommended_k == 3
+
+
+def test_errors_on_too_few_rows(tmp_path):
+    df = pd.DataFrame({"id": [0, 1, 2], "v0": [1.0, 2, 3], "v1": [3.0, 2, 1]})
+    with pytest.raises(ValueError):
+        sk.Segmenter(sk.SegmentationConfig(k_min=2, k_max=4, **FAST)).run(_write(tmp_path, df), id_col="id")
+
+
+def test_errors_on_one_item(tmp_path):
+    df = pd.DataFrame({"id": range(40), "v0": np.random.default_rng(0).normal(0, 1, 40)})
+    with pytest.raises(ValueError):
+        sk.Segmenter(sk.SegmentationConfig(k_min=2, k_max=4, **FAST)).run(_write(tmp_path, df), id_col="id")
+
+
+def test_handles_inf_and_nan(tmp_path):
+    """Infinities are treated as missing and imputed, not silently clustered; NaNs imputed."""
+    df, _, items = structured(seed=2)
+    df.loc[0, items[0]] = np.inf
+    df.loc[1, items[1]] = -np.inf
+    df.loc[2, items[2]] = np.nan
+    seg = sk.Segmenter(sk.SegmentationConfig(k_min=2, k_max=4, **FAST)).run(_write(tmp_path, df), id_col="id")
+    assert np.isfinite(seg.centroids.to_numpy(float)).all(), "no infinities should reach the output"
+
+
+def test_handles_more_items_than_respondents(tmp_path):
+    """n <= number of items: the gap statistic's PCA reference must not break."""
+    df, _, _ = structured(n_per=(4, 4, 4), n_items=20, sep=5, seed=3)   # n=12, d=20
+    seg = sk.Segmenter(sk.SegmentationConfig(k_min=2, k_max=5, **FAST)).run(_write(tmp_path, df), id_col="id")
+    assert seg.recommended_k >= 2
+
+
+def test_ignores_nonnumeric_columns(tmp_path):
+    df, _, _ = structured(seed=4)
+    df["city"] = np.random.default_rng(0).choice(list("ABC"), len(df))   # a text column
+    seg = sk.Segmenter(sk.SegmentationConfig(k_min=2, k_max=4, **FAST)).run(_write(tmp_path, df), id_col="id")
+    assert seg.centroids.shape[1] == sum(c.startswith("item_") for c in df.columns)
+
+
+def test_deterministic(tmp_path):
+    df, _, _ = structured(seed=5)
+    p = _write(tmp_path, df)
+    a = sk.Segmenter(sk.SegmentationConfig(k_min=2, k_max=5, **FAST)).run(p, id_col="id")
+    b = sk.Segmenter(sk.SegmentationConfig(k_min=2, k_max=5, **FAST)).run(p, id_col="id")
+    assert np.array_equal(a.labels, b.labels) and a.recommended_k == b.recommended_k
+
+
+def test_force_k_and_outputs_saved(tmp_path):
+    df, _, _ = structured(seed=5)
+    cfg = sk.SegmentationConfig(k_min=2, k_max=5, **FAST)
+    out = tmp_path / "out"
+    seg = sk.Segmenter(cfg).run(_write(tmp_path, df), id_col="id", force_k=4, outdir=str(out))
+    assert seg.recommended_k == 4
+    for f in ("segment_assignments.csv", "segment_centroids.csv", "k_selection_diagnostics.csv",
+              "segment_stability_jaccard.csv", "variable_importance.csv",
+              "segmentation_report.md", "run_manifest.json", "typing_rule.json"):
+        assert (out / f).exists(), f"missing output: {f}"
+
+
+# ----------------------------------------------------------------------------- typing tool
+@pytest.mark.parametrize("scaling", ["range", "standardize", "robust", "ipsative", "none"])
+def test_scale_fit_apply_roundtrip(scaling):
+    """The fitted scaling, re-applied to the same rows, must reproduce the fit exactly — this is
+    what lets a saved rule scale NEW respondents identically (and CV refit without leakage)."""
+    arr = np.random.default_rng(0).normal(3, 2, (60, 5))
+    Xf, params = sk._scale_fit(arr, scaling)
+    assert np.allclose(Xf, sk._scale_apply(arr, params))
+
+
+def test_typing_tool_reports_and_beats_baseline(tmp_path):
+    """On real structure the typing tool cross-validates well above the majority-class baseline,
+    and writes an exportable rule."""
+    df, _, _ = structured(n_per=(120, 110, 110), sep=3.5, seed=11)
+    out = tmp_path / "seg"
+    seg = sk.Segmenter(sk.SegmentationConfig(k_min=2, k_max=5, **FAST)).run(
+        _write(tmp_path, df), id_col="id", force_k=3, outdir=str(out))
+    assert not np.isnan(seg.typing["cv_accuracy"])
+    assert seg.typing["cv_accuracy"] > seg.typing["baseline_majority"] + 0.15
+    assert seg.typing["scaled_centroids"].shape == (3, seg.centroids.shape[1])
+    assert "Segment predictability (typing tool)" in seg.report_markdown
+
+
+def test_classify_new_recovers_holdout_segments(tmp_path):
+    """The operational payoff: train on 80%, export the rule, and correctly type the held-out 20%
+    into their true mind-sets — with the respondent id preserved."""
+    import json
+    df, truth, _ = structured(n_per=(130, 120, 120), sep=3.5, seed=12)
+    idx = np.random.default_rng(0).permutation(len(df)); cut = int(0.8 * len(df))
+    train_df = df.iloc[idx[:cut]].reset_index(drop=True)
+    test_df = df.iloc[idx[cut:]].reset_index(drop=True); truth_te = truth[idx[cut:]]
+    out = tmp_path / "seg"
+    sk.Segmenter(sk.SegmentationConfig(k_min=2, k_max=5, **FAST)).run(
+        _write(tmp_path, train_df, "train.csv"), id_col="id", force_k=3, outdir=str(out))
+    rule = json.loads((out / "typing_rule.json").read_text())
+    assigned = sk.classify_new(rule, test_df, id_col="id")
+    assert adjusted_rand_score(truth_te, assigned["segment"]) > 0.80   # permutation-invariant
+    assert "id" in assigned.columns and len(assigned) == len(test_df)
+    assert assigned["confidence"].between(0, 1).all()
+
+
+def test_classify_new_missing_column_errors():
+    rule = {"items": ["a", "b"], "classes": [0, 1], "scale_params": {"scaling": "none"},
+            "scaled_centroids": [[0.0, 0.0], [1.0, 1.0]]}
+    with pytest.raises(ValueError):
+        sk.classify_new(rule, pd.DataFrame({"a": [1.0, 2.0]}))          # "b" is missing
+
+
+# ------------------------------------------------------------------- variable-selection check
+def test_variable_selection_flags_planted_noise(tmp_path):
+    """The structured fixture plants two pure-noise items (item_8, item_9). The Dolnicar check must
+    flag them, and the signal-only solution must not be materially less stable."""
+    df, _, _ = structured(n_per=(120, 110, 110), n_items=10, sep=3.0, seed=7)
+    cfg = sk.SegmentationConfig(k_min=2, k_max=5, **{**FAST, "check_variable_selection": True})
+    seg = sk.Segmenter(cfg).run(_write(tmp_path, df), id_col="id", force_k=3)
+    assert seg.varsel is not None and seg.varsel["applicable"]
+    assert {"item_8", "item_9"}.issubset(set(seg.varsel["dropped"]))
+    assert seg.varsel["reduced"]["min_jaccard"] >= seg.varsel["full"]["min_jaccard"] - 0.15
+    assert "Variable-selection check" in seg.report_markdown
+
+
+# --------------------------------------------------- latent class analysis (categorical data)
+def categorical_structured(n_per=(200, 200, 200), n_items=9, seed=0, sep=0.85):
+    """Binary agree/disagree items with planted latent classes: each class 'agrees' on its own
+    distinct block of items and 'disagrees' on the rest."""
+    rng = np.random.default_rng(seed); K = len(n_per); block = n_items // K
+    proto = np.full((K, n_items), 1 - sep)
+    for c in range(K):
+        proto[c, c * block:(c + 1) * block] = sep
+    ad = np.array(["agree", "disagree"]); rows, truth = [], []
+    for c, cnt in enumerate(n_per):
+        for r in (rng.random((cnt, n_items)) < proto[c]).astype(int):
+            rows.append(ad[r]); truth.append(c)
+    df = pd.DataFrame(rows, columns=[f"q{i}" for i in range(n_items)])
+    df.insert(0, "id", [f"r{i}" for i in range(len(df))])
+    return df, np.array(truth)
+
+
+def test_lca_recovers_categorical_structure(tmp_path):
+    """On categorical data with planted latent classes, BIC/ICL/stability find the true count and
+    the classes match the truth."""
+    df, truth = categorical_structured(seed=0)
+    seg = sk.LatentClassSegmenter(sk.SegmentationConfig(k_min=2, k_max=5, **FAST)).run(
+        _write(tmp_path, df), id_col="id")
+    assert seg.recommended_k == 3
+    assert adjusted_rand_score(truth, seg.labels) > 0.85
+    assert min(seg.jaccard.values()) > 0.70
+
+
+def test_lca_rejects_categorical_noise(tmp_path):
+    """On structureless categorical noise, replication stability at the chosen k is low and the
+    report says so — it does not manufacture confident classes."""
+    rng = np.random.default_rng(1)
+    df = pd.DataFrame({f"q{i}": rng.choice(list("abc"), 360) for i in range(6)})
+    df.insert(0, "id", [f"r{i}" for i in range(360)])
+    seg = sk.LatentClassSegmenter(sk.SegmentationConfig(k_min=2, k_max=5, **FAST)).run(
+        _write(tmp_path, df), id_col="id")
+    stab = seg.diagnostics.set_index("k").loc[seg.recommended_k, "stability_ARI"]
+    assert stab < 0.75 and "WARNING" in seg.report_markdown
+
+
+def test_lca_handles_polytomous_and_is_deterministic(tmp_path):
+    """A 3-level item is modelled with three category probabilities (not collapsed), and the same
+    seed gives the same result."""
+    rng = np.random.default_rng(2); n = 450; truth = rng.integers(0, 3, n)
+    ch = np.array([rng.choice(3, p=np.eye(3)[t] * 0.7 + 0.1) for t in truth])
+    b1 = np.array([rng.choice(2, p=[0.85, 0.15] if t == 0 else [0.15, 0.85]) for t in truth])
+    df = pd.DataFrame({"id": range(n), "channel": np.array(["app", "campus", "email"])[ch],
+                       "q1": np.array(["y", "n"])[b1],
+                       "q2": np.array(["y", "n"])[rng.integers(0, 2, n)]})
+    p = _write(tmp_path, df)
+    a = sk.LatentClassSegmenter(sk.SegmentationConfig(k_min=2, k_max=4, **FAST)).run(p, id_col="id")
+    b = sk.LatentClassSegmenter(sk.SegmentationConfig(k_min=2, k_max=4, **FAST)).run(p, id_col="id")
+    assert 3 in a.model["level_counts"]                       # the 3-level item kept its 3 levels
+    assert np.array_equal(a.labels, b.labels) and a.recommended_k == b.recommended_k
+
+
+def test_lca_outputs_and_loader(tmp_path):
+    """End-to-end: all files written; a constant item is dropped by the loader; too-few-items errors."""
+    df, _ = categorical_structured(seed=4)
+    df["constant_item"] = "same"
+    out = tmp_path / "lca"
+    sk.LatentClassSegmenter(sk.SegmentationConfig(k_min=2, k_max=4, **FAST)).run(
+        _write(tmp_path, df), id_col="id", force_k=3, outdir=str(out))
+    for f in ("segment_assignments.csv", "latent_class_profiles.csv", "lca_selection_diagnostics.csv",
+              "class_stability_jaccard.csv", "latent_class_report.md", "run_manifest.json"):
+        assert (out / f).exists(), f"missing {f}"
+    assert "constant_item" not in set(pd.read_csv(out / "latent_class_profiles.csv")["item"])
+    with pytest.raises(ValueError):                            # needs >= 2 informative items
+        one = pd.DataFrame({"id": range(20), "only": ["a", "b"] * 10})
+        sk.LatentClassSegmenter(sk.SegmentationConfig(**FAST)).run(_write(tmp_path, one, "one.csv"), id_col="id")
+
+
+# ------------------------------------- non-expert front door: auto mode, plain output, HTML report
+def test_try_likert_recodes_and_rejects():
+    s = pd.Series(["Strongly agree", "Agree", "Neutral", "Disagree", "Strongly disagree"])
+    assert list(sk._try_likert(s)) == [5, 4, 3, 2, 1]
+    assert sk._try_likert(pd.Series(["red", "blue", "green", "red"])) is None   # not a scale
+
+
+def test_short_label_uses_whole_words():
+    lbl = sk._short_label("I want to meet people in real life")
+    assert lbl.endswith(("people", "real", "life")) and "want" in lbl        # no mid-word cut
+    assert not lbl.endswith("rea")
+
+
+def test_auto_prepare_picks_kmeans_for_ratings_and_finds_id():
+    rng = np.random.default_rng(0); n = 120; t = rng.integers(0, 3, n)
+    ag = np.array(["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"])
+    df = pd.DataFrame({
+        "Timestamp": ["2026-01-01 10:00"] * n,
+        "Email address": [f"u{i}@x.se" for i in range(n)],
+        "privacy": ag[np.clip(2 + t + rng.integers(-1, 2, n), 0, 4)],
+        "politics": ag[np.clip(2 - t + rng.integers(-1, 2, n), 0, 4)],
+        "rating": rng.integers(1, 6, n),
+        "Anything else?": rng.choice(["", "good", "bad", "meh", "x"], n)})
+    clean, method, id_col, items, plan = sk.auto_prepare(df)
+    assert id_col == "Email address" and method == "kmeans"
+    assert "Timestamp" in plan["skipped"] and "Anything else?" in plan["skipped"]
+    assert {"privacy", "politics", "rating"}.issubset(set(items))
+    assert pd.api.types.is_numeric_dtype(clean["privacy"])                     # Likert -> numbers
+
+
+def test_auto_prepare_picks_lca_for_categorical():
+    rng = np.random.default_rng(1); n = 120
+    df = pd.DataFrame({"id": range(n), "channel": rng.choice(["app", "email", "campus"], n),
+                       "goal": rng.choice(["friends", "dating", "events"], n)})
+    _, method, id_col, items, _ = sk.auto_prepare(df)
+    assert method == "lca" and set(items) == {"channel", "goal"}
+
+
+def test_auto_prepare_no_usable_items_raises():
+    df = pd.DataFrame({"id": range(10), "note": [f"free text number {i} here" for i in range(10)]})
+    with pytest.raises(ValueError):
+        sk.auto_prepare(df)
+
+
+def test_executive_summary_confidence_light():
+    base = dict(n_resp=100, names=["A", "B"], shares=[0.6, 0.4], wants=["x", "y"])
+    assert "High" in sk.executive_summary(**base, min_jaccard=0.9, repro=0.9, k_agreement=1.0)
+    assert "Moderate" in sk.executive_summary(**base, min_jaccard=0.65, repro=0.4, k_agreement=1.0)
+    kc = sk.executive_summary(**base, min_jaccard=0.9, repro=0.9, k_agreement=0.2)   # k contested
+    assert "Moderate" in kc and "disagree on how many" in kc
+    assert "Low" in sk.executive_summary(**base, min_jaccard=0.3, repro=0.2, k_agreement=1.0)
+
+
+def test_html_report_renders(tmp_path):
+    md = ("# Title\n\n## In plain language\n\n**Bold** and `code`.\n\n"
+          "| a | b |\n|---|---|\n| 1 | 2 |\n\n> a warning\n\n- one\n- two\n")
+    out = tmp_path / "r.html"; sk.write_html_report(md, out, "T")
+    html = out.read_text()
+    for frag in ("<h1>Title</h1>", "<table>", "<th>a</th>", "<blockquote>",
+                 "<strong>Bold</strong>", "<ul>", "<!doctype html>"):
+        assert frag in html, f"missing {frag}"
+
+
+def test_auto_end_to_end_messy_survey(tmp_path):
+    """A messy real-world export (Likert text, email id, timestamp) runs to a report with a
+    plain-language summary and an HTML file — the whole point of 'anyone can use it'."""
+    rng = np.random.default_rng(3); n = 200; t = rng.integers(0, 3, n)
+    ag = np.array(["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"])
+    df = pd.DataFrame({
+        "Timestamp": ["2026-01-01 10:00"] * n,
+        "Email address": [f"s{i}@kth.se" for i in range(n)],
+        "privacy": ag[np.clip(2 + t + rng.integers(-1, 2, n), 0, 4)],
+        "politics": ag[np.clip(2 - t + rng.integers(-1, 2, n), 0, 4)],
+        "meet": ag[np.clip(2 + t + rng.integers(-1, 2, n), 0, 4)],
+        "events": rng.integers(0, 8, n)})
+    clean, method, id_col, items, _ = sk.auto_prepare(df)
+    out = tmp_path / "res"
+    seg = sk.Segmenter(sk.SegmentationConfig(**FAST)).run(clean, id_col=id_col, item_cols=items,
+                                                          outdir=str(out))
+    assert "In plain language" in seg.report_markdown and "Confidence:" in seg.report_markdown
+    assert (out / "segmentation_report.html").exists()
+
+
+def test_analyze_csv_to_html_is_the_web_core():
+    """The web UI's core: raw CSV bytes -> a self-contained HTML report with the plain-language box
+    and the auto-detection notes (the whole no-terminal path)."""
+    rng = np.random.default_rng(4); n = 180; t = rng.integers(0, 3, n)
+    ag = np.array(["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"])
+    df = pd.DataFrame({"Email address": [f"s{i}@x.se" for i in range(n)],
+                       "privacy": ag[np.clip(2 + t + rng.integers(-1, 2, n), 0, 4)],
+                       "politics": ag[np.clip(2 - t + rng.integers(-1, 2, n), 0, 4)],
+                       "meet": ag[np.clip(2 + t + rng.integers(-1, 2, n), 0, 4)]})
+    _, doc = sk.analyze_csv_to_html(df.to_csv(index=False).encode(),
+                                    cfg=sk.SegmentationConfig(**FAST))
+    for frag in ("<!doctype html>", "In plain language", "What I found in your file", "Confidence:"):
+        assert frag in doc, f"missing {frag}"
+
+
+# ------------------------------------------- real-world robustness: messy files, demographics, Ward
+def test_read_table_handles_semicolon_latin1_bom_tab():
+    """Real exports are not always comma + UTF-8: Swedish/Excel use ';' and Latin-1 (aao)."""
+    df = sk._read_table(b"id;q1;q2\n1;4;5\n2;3;2\n")                         # semicolon
+    assert list(df.columns) == ["id", "q1", "q2"] and len(df) == 2
+    df = sk._read_table("id;fr\xe5ga\n1;Ja\n".encode("latin-1"))            # latin-1 + semicolon
+    assert "fr\xe5ga" in df.columns
+    df = sk._read_table("id,a,b\n1,2,3\n".encode("utf-8-sig"))              # UTF-8 BOM
+    assert list(df.columns) == ["id", "a", "b"]
+    df = sk._read_table(b"id\tx\ty\n1\t2\t3\n")                             # tab
+    assert list(df.columns) == ["id", "x", "y"]
+
+
+def test_read_table_reads_excel_if_openpyxl_present(tmp_path):
+    pytest.importorskip("openpyxl")
+    p = tmp_path / "s.xlsx"
+    pd.DataFrame({"id": [1, 2], "q1": [4, 5], "q2": [3, 2]}).to_excel(p, index=False)
+    df = sk._read_table(str(p))
+    assert list(df.columns) == ["id", "q1", "q2"] and len(df) == 2
+
+
+def test_skip_matching_is_whole_word():
+    assert not sk._name_matches("gender", sk._SKIP_NAME_HINTS)               # 'end' must NOT match
+    assert not sk._name_matches("calendar", sk._SKIP_NAME_HINTS)
+    assert sk._name_matches("timestamp", sk._SKIP_NAME_HINTS)
+    assert sk._name_matches("submission date", sk._SKIP_NAME_HINTS)
+
+
+def test_auto_sets_aside_demographics_not_clusters_on_them():
+    rng = np.random.default_rng(0); n = 200; t = rng.integers(0, 3, n)
+    ag = np.array(["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"])
+    df = pd.DataFrame({"Email": [f"u{i}@x.se" for i in range(n)],
+                       "Gender": rng.choice(["Male", "Female"], n),
+                       "University": rng.choice(["KTH", "Lund"], n),
+                       "Age": rng.integers(18, 30, n),
+                       "privacy": ag[np.clip(2 + t + rng.integers(-1, 2, n), 0, 4)],
+                       "politics": ag[np.clip(2 - t + rng.integers(-1, 2, n), 0, 4)]})
+    clean, _, _, items, plan = sk.auto_prepare(df)
+    assert set(items) == {"privacy", "politics"}
+    assert set(plan["demographics"]) == {"Gender", "University", "Age"}
+    assert not ({"Gender", "University", "Age"} & set(clean.columns))        # never clustered on
+
+
+def test_interpret_values_most_and_least_are_distinct_with_few_items():
+    """With few items, 'values most' and 'values least' must not list the same items."""
+    rng = np.random.default_rng(1)
+    Xr = pd.DataFrame(rng.normal(0, 1, (90, 4)), columns=list("abcd"))
+    labels = np.array([0, 1, 2] * 30)
+    _, defining, _, _ = sk.interpret(Xr, labels, sk.SegmentationConfig())
+    for d in defining.values():
+        above = {x.split(" (")[0] for x in d["most_above_average"]}
+        below = {x.split(" (")[0] for x in d["most_below_average"]}
+        assert not (above & below)
+
+
+def test_ward_agreement_recovers_and_guards_large_n():
+    rng = np.random.default_rng(0); C = rng.normal(0, 6, (3, 8))
+    a = rng.integers(0, 3, 300); X = sk._scale_fit((C[a] + rng.normal(0, 0.7, (300, 8))), "range")[0]
+    lab = KMeans(3, n_init=10, random_state=0).fit(X).labels_
+    assert sk.ward_agreement(X, lab, 3) > 0.90
+    assert np.isnan(sk.ward_agreement(np.zeros((3001, 3)), np.zeros(3001, int), 2))   # O(n^2) guard
+
+
+def test_weighted_population_projection(tmp_path):
+    """Cluster unweighted, but project segment sizes to the population using a weight column: an
+    over-sampled group must shrink to its true population share."""
+    rng = np.random.default_rng(0)
+    C = np.array([[5., 5, 5, 5], [-5., -5, -5, -5]]); lab = np.r_[np.zeros(300, int), np.ones(100, int)]
+    X = C[lab] + rng.normal(0, 0.6, (400, 4))
+    df = pd.DataFrame(X.round(2), columns=[f"q{i}" for i in range(4)])
+    df.insert(0, "id", range(400)); df["design_weight"] = np.where(lab == 0, 0.5, 2.0)
+    clean, _, id_col, items, plan = sk.auto_prepare(df)
+    assert plan["weight"] == "design_weight" and "design_weight" not in items      # not clustered on
+    seg = sk.Segmenter(sk.SegmentationConfig(k_min=2, k_max=3, **FAST)).run(
+        clean, id_col=id_col, item_cols=items, force_k=2, weights=df["design_weight"].to_numpy())
+    assert "population_share" in seg.sizes.columns
+    big = seg.sizes["share"].idxmax()
+    assert seg.sizes.loc[big, "population_share"] < seg.sizes.loc[big, "share"] - 0.1   # shrinks
+    assert abs(seg.sizes["population_share"].sum() - 1.0) < 0.01
+
+
+# ----------------------------------------------------- professional hardening: bad files, packaging
+def test_read_table_rejects_empty_and_binary_cleanly():
+    for bad in (b"", b"\x00\x01\xff not a csv"):           # unreadable -> clean _BAD_FILE, not a crash
+        with pytest.raises(ValueError):
+            sk._read_table(bad)
+    assert "could not read that as a survey" in sk._explain_run_error("_BAD_FILE").lower()
+
+
+def test_hostile_uploads_never_crash_the_web_core():
+    """The non-expert path must return a clean error, never a traceback (professional requirement)."""
+    fast = sk.SegmentationConfig(gap_B=5, stability_B=6, ps_splits=4, jaccard_B=10, n_init_final=5,
+                                 n_init_search=4, run_consensus=False, check_variable_selection=False)
+    for data in (b"", b"\x00\x01\xff", b"id\n1\n2\n", b"only,two\nx,y\n"):
+        with pytest.raises(ValueError):                 # a clean, explainable error (not a crash)
+            sk.analyze_csv_to_html(data, cfg=fast)
+
+
+def test_multipart_parser_extracts_uploaded_file():
+    b = "BND123"; csv = b"id,q1\n1,4\n"
+    body = (f"--{b}\r\n".encode() + b'Content-Disposition: form-data; name="file"; filename="s.csv"'
+            b"\r\n\r\n" + csv + f"\r\n--{b}--\r\n".encode())
+    assert sk._parse_multipart_file(f"multipart/form-data; boundary={b}", body) == csv
+    assert sk._parse_multipart_file("text/plain", body) is None
+
+
+def test_demographics_do_not_swallow_long_attitude_questions():
+    df = pd.DataFrame({"id": range(60), "Gender": ["M", "F"] * 30,
+                       "Campus politics puts me off an app": ["Agree", "Disagree"] * 30,
+                       "I value privacy online": ["Disagree", "Agree"] * 30})
+    _, _, _, items, plan = sk.auto_prepare(df)
+    assert "Campus politics puts me off an app" in items         # attitude, not a demographic
+    assert plan["demographics"] == ["Gender"]
+
+
+def test_version_stamped_in_manifest_and_report(tmp_path):
+    import json
+    df, _, _ = structured(seed=6)
+    out = tmp_path / "o"
+    seg = sk.Segmenter(sk.SegmentationConfig(k_min=2, k_max=4, **FAST)).run(
+        _write(tmp_path, df), id_col="id", force_k=3, outdir=str(out))
+    assert json.loads((out / "run_manifest.json").read_text())["tool_version"] == sk.__version__
+    assert sk.__version__ in seg.report_markdown
+
+
+def test_web_app_chat_page_and_shutdown():
+    """The redesigned front end is a Claude-style chat page wired to the analyze / chat / settings
+    endpoints, with a clean shutdown page and the app() entry point present."""
+    p = sk._CHAT_PAGE
+    assert "<!doctype html>" in p and "Survey Segmenter" in p
+    for frag in ("/analyze", "/chat", "/settings", "Ask about your segments", "Settings",
+                 "suggestChips", "Save PDF"):     # guided follow-up chips + save-to-PDF
+        assert frag in p, f"missing {frag}"
+    assert "The app has closed" in sk._shutdown_page()
+    assert callable(sk.app) and callable(sk.serve)
+
+
+def test_report_not_dumped_to_stdout_when_saved(tmp_path, capsys):
+    """When results are written to a folder, the full report should not also flood stdout — it is
+    redundant noise for scripted/professional use. Without an outdir it still prints."""
+    df, _, _ = structured(seed=8)
+    sk.Segmenter(sk.SegmentationConfig(k_min=2, k_max=4, **FAST)).run(
+        _write(tmp_path, df), id_col="id", force_k=3, outdir=str(tmp_path / "o"))
+    out = capsys.readouterr().out
+    assert "Generated by segment_kmeans version" not in out and "Saved to" in out
+
+
+def test_pluralization_of_unit_words():
+    assert sk._plural("group") == "groups" and sk._plural("class") == "classes"
+    assert sk._plural("segment") == "segments"
+
+
+def test_lca_parity_typing_demographics_weights(tmp_path):
+    """The categorical path has parity with k-means: a typing tool (with an exportable rule that
+    types new respondents), demographics profiling, weighted population sizes, and correct grammar."""
+    import json
+    rng = np.random.default_rng(0); n = 600; truth = rng.integers(0, 3, n)
+    proto = np.full((3, 6), 0.15); proto[0, 0:2] = 0.9; proto[1, 2:4] = 0.9; proto[2, 4:6] = 0.9
+    ans = np.array(["No", "Yes"])
+    df = pd.DataFrame({f"q{j}": ans[(rng.random(n) < proto[truth, j]).astype(int)] for j in range(6)})
+    df.insert(0, "id", range(n)); df["Gender"] = rng.choice(["M", "F"], n)
+    df["weight"] = np.where(truth == 0, 0.5, 1.5)
+    clean, method, idc, items, plan = sk.auto_prepare(df)
+    assert method == "lca" and plan["weight"] == "weight" and plan["demographics"] == ["Gender"]
+    out = tmp_path / "lca"
+    seg = sk.LatentClassSegmenter(sk.SegmentationConfig(k_min=2, k_max=5, **FAST)).run(
+        clean, id_col=idc, item_cols=items, force_k=3, outdir=str(out),
+        demographics=df[[idc, "Gender"]], weights=df["weight"].to_numpy())
+    r = seg.report_markdown
+    assert "predictability (typing tool)" in r
+    assert "Profiling the classes against demographics" in r
+    assert "population_share" in r and "classs" not in r          # weighted sizes + correct grammar
+    assert (out / "latent_class_typing_rule.json").exists()
+    tn = rng.integers(0, 3, 60)
+    newdf = pd.DataFrame({f"q{j}": ans[(rng.random(60) < proto[tn, j]).astype(int)] for j in range(6)})
+    newdf.insert(0, "id", range(1000, 1060))
+    rule = json.loads((out / "latent_class_typing_rule.json").read_text())
+    assigned = sk.classify_new_lca(rule, newdf, id_col="id")
+    assert adjusted_rand_score(tn, assigned["segment"]) > 0.6      # types a fresh cohort
+    assert "id" in assigned.columns and assigned["confidence"].between(0, 1).all()
+
+
+def test_negative_weights_treated_as_zero(tmp_path):
+    df, _, _ = structured(n_per=(60, 60), n_items=6, sep=4, seed=2)
+    w = np.ones(len(df)); w[:5] = -3.0                          # nonsensical negative weights
+    seg = sk.Segmenter(sk.SegmentationConfig(k_min=2, k_max=3, **FAST)).run(
+        _write(tmp_path, df), id_col="id", force_k=2, weights=w)
+    assert "population_share" in seg.sizes.columns
+    assert seg.sizes["population_share"].between(0, 1).all()
+    assert abs(seg.sizes["population_share"].sum() - 1.0) < 0.01
+
+
+# ======================= AI interpretation layer (ai_interpret.py) + web endpoints =======================
+import ai_interpret as ai
+
+
+def test_ai_config_roundtrip(tmp_path, monkeypatch):
+    """The API key is saved to a local file, read back trimmed, and cleared; the ANTHROPIC_API_KEY
+    environment variable takes precedence when set."""
+    monkeypatch.setattr(ai, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(ai, "_CONFIG_FILE", tmp_path / "config.json")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert ai.load_api_key() is None
+    ai.save_api_key("  sk-ant-abc  ")
+    assert ai.load_api_key() == "sk-ant-abc"                    # trimmed
+    assert ai.key_source() == "this app's Settings"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env")
+    assert ai.load_api_key() == "sk-ant-env"                    # env wins over the file
+    assert "environment" in ai.key_source()
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    ai.clear_api_key()
+    assert ai.load_api_key() is None
+
+
+def test_ai_build_messages_embeds_report_then_appends():
+    """Turn 1 embeds the full report in the user message; later turns carry the running history and
+    append only the new question (the report is not re-sent every turn)."""
+    first = ai.build_messages("REPORT_TEXT", None, None)
+    assert len(first) == 1 and first[0]["role"] == "user" and "REPORT_TEXT" in first[0]["content"]
+    hist = [{"role": "user", "content": "...REPORT..."},
+            {"role": "assistant", "content": "an interpretation"}]
+    nxt = ai.build_messages("REPORT_TEXT", "which segment first?", hist)
+    assert len(nxt) == 3 and nxt[-1] == {"role": "user", "content": "which segment first?"}
+    assert "REPORT_TEXT" not in nxt[-1]["content"]
+
+
+def test_ai_chat_requires_sdk_and_key(monkeypatch):
+    """No SDK -> a friendly 'nosdk' AIError; SDK present but no key -> 'nokey'. Never a traceback."""
+    monkeypatch.setattr(ai, "have_sdk", lambda: False)
+    with pytest.raises(ai.AIError) as e1:
+        ai.chat_once([], "digest", None)
+    assert e1.value.kind == "nosdk"
+    monkeypatch.setattr(ai, "have_sdk", lambda: True)
+    monkeypatch.setattr(ai, "load_api_key", lambda: None)
+    with pytest.raises(ai.AIError) as e2:
+        ai.chat_once([], "digest", None)
+    assert e2.value.kind == "nokey"
+
+
+def test_ai_status_shape(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    st = ai.status()
+    assert set(st) == {"sdk_installed", "configured", "source", "env_key", "model"}
+    assert st["model"] == ai.MODEL
+
+
+def test_row_counters_and_stray_ids_are_never_clustered_on():
+    """Regression: a row counter ('City_n' = 1..49) or a second numeric id column used to be treated
+    as a rating and clustered on, injecting a straight-line gradient that is pure bookkeeping. It
+    must be set aside — whatever the column is called — while genuine answers survive untouched."""
+    rng = np.random.default_rng(0)
+    def cont(df):
+        return sk.classify_columns(df)["continuous"]
+
+    # the exact cities-file failure, plus a shuffled counter and a second numeric id
+    counter = pd.DataFrame({"City_n": range(1, 50), "q1": rng.integers(1, 6, 49),
+                            "q2": rng.integers(1, 6, 49)})
+    assert cont(counter) == ["q1", "q2"]
+    shuffled = pd.DataFrame({"row": rng.permutation(np.arange(1, 41)),
+                             "q1": rng.integers(1, 6, 40), "q2": rng.integers(1, 6, 40)})
+    assert cont(shuffled) == ["q1", "q2"]
+    second_id = pd.DataFrame({"respondent_id": [f"R{i}" for i in range(40)], "user_id": range(1000, 1040),
+                              "q1": rng.integers(1, 6, 40), "q2": rng.integers(1, 6, 40)})
+    plan = sk.classify_columns(second_id)
+    assert plan["id"] == "respondent_id" and plan["continuous"] == ["q1", "q2"]
+
+    # ...and genuine data must NOT be mistaken for a counter (this is the dangerous direction)
+    assert cont(pd.DataFrame({"u1": rng.normal(0, 1, 60), "u2": rng.normal(0, 1, 60)})) == ["u1", "u2"]
+    assert cont(pd.DataFrame({"score": np.linspace(.5, 30.2, 60),          # all-distinct floats
+                              "q2": rng.integers(1, 6, 60)})) == ["score", "q2"]
+    assert cont(pd.DataFrame({"spend_gbp": rng.integers(10, 900, 60),
+                              "q2": rng.integers(1, 6, 60)})) == ["spend_gbp", "q2"]
+
+    # a bare counter with no named id becomes the id, so results stay labelled by the file's own key
+    assert sk.classify_columns(counter)["id"] == "City_n"
+
+
+def test_typing_rule_scores_a_raw_export_with_text_likert_answers(tmp_path):
+    """Regression: the typing tool was unusable on a REAL follow-up export. Auto-detection recodes
+    'Strongly agree' to 1-5 when building the segments, but new files still arrive as words, and
+    scoring crashed on them. It must recode the same way, and must label each person with their id
+    (a scored list you cannot tie back to people is worthless for targeting)."""
+    import json
+    rng = np.random.default_rng(3)
+    n = 260
+    seg = rng.integers(0, 2, n)
+    agree = np.array(["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"])
+    def make(idx):
+        s = seg[idx]
+        text_code = np.clip(np.round(rng.normal(np.where(s == 0, 3.4, 0.6), .6)), 0, 4).astype(int)
+        return pd.DataFrame({
+            "respondent_id": [f"P{i}" for i in idx],
+            "q_rating_a": np.clip(np.round(rng.normal(np.where(s == 0, 4.5, 1.5), .5)), 1, 5).astype(int),
+            "q_rating_b": np.clip(np.round(rng.normal(np.where(s == 0, 1.5, 4.5), .5)), 1, 5).astype(int),
+            "q_text_scale": agree[text_code],
+        })
+    train_idx, new_idx = np.arange(0, 200), np.arange(200, n)
+    r = sk.run_analysis(make(train_idx).to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=3, **FAST))
+    rule = json.loads(r["files"]["typing_rule.json"])
+    assert "q_text_scale" in rule["items"]                 # the recoded item is part of the rule
+
+    scored = sk.classify_new(rule, make(new_idx))          # raw words, exactly as exported
+    assert list(scored.columns) == ["respondent_id", "segment", "confidence"]
+    assert len(scored) == len(new_idx)
+    truth = seg[new_idx]
+    assert adjusted_rand_score(truth, scored["segment"]) > 0.7   # it really recovers the mind-sets
+
+    with pytest.raises(ValueError):                        # a genuinely unscorable column still errors
+        bad = make(new_idx); bad["q_text_scale"] = "banana"
+        sk.classify_new(rule, bad)
+
+
+def test_user_can_override_which_questions_group_people():
+    """The detector's guess is a starting point, not a verdict. A user must be able to group people
+    on columns it set aside — e.g. clustering cities on ethnicity/income, which auto-detection
+    treats as background traits and therefore refuses to use."""
+    rng = np.random.default_rng(5)
+    n = 60
+    df = pd.DataFrame({
+        "City_n": range(1, n + 1),                      # a row counter: never an answer
+        "gender_mix": rng.integers(20, 80, n),          # "demographic" by name -> set aside
+        "income": rng.integers(10, 40, n),              # ditto
+        "q_rating": rng.integers(1, 6, n),
+    })
+    # auto: the two demographic-looking columns are set aside, leaving too little to group on
+    plan = sk.classify_columns(df)
+    assert set(plan["demographics"]) == {"gender_mix", "income"} and plan["continuous"] == ["q_rating"]
+
+    # the override: group on exactly what the user ticked
+    clean, method, idc, items, _ = sk.auto_prepare(df, force_items=["gender_mix", "income"])
+    assert method == "kmeans" and items == ["gender_mix", "income"]
+    assert idc == "City_n"                              # the counter still labels the results
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=3, **FAST),
+                        force_items=["gender_mix", "income"])
+    assert r["n_people"] == n
+    assert r["columns"]["gender_mix"] == "used" and r["columns"]["income"] == "used"
+    assert "City_n" not in r["columns"]        # the id is not offered as something to group on
+    with pytest.raises(ValueError):                     # fewer than two questions is not a grouping
+        sk.auto_prepare(df, force_items=["income"])
+
+
+def test_refuses_to_treat_a_measurement_as_categories():
+    """Regression: picking a text column together with a high-cardinality number (salary) pushed the
+    run down the categorical path, inventing one 'category' per person. That fits perfectly and
+    reported 'Confidence: High' while meaning nothing — the exact failure this tool exists to
+    prevent. It must refuse, in plain language."""
+    rng = np.random.default_rng(0)
+    n = 200
+    df = pd.DataFrame({"id": range(n), "salary": rng.integers(20000, 90000, n),
+                       "pref": rng.choice(["Yes", "No"], n), "q": rng.integers(1, 6, n)})
+    with pytest.raises(ValueError) as e:
+        sk.auto_prepare(df, force_items=["salary", "pref"])
+    msg = sk._explain_run_error(str(e.value))
+    assert "different answers" in msg and "salary" in msg and "meaningless" in msg
+    # a genuine all-categorical pick, and a genuine all-numeric pick, both still work
+    assert sk.auto_prepare(df, force_items=["pref", "q"])[1] == "lca"
+    assert sk.auto_prepare(df, force_items=["salary", "q"])[1] == "kmeans"
+
+
+def test_swedish_survey_profiles_demographics_instead_of_grouping_on_them():
+    """Regression, and the one that matters most for a Nordic team: the word-splitter used [a-z]+,
+    which shredded 'Kön' into ['k','n'] and 'Ålder' into ['lder']. Swedish gender/age/university
+    columns were therefore never recognised as background traits and ended up FORMING the segments —
+    the circular result the whole tool is built to prevent. Swedish answer scales were also unread,
+    losing the ordering of 'Instämmer helt' over 'Instämmer'."""
+    rng = np.random.default_rng(4)
+    n = 180
+    t = rng.integers(0, 2, n)
+    sv = np.array(["Instämmer inte alls", "Instämmer inte", "Neutral", "Instämmer", "Instämmer helt"])
+    def col(hi, lo):
+        return sv[np.clip(np.round(rng.normal(np.where(t == 0, hi, lo), .7)).astype(int), 0, 4)]
+    df = pd.DataFrame({
+        "Svarsnummer": range(1, n + 1),
+        "Jag vill träffa nya människor på campus": col(3.6, 1.2),
+        "Jag oroar mig för integritet i appar": col(1.2, 3.4),
+        "Jag använder gärna en app för studentevent": col(3.5, 1.4),
+        "Kön": rng.choice(["Man", "Kvinna"], n),
+        "Universitet": rng.choice(["Lund", "KTH", "Uppsala"], n),
+        "Ålder": rng.choice(["18-24", "25-34"], n),
+    })
+    clean, method, idc, items, plan = sk.auto_prepare(df)
+    assert set(plan["demographics"]) == {"Kön", "Universitet", "Ålder"}
+    assert "Kön" not in items and "Universitet" not in items and "Ålder" not in items
+    assert method == "kmeans"                      # the Swedish scale was read as ordered 1-5
+    assert len(items) == 3
+    r = sk.run_analysis(df.to_csv(index=False).encode(), cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+    got = pd.read_csv(io.StringIO(r["files"]["segment_assignments.csv"]))["segment"]
+    assert adjusted_rand_score(t, got) > 0.8       # and it still finds the real split
+
+    # the English path must be untouched by the unicode change
+    en = pd.DataFrame({"Gender": ["M", "F"] * 40, "Age": ["18-24", "25-34"] * 40,
+                       "q1": np.resize([1, 5], 80), "q2": np.resize([5, 1], 80)})
+    p_en = sk.classify_columns(en)
+    assert set(p_en["demographics"]) == {"Gender", "Age"} and p_en["continuous"] == ["q1", "q2"]
+
+
+def test_google_forms_export_including_select_all_questions():
+    """Google Forms is how this team actually collects data, and its 'select all that apply'
+    questions pack every ticked option into one comma-separated cell. Treated naively, each
+    COMBINATION becomes its own category — four options turn into fourteen pseudo-categories.
+    They must be split into yes/no columns, kept out of the way when real rating questions exist,
+    and never confused with free text that happens to contain a comma."""
+    rng = np.random.default_rng(7)
+    n = 140
+    t = rng.integers(0, 2, n)
+    brands = np.array(["Brand A", "Brand B", "Brand C", "Brand D"])
+
+    def checkbox(seg):
+        pool = brands[[0, 1]] if seg == 0 else brands[[2, 3]]
+        return ", ".join(sorted(rng.choice(pool, size=rng.integers(1, 3), replace=False)))
+
+    gf = pd.DataFrame({
+        "Timestamp": [f"2026/05/0{i % 9 + 1} 10:2{i % 9}:11" for i in range(n)],
+        "Email Address": [f"s{i}@lu.se" for i in range(n)],
+        "Which of these apps have you used? (select all that apply)": [checkbox(x) for x in t],
+        "Rate the following [Ease of use]":
+            np.clip(np.round(rng.normal(np.where(t == 0, 4.4, 2), .7)), 1, 5).astype(int),
+        "Rate the following [Privacy]":
+            np.clip(np.round(rng.normal(np.where(t == 0, 2, 4.3), .7)), 1, 5).astype(int),
+        "How likely are you to recommend us?":
+            np.clip(np.round(rng.normal(np.where(t == 0, 4.5, 2), .8)), 1, 5).astype(int),
+        "What is your gender?": rng.choice(["Male", "Female"], n),
+        "Anything else you want to tell us?": ["" if rng.random() < .85 else f"c{i}" for i in range(n)],
+    })
+    plan = sk.classify_columns(gf)
+    ms = plan["multiselect"]
+    assert len(ms) == 1 and sorted(next(iter(ms.values()))) == sorted(brands.tolist())
+    assert plan["id"] == "Email Address"                       # Google Forms email column
+    assert "Timestamp" in plan["skipped"]
+    assert plan["demographics"] == ["What is your gender?"]
+
+    # ratings present -> the select-all is set aside, so it cannot outvote them by column count
+    clean, method, idc, items, plan2 = sk.auto_prepare(gf)
+    assert method == "kmeans" and len(items) == 3 and all("—" not in i for i in items)
+    r = sk.run_analysis(gf.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+    got = pd.read_csv(io.StringIO(r["files"]["segment_assignments.csv"]))["segment"]
+    assert adjusted_rand_score(t, got) > 0.9
+
+    # only a select-all -> the yes/no columns become the grouping, with readable names
+    only = gf[["Email Address", "Which of these apps have you used? (select all that apply)"]]
+    _, m2, _, items2, _ = sk.auto_prepare(only)
+    assert m2 == "kmeans" and len(items2) == 4
+    assert all(i.startswith("Which of these apps have you used — ") for i in items2)
+
+    # free text containing commas must NOT be shredded into fake options
+    ft = pd.Series(["I like it, a lot", "Too expensive, sadly", "Great, would recommend",
+                    "Not sure, maybe", "Fine, I guess", "Could be better, honestly"] * 4)
+    assert sk._multiselect_options(ft) is None
+
+
+def test_projects_persist_to_disk_and_reopen(tmp_path):
+    """Analysed surveys are saved as projects, like a chat history, so closing the app does not
+    throw away an analysis. A saved project must come back with its report, its downloads and its
+    conversation — and the store must never write outside its own folder."""
+    store = sk.ProjectStore(tmp_path)
+    store.save("abc123", {"title": "campus_wave1.csv", "digest": "# Report",
+                          "report_html": "<h2>In plain language</h2>" + "x" * 300,
+                          "files": {"segment_assignments.csv": "id,segment\n1,0\n"},
+                          "messages": [{"role": "user", "content": "hi"}],
+                          "transcript": [{"role": "you", "text": "Analyse: campus_wave1.csv"}],
+                          "k": 3, "n_people": 150, "confidence": "high", "columns": {"q1": "used"}})
+    listed = store.list()
+    assert len(listed) == 1 and listed[0]["title"] == "campus_wave1.csv"
+    assert listed[0]["k"] == 3 and listed[0]["confidence"] == "high" and listed[0]["updated"]
+
+    back = store.load("abc123")                       # survives as if the app had restarted
+    assert back["files"]["segment_assignments.csv"].startswith("id,segment")
+    assert back["transcript"][0]["text"].startswith("Analyse:")
+    assert back["k"] == 3
+
+    # a hostile id must not escape the store directory
+    store.save("../../../etc/evil", {"title": "nope"})
+    assert not (tmp_path / ".." / ".." / ".." / "etc" / "evil.json").exists()
+    assert all(p.parent == tmp_path for p in tmp_path.glob("*.json"))
+
+    # Regression: the original upload must be kept, or re-grouping a REOPENED project fails while
+    # the UI still offers the question picker.
+    store.save("withraw", {"title": "wave2.csv", "k": 2}, raw=b"id,q1,q2\n1,5,1\n2,1,5\n")
+    assert store.load("withraw")["raw"].startswith(b"id,q1,q2")
+
+    # Regression: the sidebar must not parse every full report just to list titles.
+    big = "<p>" + ("x" * 40000) + "</p>"
+    store.save("bigone", {"title": "big.csv", "report_html": big, "digest": big, "k": 4})
+    meta = sorted(tmp_path.glob("*.meta.json"))
+    assert meta, "expected a small summary file per project"
+    assert max(p.stat().st_size for p in meta) < 1000        # summaries stay tiny
+    assert any(p.stat().st_size > 40000 for p in tmp_path.glob("*.json")
+               if not p.name.endswith(".meta.json"))         # the full record is separate
+    assert {d["id"] for d in store.list()} >= {"abc123", "withraw", "bigone"}
+
+    store.delete("abc123")
+    assert store.load("abc123") is None
+    assert store.load("never-existed") is None        # missing project is None, not a crash
+    store.delete("withraw")                           # delete removes record, summary AND upload
+    assert not list(tmp_path.glob("withraw*"))
+
+
+def test_front_end_is_hardened_against_the_obvious_ways_to_break_it():
+    """The page is used by non-technical people, so no interaction may wedge it. Every request goes
+    through one helper that cannot throw, files are checked before upload, dropped folders are
+    explained, and a crash anywhere still releases the busy state."""
+    js = sk._CHAT_JS
+    # exactly one real fetch — inside the helper that turns every failure into a message
+    assert js.count("fetch(") == 1 and "function req(" in js
+    assert "Could not reach the app" in js               # app closed / network gone
+    assert "sent back something unexpected" in js        # non-JSON reply
+    # pre-upload validation instead of a pointless round trip
+    for msg in ("That file is empty", "bigger than 100 MB", "does not look like one",
+                "That is a folder"):
+        assert msg in js, msg
+    # a stuck spinner is never acceptable
+    assert "unhandledrejection" in js and "window.addEventListener('error'" in js
+    # user- and file-supplied text is escaped, never injected as markup
+    assert "function esc(" in js and "b.textContent=text" in js
+    assert "esc(p.title" in js and "esc(d.error)" in js
+
+
+def test_markdown_renders_numbered_lists_and_errors_stay_plain_language():
+    """Claude may number its points; they must render as a real list, not stray text. And an
+    unrecognised technical error must reach a non-expert as a plain sentence, not a raw exception."""
+    html = sk._markdown_to_html("## Plan\n1. First step\n2. Second step\n\nAfter")
+    assert "<ol>" in html and "<li>First step</li>" in html and "</ol>" in html
+    assert "<ul>" in sk._markdown_to_html("- a\n- b")            # bullets unaffected
+    assert "<p>Hopkins was 0.76 overall.</p>" in sk._markdown_to_html("Hopkins was 0.76 overall.")
+    friendly = sk._explain_run_error("Connection reset by peer")
+    assert "Something went wrong" in friendly and "Connection reset by peer" in friendly
+
+
+def test_ai_request_is_well_formed_against_a_mock_anthropic_server(monkeypatch):
+    """Prove the REAL request Claude would receive is correct, without spending a real API key:
+    point the Anthropic SDK at a local mock that speaks the streaming wire format, then inspect
+    exactly what was sent. Guards the model id, the system prompt, that the report digest actually
+    reaches the model, and that a streamed reply is parsed back out."""
+    import http.server
+    import json as _json
+    import threading
+
+    captured = {}
+    SSE = (
+        'event: message_start\n'
+        'data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant",'
+        '"model":"claude-opus-5","content":[],"stop_reason":null,"stop_sequence":null,'
+        '"usage":{"input_tokens":10,"output_tokens":1}}}\n\n'
+        'event: content_block_start\n'
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n'
+        'event: content_block_delta\n'
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta",'
+        '"text":"## Your segments\\n- **Champions** lead on consideration."}}\n\n'
+        'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n'
+        'event: message_delta\n'
+        'data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},'
+        '"usage":{"output_tokens":12}}\n\n'
+        'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+    )
+
+    class Mock(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            captured["path"] = self.path
+            captured["body"] = _json.loads(self.rfile.read(n).decode())
+            b = SSE.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Mock)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", f"http://127.0.0.1:{srv.server_address[1]}")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
+    try:
+        reply, history = ai.chat_once([], "# Report\n- Segment 1 is 41% of students", None)
+    finally:
+        srv.shutdown()
+
+    assert "Champions" in reply                      # the streamed answer was parsed back out
+    assert history[-1]["role"] == "assistant"
+    body = captured["body"]
+    assert captured["path"].endswith("/v1/messages")
+    assert body["model"] == "claude-opus-5"
+    assert body["stream"] is True                    # streaming, so long answers don't time out
+    assert body["max_tokens"] >= 2000
+    assert "segmentation strategist" in body["system"]
+    sent = body["messages"][0]["content"]
+    assert "Segment 1 is 41% of students" in sent    # the aggregate report really reaches Claude
+    assert body["messages"][0]["role"] == "user"
+
+
+def test_ai_flags_a_truncated_answer(monkeypatch):
+    """A reply cut off at the token ceiling must be labelled, never shown as if it were complete."""
+    class _Block:
+        type, text = "text", "Segment 1 is the biggest and"
+
+    class _Msg:
+        stop_reason, content = "max_tokens", [_Block()]
+
+    class _Stream:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get_final_message(self): return _Msg()
+
+    monkeypatch.setattr(ai, "have_sdk", lambda: True)
+    monkeypatch.setattr(ai, "load_api_key", lambda: "sk-ant-x")
+    import anthropic
+    monkeypatch.setattr(anthropic.Anthropic, "__init__", lambda self, **k: None)
+    monkeypatch.setattr(anthropic.Anthropic, "messages",
+                        property(lambda self: type("M", (), {"stream": lambda *a, **k: _Stream()})()))
+    reply, _ = ai.chat_once([], "digest", "which first?")
+    assert "cut short" in reply and "Segment 1 is the biggest" in reply
+
+
+def test_web_server_endpoints_end_to_end(monkeypatch):
+    """Start the real local server and exercise the JSON endpoints end to end: the chat page loads, a
+    survey 'analyses' into a session, a key saves, and /chat returns Claude's reply — with the no-key
+    path returning a friendly 'nokey', never a crash. The (slow) statistics and the (network) Claude
+    call are stubbed, so this tests the wiring fast and offline."""
+    import json as _json
+    import socket
+    import threading
+    import time
+    import urllib.request
+
+    monkeypatch.setattr(sk, "run_analysis", lambda data, cfg=None, force_items=None: {
+        "title": "Segmentation report",
+        "report_html": "<h2>In plain language</h2><p>Three groups.</p>",
+        "digest": "# Report\n- three groups", "k": 3, "n_people": 2,
+        "columns": {"q1": "used", "q2": "used", "age": "background"},
+        "files": {"segment_assignments.csv": "id,segment\n1,0\n2,1\n",
+                  "group_profiles.csv": ",q1\nSegment 0,4.2\n",
+                  "typing_rule.json": '{"method": "kmeans", "items": ["q1"]}'}})
+
+    class FakeAI:
+        class AIError(Exception):
+            def __init__(self, msg, kind="error"):
+                super().__init__(msg)
+                self.kind = kind
+
+        def __init__(self):
+            self.key = None
+
+        def status(self):
+            return {"sdk_installed": True, "configured": self.key is not None,
+                    "source": "test" if self.key else None, "env_key": False, "model": "claude-opus-5"}
+
+        def chat_once(self, history, digest, question=None):
+            if self.key is None:
+                raise self.AIError("Add your Anthropic API key in Settings.", kind="nokey")
+            reply = ("## Your segments\n- **Privacy-First Students** value real-life meetups."
+                     if question is None else "Target the largest group first.")
+            return reply, list(history) + [{"role": "assistant", "content": reply}]
+
+        def suggest_names(self, digest, k):
+            if self.key is None:
+                raise self.AIError("Add your key.", kind="nokey")
+            return ["Loyal Fans", "Price Hunters"][:k]
+
+        def save_api_key(self, k):
+            if not (k or "").strip():
+                raise self.AIError("empty", kind="nokey")
+            self.key = k.strip()
+
+        def clear_api_key(self):
+            self.key = None
+
+    monkeypatch.setattr(sk, "_ai", FakeAI())
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: None)
+
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    threading.Thread(target=sk.serve, kwargs={"port": port}, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+
+    def get(path):
+        return urllib.request.urlopen(base + path, timeout=5).read().decode()
+
+    def post_json(path, obj):
+        req = urllib.request.Request(base + path, data=_json.dumps(obj).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        return _json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
+
+    def post_file(path, name, blob):
+        b = "----t"
+        body = (f'--{b}\r\nContent-Disposition: form-data; name="file"; filename="{name}"\r\n'
+                f'Content-Type: text/csv\r\n\r\n').encode() + blob + f"\r\n--{b}--\r\n".encode()
+        req = urllib.request.Request(base + path, data=body, method="POST",
+                                     headers={"Content-Type": f"multipart/form-data; boundary={b}"})
+        return _json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
+
+    up = False
+    for _ in range(60):
+        try:
+            if "Survey Segmenter" in get("/"):
+                up = True
+                break
+        except Exception:
+            time.sleep(0.1)
+    assert up, "server did not start"
+
+    try:
+        assert _json.loads(get("/settings"))["sdk_installed"] is True
+        a = post_file("/analyze", "u.csv", b"id,q1,q2\n1,4,5\n2,1,2\n")
+        assert a["ok"] and a["session_id"] and "In plain language" in a["report_html"]
+        assert a["ai_available"] is False                       # no key yet
+        c0 = post_json("/chat", {"session_id": a["session_id"], "initial": True})
+        assert c0["ok"] is False and c0["kind"] == "nokey"      # friendly, not a crash
+        st = post_json("/settings", {"api_key": "sk-ant-xyz"})
+        assert st["ok"] and st["configured"] is True
+        a2 = post_file("/analyze", "u.csv", b"id,q1,q2\n1,4,5\n2,1,2\n")
+        assert a2["ai_available"] is True                       # key now present
+        c1 = post_json("/chat", {"session_id": a2["session_id"], "initial": True})
+        assert c1["ok"] and "Your segments" in c1["reply_html"]
+        c2 = post_json("/chat", {"session_id": a2["session_id"], "message": "which first?"})
+        assert c2["ok"] and "Target the largest" in c2["reply_html"]
+        c3 = post_json("/chat", {"session_id": "nope", "message": "hi"})
+        assert c3["ok"] is False and "analyse" in c3["error"].lower()
+
+        # the actionable exports: the growth team must be able to pull the results out
+        assert sorted(a2["downloads"]) == ["group_profiles.csv", "segment_assignments.csv",
+                                           "typing_rule.json"]
+        got = get(f"/download?session_id={a2['session_id']}&file=segment_assignments.csv")
+        assert got.startswith("id,segment") and "1,0" in got
+        with pytest.raises(urllib.error.HTTPError) as e404:      # unknown file -> clean 404
+            urllib.request.urlopen(base + f"/download?session_id={a2['session_id']}&file=nope.csv")
+        assert e404.value.code == 404
+
+        # re-grouping on chosen questions, and the guard against a meaningless pick
+        rg = post_json("/regroup", {"session_id": a2["session_id"], "items": ["q1", "q2"]})
+        assert rg["ok"] and rg["session_id"] == a2["session_id"]
+        bad = post_json("/regroup", {"session_id": a2["session_id"], "items": ["q1"]})
+        assert bad["ok"] is False and "two questions" in bad["error"]
+        # scoring needs a real session
+        nos = post_json("/score?session_id=nope", {})
+        assert nos["ok"] is False
+
+        # naming: human names must reach the downloads, or the exports are unusable in a brief
+        nm = post_json("/name", {"session_id": a2["session_id"],
+                                 "names": ["Champions", "Sceptics"]})
+        assert nm["ok"] and nm["names"] == ["Champions", "Sceptics"]
+        assert "group_names.csv" in nm["downloads"]
+        rows = get(f"/download?session_id={a2['session_id']}&file=segment_assignments.csv")
+        assert "group_name" in rows and "Champions" in rows
+        names_csv = get(f"/download?session_id={a2['session_id']}&file=group_names.csv")
+        assert "segment,name,people" in names_csv and "Sceptics" in names_csv
+        wrong = post_json("/name", {"session_id": a2["session_id"], "names": ["only one"]})
+        assert wrong["ok"] is False and "each of the 2 groups" in wrong["error"]
+        sug = post_json("/name", {"session_id": a2["session_id"], "suggest": True})
+        assert sug["ok"] and sug["names"] == ["Loyal Fans", "Price Hunters"]   # from the fake AI
+    finally:
+        try:
+            urllib.request.urlopen(base + "/quit", timeout=5).read()
+        except Exception:
+            pass
+
+
+def test_scoring_a_person_does_not_depend_on_who_else_is_in_the_file():
+    """A typing rule has to be a fixed rule. Skipped answers used to be filled in from the mean of
+    whatever file they arrived in, so the SAME person got a different confidence — and could get a
+    different segment — depending on which other people happened to be uploaded alongside them.
+    The study's own centre is the only defensible fallback, and it makes each row self-contained."""
+    rng = np.random.default_rng(11)
+    n = 130
+    hi = pd.DataFrame({"q1": rng.integers(6, 8, n), "q2": rng.integers(6, 8, n),
+                       "q3": rng.integers(1, 3, n)})
+    lo = pd.DataFrame({"q1": rng.integers(1, 3, n), "q2": rng.integers(1, 3, n),
+                       "q3": rng.integers(6, 8, n)})
+    df = pd.concat([hi, lo], ignore_index=True)
+    df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=3, **FAST))
+    rule = json.loads(r["files"]["typing_rule.json"])
+
+    person = {"respondent_id": "NEW1", "q1": 7, "q2": 7, "q3": np.nan}   # skipped one question
+    alone = sk.classify_new(rule, pd.DataFrame([person]))
+    company = [{"respondent_id": f"F{i}", "q1": 1, "q2": 1, "q3": 7} for i in range(40)]
+    crowded = sk.classify_new(rule, pd.DataFrame([person] + company))
+
+    assert alone.loc[0, "segment"] == crowded.loc[0, "segment"]
+    assert alone.loc[0, "confidence"] == crowded.loc[0, "confidence"]
+
+    # A column nobody answered must not blow up or silently become an extreme score.
+    blank = pd.DataFrame([person, {"respondent_id": "NEW2", "q1": 6, "q2": 7, "q3": np.nan}])
+    scored = sk.classify_new(rule, blank)
+    assert len(scored) == 2 and scored["confidence"].between(0, 1).all()
+
+
+def test_naming_regrouping_and_scoring_all_survive_a_restart(tmp_path, monkeypatch):
+    """Everything the user does after the first analysis has to be saved, not just the analysis and
+    the chat. Naming the groups, scoring new people and re-grouping all mutate the project; if they
+    are not persisted, the work quietly disappears the next time the app opens. Re-grouping must
+    also replace the WHOLE stored result — a reopened project showing the previous grouping's report
+    beside the new group count is worse than not saving at all."""
+    monkeypatch.setenv("SURVEY_SEGMENTER_PROJECTS", str(tmp_path / "projects"))
+    store = sk.ProjectStore()
+
+    # Jittered rather than perfectly constant: identical answers within a group make the ANOVA
+    # undefined and flood the run with warnings that have nothing to do with what is being tested.
+    rng = np.random.default_rng(7)
+    base = np.tile([5, 1], 40)
+    df = pd.DataFrame({"respondent_id": [f"P{i}" for i in range(80)],
+                       "q1": np.clip(base + rng.integers(-1, 2, 80), 1, 5),
+                       "q2": np.clip(6 - base + rng.integers(-1, 2, 80), 1, 5),
+                       "q3": np.clip(base + rng.integers(-1, 2, 80), 1, 5)})
+    raw = df.to_csv(index=False).encode()
+    r = sk.run_analysis(raw, cfg=sk.SegmentationConfig(k_min=2, k_max=3, **FAST))
+
+    store.save("proj1", {"title": "wave 1", "digest": r["digest"], "files": r["files"],
+                         "report_html": r["report_html"], "k": r["k"],
+                         "n_people": r["n_people"], "names": ["Champions", "Sceptics"]}, raw=raw)
+    back = store.load("proj1")
+    assert back["names"] == ["Champions", "Sceptics"]     # names come back
+    assert back["raw"] == raw                             # and so does the file, so re-grouping works
+
+    # Re-grouping replaces the result wholesale rather than leaving a stale report behind.
+    r2 = sk.run_analysis(raw, force_items=["q1", "q2"],
+                         cfg=sk.SegmentationConfig(k_min=2, k_max=3, **FAST))
+    store.save("proj1", {"title": "wave 1", "digest": r2["digest"], "files": r2["files"],
+                         "report_html": r2["report_html"], "k": r2["k"],
+                         "n_people": r2["n_people"], "names": []}, raw=raw)
+    again = store.load("proj1")
+    assert again["names"] == []                           # stale names dropped, not re-applied
+    assert again["report_html"] == r2["report_html"]      # the report matches the new grouping
+    assert again["raw"] == raw
+
+
+# ------------------------------------------------------------------- charts: seeing the data
+def _three_group_survey(n=240, seed=4):
+    """A survey with three genuinely distinct mind-sets planted in it.
+
+    Sized so k=3 wins outright. At n=150 the search legitimately prefers 4 and splits one real
+    group in half, which is a correct Low-confidence result but a useless fixture for asserting
+    what a GOOD run looks like."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for i in range(n):
+        g = i % 3
+        base = {0: [5, 1, 5, 2], 1: [1, 5, 2, 4], 2: [3, 3, 4, 5]}[g]
+        rows.append([f"R{i:03d}"] + [int(np.clip(round(b + rng.normal(0, 0.7)), 1, 5))
+                                     for b in base])
+    return pd.DataFrame(rows, columns=["respondent_id", "q1", "q2", "q3", "q4"])
+
+
+def _noise_survey(n=150, seed=11):
+    """Answers drawn at random. There are no groups here; any the tool reports it invented."""
+    rng = np.random.default_rng(seed)
+    return pd.DataFrame({"respondent_id": [f"R{i}" for i in range(n)],
+                         **{f"q{j}": rng.integers(1, 6, n) for j in range(1, 6)}})
+
+
+def test_every_run_produces_the_four_charts_as_valid_standalone_svg():
+    """The charts are the user's own check on the result, so they are not optional decoration:
+    a run that produces a report must produce the pictures of that report too."""
+    r = sk.run_analysis(_three_group_survey().to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+    assert [c["id"] for c in r["charts"]] == ["map", "fit", "k", "profiles"]
+    for c in r["charts"]:
+        assert c["svg"].startswith("<svg") and c["svg"].endswith("</svg>")
+        assert c["svg"].count("<svg") == c["svg"].count("</svg>") == 1
+        assert c["title"] and c["caption"]
+        # Chrome must be themeable: hard-coding a text colour breaks the chart in dark mode.
+        assert "currentColor" in c["svg"]
+    # And they reach the page the user actually looks at.
+    doc = sk.charts_html(r["charts"])
+    assert doc.count("<svg") == 4
+
+
+def test_the_charts_say_out_loud_when_the_segments_are_not_real():
+    """The whole point of showing the data: on structureless answers the tool still returns k
+    groups, and the charts have to be the thing that contradicts the tidy-looking result rather
+    than illustrating it."""
+    cfg = sk.SegmentationConfig(k_min=2, k_max=4, **FAST)
+    noise = sk.run_analysis(_noise_survey().to_csv(index=False).encode(), cfg=cfg)
+    real = sk.run_analysis(_three_group_survey().to_csv(index=False).encode(), cfg=cfg)
+
+    cap = {c["id"]: c["caption"] for c in noise["charts"]}
+    assert "no number of groups reproduces strongly" in cap["k"]
+    assert "not really there" in cap["fit"]          # low average silhouette, stated as such
+    # The headline confidence has to agree with the charts. It used to read "Moderate — the groups
+    # reproduce" on exactly this data, which is the wrong conclusion the charts exist to catch.
+    assert noise["confidence"] == "low"
+
+    good = {c["id"]: c["caption"] for c in real["charts"]}
+    assert "real answer from the data" in good["k"]
+    assert "not really there" not in good["fit"]
+    assert real["confidence"] == "high"
+
+
+def test_the_segment_map_reports_how_much_of_the_data_it_is_actually_showing():
+    """A 2-D projection of a 10-question survey is a shadow, and how faithful a shadow it is
+    decides whether overlap on screen means anything. Hiding that number would make the most
+    persuasive chart in the app the least honest one."""
+    r = sk.run_analysis(_three_group_survey().to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+    caption = next(c for c in r["charts"] if c["id"] == "map")["caption"]
+    assert re.search(r"carry \d+% of", caption)
+
+
+def test_charts_never_draw_an_individual_respondent_by_name():
+    """Every respondent is a dot on the segment map. Their id must not travel with the dot — the
+    charts are the part of the report most likely to be pasted into a deck or shared onward."""
+    df = _three_group_survey()
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+    everything = "".join(c["svg"] for c in r["charts"])
+    for rid in df["respondent_id"]:
+        assert rid not in everything
+
+
+def test_a_hostile_column_name_cannot_inject_markup_into_a_chart():
+    """Question wording is drawn as chart labels, and it comes from whatever the survey tool
+    exported. It has to be escaped on the way in, not trusted."""
+    df = _three_group_survey()
+    df = df.rename(columns={"q1": "<script>alert(1)</script>"})
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+    everything = "".join(c["svg"] for c in r["charts"])
+    assert "<script>" not in everything
+    assert "&lt;script&gt;" in everything          # escaped, and still shown to the user
+
+
+def test_categorical_surveys_are_charted_too():
+    """Multiple-choice surveys go down the latent-class path, which has no centroids and no
+    distances of its own. It gets the same four charts or the categorical half of the tool is
+    the half nobody can check."""
+    rng = np.random.default_rng(5)
+    opts = {"channel": ["Instagram", "TikTok", "Email"], "why": ["Price", "Quality", "Brand"],
+            "when": ["Morning", "Evening", "Weekend"]}
+    rows = []
+    for i in range(150):
+        g = i % 3
+        rows.append([f"R{i}"] + [o[g] if rng.random() < 0.8 else o[rng.integers(0, len(o))]
+                                 for o in opts.values()])
+    df = pd.DataFrame(rows, columns=["respondent_id", *opts])
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=4, n_init_search=6,
+                                                  n_init_final=8, stability_B=6,
+                                                  run_consensus=False,
+                                                  check_variable_selection=False))
+    assert r["method"] == "lca"
+    assert [c["id"] for c in r["charts"]] == ["map", "fit", "k", "profiles"]
+    prof = next(c for c in r["charts"] if c["id"] == "profiles")
+    # Probabilities, not means — the caption must not tell the reader to read them as ratings.
+    assert "How likely each answer is" in prof["caption"]
+    assert "channel = TikTok" in prof["svg"] or "why = Price" in prof["svg"]
+
+
+def test_a_chart_that_cannot_be_drawn_never_costs_the_user_the_analysis():
+    """Charts are an aid, not the product. If one cannot be drawn the run must still hand over
+    the report and the CSVs rather than failing in front of someone who just wants their groups."""
+    class Broken:
+        labels = np.array([0, 1, 0, 1])
+        recommended_k = 2
+
+        def __getattr__(self, name):               # every matrix access blows up
+            raise RuntimeError("no matrix here")
+
+    assert sk.build_charts(Broken(), "kmeans") == []
+
+
+def test_the_ai_digest_contains_no_individual_respondent_data():
+    """The privacy guarantee, as an executable check rather than a sentence in a README.
+
+    Everything the Claude layer transmits is the `digest`. The claim made to users — and to
+    anyone asking a GDPR question — is that it is aggregate only: no respondent identifiers, no
+    individual answer rows, no free text. That claim is worth exactly as much as the test behind
+    it, so this builds a dataset whose identifiers and free-text answers are unmistakable strings
+    and fails if any of them survives into the payload.
+    """
+    rng = np.random.default_rng(19)
+    n = 400
+    ids = [f"RESPONDENT-UNIQUE-{i:04d}" for i in range(n)]
+    # Free text is the highest-risk field: it is the one place someone writes their own name.
+    comments = [f"my-secret-comment-{i:04d}" for i in range(n)]
+    rows = []
+    for i in range(n):
+        base = [5, 1, 5, 2] if i % 2 else [1, 5, 2, 4]
+        rows.append([ids[i], *[int(np.clip(round(b + rng.normal(0, 0.7)), 1, 5)) for b in base],
+                     comments[i], ["Woman", "Man"][i % 2]])
+    df = pd.DataFrame(rows, columns=["respondent_id", "q1", "q2", "q3", "q4",
+                                     "open_feedback", "gender"])
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+
+    payload = r["digest"]
+    leaked_ids = [x for x in ids if x in payload]
+    leaked_text = [c for c in comments if c in payload]
+    assert leaked_ids == [], f"{len(leaked_ids)} respondent identifiers reached the AI payload"
+    assert leaked_text == [], f"{len(leaked_text)} free-text answers reached the AI payload"
+
+    # And it is not empty-by-accident: the aggregate content the feature needs IS present.
+    assert "Confidence" in payload and "Segment" in payload
+
+    # The digest is the whole of what gets transmitted, so pin that too: what ai.build_messages
+    # puts on the wire is the digest and nothing else drawn from the raw file.
+    sent = ai.build_messages(payload, None, None)[0]["content"]
+    assert not [x for x in ids if x in sent]
+    assert not [c for c in comments if c in sent]

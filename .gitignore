@@ -1,0 +1,32 @@
+# macOS
+.DS_Store
+._*
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Build output. The packaged app is ~190 MB and the archive ~76 MB — far too large for git
+# history, and it is fully reproducible with `python3 build_app.py`. Ship it as a GitHub Release
+# asset instead, so downloads are versioned without bloating every clone.
+build/
+dist/
+*.spec
+
+# Analysis output written next to an input file
+*_results/
+results/
+
+# Secrets. The Anthropic key belongs in ~/.survey_segmenter/config.json (chmod 600), never here.
+.env
+*.key
+
+# Real survey data must never be committed — it is personal data. Only the synthetic file in
+# examples/ is tracked; anything else you drop in for testing stays local.
+*.csv
+*.xlsx
+!examples/*.csv

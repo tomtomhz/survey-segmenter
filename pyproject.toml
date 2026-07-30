@@ -1,0 +1,33 @@
+# Packaging for segment_kmeans. Install with:  pip install .
+# Then run from anywhere with the `segment-kmeans` command, e.g.:
+#   segment-kmeans my_survey.csv
+#   segment-kmeans --serve
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "segment-kmeans"
+version = "1.0.0"                 # keep in sync with __version__ in segment_kmeans.py
+description = "Market-segmentation-grade clustering (k-means, Gaussian mixture, latent class) with stability-first validation, a typing tool, automatic survey-file handling, and a no-expertise web UI."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=1.5",
+    "scipy>=1.10",
+    "scikit-learn>=1.2",
+]
+
+[project.optional-dependencies]
+excel = ["openpyxl>=3.0"]         # read .xlsx survey exports
+figures = ["matplotlib>=3.6"]     # the diagnostics.png figure
+tables = ["tabulate>=0.9"]        # prettier Markdown tables in the report
+ai = ["anthropic>=0.40"]          # "ask Claude about your segments" chat (optional; bring your own key)
+dev = ["pytest>=7.0", "pyflakes>=3.0"]
+
+[project.scripts]
+segment-kmeans = "segment_kmeans:_cli"
+
+[tool.setuptools]
+py-modules = ["segment_kmeans", "ai_interpret"]
