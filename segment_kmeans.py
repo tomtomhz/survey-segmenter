@@ -1469,7 +1469,8 @@ def chart_profiles(centroids, names=None, max_items=9, kind="means"):
         return None
     # Show the items that actually separate the groups. With 40-question surveys, all of them is
     # an unreadable wall; the ones that differ most are the whole story anyway.
-    spread = (C.max(0) - C.min(0)).sort_values(ascending=False)
+    # axis= spelled out: pandas 4 makes these keyword-only, and this is a DataFrame, not an array.
+    spread = (C.max(axis=0) - C.min(axis=0)).sort_values(ascending=False)
     items = list(spread.index[:max_items])
     trimmed = len(spread) - len(items)
     C = C[items]

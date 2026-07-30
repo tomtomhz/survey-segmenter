@@ -30,7 +30,10 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install ".[excel,dev]"
+          # `ai` is required: the suite covers the Claude layer (request shape against a mock
+          # server, truncated-answer handling), and without anthropic installed those tests fail
+          # on an import rather than testing anything. No API key is used or needed.
+          pip install ".[ai,excel,dev]"
 
       - name: Lint
         run: pyflakes segment_kmeans.py ai_interpret.py run_app.py build_app.py tests/
