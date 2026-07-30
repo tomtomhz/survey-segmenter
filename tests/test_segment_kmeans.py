@@ -12,6 +12,7 @@ import io
 import json
 import re
 import sys
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -1584,3 +1585,127 @@ def test_ai_falls_back_gracefully_when_the_best_request_is_unavailable(monkeypat
         text, tried = run(failure)
         assert "Target Segment 1" in text, f"chat broke on {type(failure).__name__}"
         assert tried[0] == "beta" and "plain" in tried, tried
+
+
+def test_one_broken_chart_does_not_take_the_others_down():
+    """Charts are independent, so a failure in one must not withhold the rest.
+
+    They were previously built as one eagerly-evaluated tuple inside a single try/except: any
+    raise discarded all four, including the segment map, which is the whole point of the feature.
+    A NaN centroid was enough to trigger it.
+    """
+    class _Seg:
+        labels = np.array([0] * 30 + [1] * 30)
+        recommended_k = 2
+        X = np.random.default_rng(0).normal(size=(60, 4))
+        centroids = pd.DataFrame({"q1": [1.0, 4.0], "q2": [4.0, 1.0]})
+        diagnostics = pd.DataFrame({"k": [2, 3], "silhouette": [0.5, 0.3],
+                                    "stability_ARI": [0.9, 0.6],
+                                    "prediction_strength": [0.85, 0.5]})
+
+    assert [c["id"] for c in sk.build_charts(_Seg(), "kmeans")] == ["map", "fit", "k", "profiles"]
+
+    original = sk.chart_segment_map
+    sk.chart_segment_map = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    try:
+        survivors = [c["id"] for c in sk.build_charts(_Seg(), "kmeans")]
+    finally:
+        sk.chart_segment_map = original
+    assert survivors == ["fit", "k", "profiles"], survivors
+
+
+def test_charts_survive_degenerate_data():
+    """Real exports produce degenerate cases — an empty cluster leaves NaN centroids, and a
+    one-group solution makes per-person fit undefined. Neither should raise: each chart returns
+    None when it has nothing honest to draw, and the others still render."""
+    X = np.random.default_rng(0).normal(size=(60, 4))
+
+    # A single group: "how much better do you fit your own group than the next" has no answer.
+    assert sk.chart_silhouette(X, np.zeros(60, dtype=int)) is None
+
+    # NaN centroids: drop the affected question, chart the rest.
+    partial = sk.chart_profiles(pd.DataFrame({"q1": [np.nan, 3.0], "q2": [1.0, 2.0]}))
+    assert partial is not None and "q2" in partial["svg"]
+    assert sk.chart_profiles(pd.DataFrame({"q1": [np.nan, np.nan]})) is None
+
+    # A NaN span previously raised StopIteration out of _nice_step, far from its cause.
+    assert sk._nice_step(float("nan")) == 1.0
+    assert sk._nice_step(float("inf")) == 1.0
+
+
+def test_it_will_not_recommend_segments_too_small_to_target():
+    """A segmentation exists to be acted on, so unusably small segments are not an answer.
+
+    Separation indices happily crown very large k: on 120 respondents the criteria picked k=55 —
+    segments of two people — and reported Moderate confidence. `min_segment_frac` already
+    expressed the floor, but only printed a footnote *under* the finished report, so the headline
+    number was chosen as if it did not exist. It is now applied before the vote.
+    """
+    rng = np.random.default_rng(0)
+    n = 120
+    df = pd.DataFrame({"respondent_id": [f"R{i}" for i in range(n)],
+                       "q1": rng.integers(1, 6, n), "q2": rng.integers(1, 6, n)})
+    cfg = sk.SegmentationConfig(k_min=2, k_max=55, **FAST)
+    r = sk.run_analysis(df.to_csv(index=False).encode(), cfg=cfg)
+
+    assignments = pd.read_csv(io.StringIO(r["files"]["segment_assignments.csv"]))
+    smallest = assignments["segment"].value_counts().min() / len(assignments)
+
+    # The guard is applied to the search-time fit; the final fit uses more restarts and can land
+    # on a slightly different local optimum, so this is a large reduction rather than a hard
+    # bound — two-person segments are gone, a segment marginally under the floor can remain.
+    assert r["k"] <= 20, f"k={r['k']} is still far more groups than 120 people can support"
+    assert smallest > 0.03, f"smallest segment is {smallest:.1%} — fragment-sized"
+
+    # The exclusion is stated, not silent — a reader can see which k values were taken off the
+    # table and why, rather than wondering why an obvious peak was ignored.
+    assert "Ruled out before the vote" in r["digest"]
+
+    # And the residual case is still caught downstream: anything that slips under the floor in
+    # the final fit is called out in the report rather than passing silently.
+    assert "below 5% of the sample" in r["digest"]
+
+
+def test_the_size_floor_does_not_distort_a_healthy_segmentation():
+    """The floor must only remove unusable answers. On data with three real, well-populated
+    groups it must not shift the recommendation — a guard that changes good results is worse
+    than no guard."""
+    rng = np.random.default_rng(3)
+    rows = []
+    for i in range(240):
+        base = {0: [5, 1, 5, 2], 1: [1, 5, 2, 4], 2: [3, 3, 4, 5]}[i % 3]
+        rows.append([f"R{i}"] + [int(np.clip(round(b + rng.normal(0, 0.7)), 1, 5)) for b in base])
+    df = pd.DataFrame(rows, columns=["respondent_id", "q1", "q2", "q3", "q4"])
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=6, **FAST))
+    assert r["k"] == 3, r["k"]
+    assert r["confidence"] == "high"
+    assert "Ruled out before the vote" not in r["digest"]   # nothing needed excluding
+
+
+def test_k_is_capped_by_the_number_of_distinct_answer_patterns():
+    """A cluster needs a distinct point to sit on.
+
+    Two 1-to-5 questions admit only 25 possible answer patterns, so a 120-person file cannot
+    yield 55 groups however many the criteria vote for — k-means quietly returns duplicate or
+    empty clusters and emits a ConvergenceWarning per fit. The old ceiling was n//2, which
+    ignores distinctness entirely, so the search burned time fitting impossible solutions and
+    then scored them as if they were real.
+    """
+    rng = np.random.default_rng(0)
+    n = 120
+    df = pd.DataFrame({"respondent_id": [f"R{i}" for i in range(n)],
+                       "q1": rng.integers(1, 6, n), "q2": rng.integers(1, 6, n)})
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        r = sk.run_analysis(df.to_csv(index=False).encode(),
+                            cfg=sk.SegmentationConfig(k_min=2, k_max=55, **FAST))
+
+    assert r["k"] <= 25, f"chose k={r['k']} with only 25 possible answer patterns"
+    # The ceiling is estimated from a handful of half-splits, so an unlucky resample can still
+    # come up short — the point is that this went from hundreds of impossible fits to at most a
+    # couple, not that randomness was eliminated.
+    impossible = [w for w in caught if "found smaller than n_clusters" in str(w.message)]
+    assert len(impossible) <= 3, (
+        f"{len(impossible)} fits asked for more clusters than the data can hold")

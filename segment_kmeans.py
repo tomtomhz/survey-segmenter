@@ -632,7 +632,11 @@ def selection_diagnostics(X, cfg):
         base.append({"k": k, "inertia": _pooled_within_ss(X, lab),
                      "silhouette": silhouette_score(X, lab),
                      "calinski_harabasz": calinski_harabasz_score(X, lab),
-                     "davies_bouldin": davies_bouldin_score(X, lab)})
+                     "davies_bouldin": davies_bouldin_score(X, lab),
+                     # Share of respondents in the SMALLEST segment. A statistically tidy
+                     # solution made of two-person segments cannot be marketed to, so this is
+                     # what makes cfg.min_segment_frac enforceable rather than decorative.
+                     "min_segment_share": float(np.bincount(lab, minlength=k).min() / len(lab))})
     diag = pd.DataFrame(base)
     diag = diag.merge(gap_statistic(X, k_range, cfg.gap_B,
                                     np.random.default_rng(cfg.random_state + 1), cfg.n_init_search), on="k")
@@ -660,6 +664,22 @@ def _gap_choice(diag):
 def recommend_k(diag, cfg):
     """Consensus that weights STABILITY and prediction strength above internal fit indices,
     because a stable, replicable solution is what survives — the market-segmentation view."""
+    # Rule out solutions whose smallest segment is too small to act on BEFORE the vote, rather
+    # than noting it afterwards. A segmentation exists to be targeted: on 120 respondents the
+    # criteria will happily crown k=55 (segments of two people) on separation grounds alone, and
+    # that is a confidently-presented answer nobody can use. cfg.min_segment_frac already
+    # expressed the floor; until now it only printed a footnote under the finished report.
+    # Keep at least two candidates so the search still has something to choose between, and if
+    # the floor would rule out everything, defer to the criteria rather than inventing an answer.
+    # This filters the SEARCH fit; the final fit uses more restarts and may settle on a slightly
+    # different optimum, so treat it as removing unusable answers rather than as a hard bound.
+    # A segment that still lands under the floor is caught by the note under the sizes table.
+    excluded = []
+    if "min_segment_share" in diag:
+        viable = diag[diag["min_segment_share"] >= cfg.min_segment_frac]
+        if len(viable) >= 2:
+            excluded = sorted(set(diag["k"]) - set(viable["k"]))
+            diag = viable
     ks = diag["k"].to_numpy()
     signals = {}
     signals["elbow (weak)"] = auto_elbow(ks, diag["inertia"].to_numpy())
@@ -696,10 +716,18 @@ def recommend_k(diag, cfg):
     winners = sorted([k for k, s in tally.items() if s == best_score])
     pick = winners[0]   # ties -> smaller, more interpretable k (Dolnicar: parsimony)
 
+    ruled_out = ""
+    if excluded:
+        ruled_out = ("\n\nRuled out before the vote: k = "
+                     + ", ".join(str(k) for k in excluded)
+                     + f" — each of those splits the sample into at least one segment holding "
+                       f"under {cfg.min_segment_frac:.0%} of respondents, which is too small to "
+                       "target even if the statistics look clean.")
     rationale = ("Recommended number of segments: **{}**.\n\nWhat each criterion points to: "
                  .format(pick)
                  + "; ".join(f"{n} -> {k}" for n, k in signals.items())
-                 + ".\n\nThe recommendation weights prediction strength and replication "
+                 + "." + ruled_out
+                 + "\n\nThe recommendation weights prediction strength and replication "
                  "stability most heavily (a segmentation is only useful if it reproduces), "
                  "then the separation indices, then the gap statistic, and treats the inertia "
                  "elbow as the weakest signal. On a tie it prefers the smaller, more "
@@ -1127,8 +1155,12 @@ def _num(v, nd=2):
 
 def _nice_step(span, target=6):
     """A tick interval a human would have chosen: 1, 2 or 5 times a power of ten, aiming for about
-    `target` ticks. Raw span/target gives values like 0.7333, which reads as an error."""
-    if span <= 0:
+    `target` ticks. Raw span/target gives values like 0.7333, which reads as an error.
+
+    Non-finite spans are guarded because NaN fails every comparison, so the `next(...)` below
+    would raise StopIteration rather than returning a step — an obscure failure a long way from
+    its cause."""
+    if not np.isfinite(span) or span <= 0:
         return 1.0
     raw = span / max(target, 1)
     mag = 10 ** np.floor(np.log10(raw))
@@ -1287,6 +1319,11 @@ def chart_silhouette(X, labels, names=None, max_rows=900):
     X = np.asarray(X, float)
     labels = np.asarray(labels)
     k = int(labels.max()) + 1
+    # "How much better does this person fit their own group than the next best one" is undefined
+    # when there is no next best one. Callers guard this, but the guard belongs here too — the
+    # cost of getting it wrong is an exception that takes the other charts down with it.
+    if len(np.unique(labels)) < 2:
+        return None
     sv = silhouette_samples(X, labels)
     W, H = 720, 404
     L, R, T, B = 116, 18, 14, 62
@@ -1465,6 +1502,10 @@ def chart_profiles(centroids, names=None, max_items=9, kind="means"):
     if centroids is None or centroids.empty:
         return None
     C = centroids.select_dtypes(include=[np.number])
+    # An empty cluster or an all-missing item leaves NaN centroids. Those cannot be drawn as bar
+    # lengths, and silently plotting them at zero would misrepresent the group, so drop the
+    # affected columns and chart what is real.
+    C = C.loc[:, np.isfinite(C.to_numpy(float)).all(axis=0)] if not C.empty else C
     if C.empty:
         return None
     # Show the items that actually separate the groups. With 40-question surveys, all of them is
@@ -1545,6 +1586,20 @@ def build_charts(seg, method, names=None):
     """Assemble the chart set for a finished run. Any chart that cannot be drawn for this data is
     simply left out rather than faked — a missing chart is honest, an empty one is not."""
     out = []
+
+    def _try(label, fn):
+        """Draw one chart, isolated. Each chart is independent, so a failure in one is no reason
+        to withhold the other three — and the segment map in particular is the whole point of the
+        feature. Previously a single raise dropped the entire set."""
+        try:
+            chart = fn()
+        except Exception as e:
+            print(f"NOTE: could not draw the '{label}' chart ({type(e).__name__}: {e}); "
+                  "the rest of the report is unaffected.")
+            return
+        if chart:
+            out.append(chart)
+
     try:
         if method == "lca":
             X = _onehot_matrix(seg.Xcat, seg.level_counts)
@@ -1558,17 +1613,17 @@ def build_charts(seg, method, names=None):
         else:
             X, centroids = seg.X, seg.centroids
         labels = np.asarray(seg.labels)
-        for chart in (chart_segment_map(X, labels, names),
-                      chart_silhouette(X, labels, names) if len(np.unique(labels)) > 1 else None,
-                      chart_k_choice(seg.diagnostics, int(seg.recommended_k)),
-                      chart_profiles(centroids, names,
-                                     kind="probability" if method == "lca" else "means")
-                      if centroids is not None else None):
-            if chart:
-                out.append(chart)
-    except Exception as e:                    # a failed chart must never cost the user their run
-        print(f"NOTE: could not draw the charts ({e}); the report itself is unaffected.")
+    except Exception as e:            # the shared inputs failed; there is nothing to draw at all
+        print(f"NOTE: could not prepare the charts ({type(e).__name__}: {e}); "
+              "the report itself is unaffected.")
         return []
+
+    _try("segment map", lambda: chart_segment_map(X, labels, names))
+    _try("who belongs", lambda: chart_silhouette(X, labels, names))
+    _try("how many groups", lambda: chart_k_choice(seg.diagnostics, int(seg.recommended_k)))
+    if centroids is not None:
+        _try("what differs", lambda: chart_profiles(
+            centroids, names, kind="probability" if method == "lca" else "means"))
     return out
 
 
@@ -3955,13 +4010,32 @@ class Segmenter:
         # this is also within the silhouette limit of k <= n-1.
         if n < 4:
             raise ValueError(f"Need at least 4 respondents to segment; got {n}.")
-        max_valid_k = n // 2
+        # A cluster needs a distinct point to sit on, so the number of DISTINCT answer patterns
+        # is a hard ceiling independent of n. Two 1-to-5 questions admit only 25 patterns, so a
+        # 120-person file cannot yield 55 groups no matter what the criteria vote for: k-means
+        # silently returns duplicate/empty clusters and warns.
+        #
+        # The binding limit is the half-split, not the whole file: prediction strength clusters
+        # each half into k, and a half necessarily holds fewer distinct patterns than the whole.
+        # Measure that directly over a few splits and take the worst, so the search only ever
+        # scores solutions the validation can actually fit.
+        _Xa = np.asarray(X, float)
+        _rng = np.random.default_rng(cfg.random_state)
+        n_distinct = min(
+            [len(np.unique(_Xa, axis=0))]
+            + [len(np.unique(_Xa[_rng.choice(n, n // 2, replace=False)], axis=0))
+               for _ in range(5)])
+        max_valid_k = max(2, min(n // 2, n_distinct))
         if cfg.k_min > max_valid_k:
             raise ValueError(f"k_min={cfg.k_min} is too large for n={n} (the most segments the "
                              f"validation can support is {max_valid_k}).")
         if cfg.k_max > max_valid_k:
-            print(f"NOTE: clamping k_max from {cfg.k_max} to {max_valid_k} — with n={n} respondents "
-                  "the resampling-based validation cannot reliably support more segments.")
+            why = ("the resampling-based validation cannot reliably support more segments"
+                   if max_valid_k == n // 2 else
+                   f"there are only {n_distinct} distinct answer patterns in the data, so more "
+                   "groups than that cannot exist")
+            print(f"NOTE: clamping k_max from {cfg.k_max} to {max_valid_k} — with n={n} "
+                  f"respondents {why}.")
             cfg = replace(cfg, k_max=max_valid_k)
 
         # Memory guard: the consensus matrix is n x n. Skip it (with a note) for very large n.
