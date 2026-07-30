@@ -38,6 +38,14 @@ _CONFIG_FILE = _CONFIG_DIR / "config.json"
 # Opus 5). Generous so a rich first interpretation never truncates; streaming avoids timeouts.
 _MAX_TOKENS = 6000
 
+# Opus 5's safety classifiers can decline a request outright — the call succeeds, but comes back
+# with stop_reason "refusal" and no answer. Segment reports are dry marketing statistics, so this
+# should be vanishingly rare, but a false positive would look to the user like the tool is broken.
+# Server-side fallbacks re-run the declined request on another model inside the same call, routed
+# by refusal category, so the user gets an answer instead of an apology. "default" lets Anthropic
+# pick the substitute rather than pinning a model we would then have to maintain.
+_FALLBACK_BETA = "server-side-fallback-2026-07-01"
+
 SYSTEM_PROMPT = (
     "You are a segmentation strategist embedded with a marketing, business-development, or growth "
     "team. You are handed the AGGREGATE output of a rigorous customer-segmentation study: segment "
@@ -239,16 +247,31 @@ def chat_once(history: "list | None", report_markdown: str, question: "str | Non
     # guidance. Adaptive thinking (on by default on Opus 5) with medium effort is a good
     # quality/latency balance for an interpretation chat. If an older installed SDK does not accept
     # those tuning kwargs, fall back to a plain request so the chat still works.
+    # Best request first, then progressively plainer ones. Each rung drops a capability that an
+    # older SDK or an account without the beta might reject, so the chat still works everywhere
+    # rather than failing for anyone not on the newest setup.
+    _tuning = {"thinking": {"type": "adaptive"}, "output_config": {"effort": "medium"}}
+    attempts = (
+        ("beta", {**_tuning, "betas": [_FALLBACK_BETA], "fallbacks": "default"}),
+        ("plain", _tuning),
+        ("plain", {}),
+    )
     final = None
-    for extra in ({"thinking": {"type": "adaptive"}, "output_config": {"effort": "medium"}}, {}):
+    for endpoint, extra in attempts:
         try:
-            with client.messages.stream(model=model, max_tokens=_MAX_TOKENS,
-                                        system=SYSTEM_PROMPT, messages=messages, **extra) as stream:
+            api = client.beta.messages if endpoint == "beta" else client.messages
+            with api.stream(model=model, max_tokens=_MAX_TOKENS,
+                            system=SYSTEM_PROMPT, messages=messages, **extra) as stream:
                 final = stream.get_final_message()
             break
-        except TypeError:
+        except (TypeError, AttributeError):
             final = None
             continue          # this SDK version does not know these kwargs; retry without them
+        except anthropic.BadRequestError:
+            # Most likely this account is not enabled for the fallbacks beta. That is a reason to
+            # ask for less, not to break the feature — drop to the next rung.
+            final = None
+            continue
         except anthropic.AuthenticationError:
             raise AIError("Your Anthropic API key was not accepted. Check it in Settings "
                           "(it should start with 'sk-ant-').", kind="auth")

@@ -1103,11 +1103,22 @@ def test_ai_request_is_well_formed_against_a_mock_anthropic_server(monkeypatch):
     assert "Champions" in reply                      # the streamed answer was parsed back out
     assert history[-1]["role"] == "assistant"
     body = captured["body"]
-    assert captured["path"].endswith("/v1/messages")
+    assert captured["path"].split("?")[0].endswith("/v1/messages")
     assert body["model"] == "claude-opus-5"
     assert body["stream"] is True                    # streaming, so long answers don't time out
     assert body["max_tokens"] >= 2000
     assert "segmentation strategist" in body["system"]
+    # Opus 5 rejects these outright (400) — a regression here breaks every chat, silently in
+    # dev if the reviewer has no key, so pin their absence rather than trusting review.
+    for banned in ("temperature", "top_p", "top_k", "budget_tokens"):
+        assert banned not in body, f"{banned} is rejected by Opus 5"
+    assert body["thinking"] == {"type": "adaptive"}
+    assert body["output_config"]["effort"] == "medium"
+    # Safety classifiers can decline a request; fallbacks turn that into an answer rather than
+    # an apology. "default" lets Anthropic route by refusal category instead of us pinning a
+    # model we would have to maintain.
+    assert body["fallbacks"] == "default"
+    assert "beta=true" in captured["path"]            # fallbacks require the beta endpoint
     sent = body["messages"][0]["content"]
     assert "Segment 1 is 41% of students" in sent    # the aggregate report really reaches Claude
     assert body["messages"][0]["role"] == "user"
@@ -1520,3 +1531,56 @@ def test_the_ai_digest_contains_no_individual_respondent_data():
     sent = ai.build_messages(payload, None, None)[0]["content"]
     assert not [x for x in ids if x in sent]
     assert not [c for c in comments if c in sent]
+
+
+def test_ai_falls_back_gracefully_when_the_best_request_is_unavailable(monkeypatch):
+    """The chat asks for the best request shape first, then degrades rather than failing.
+
+    The top rung uses the beta endpoint for server-side refusal fallbacks. Not every account is
+    enabled for that beta and not every installed SDK knows the parameter — and in both cases the
+    failure arrives as a plain 400 or a TypeError, which would otherwise surface to a marketing
+    user as "Claude could not be reached". Each rung must therefore drop a capability and retry,
+    so the feature works everywhere instead of only on the newest setup.
+    """
+    import anthropic as _real
+
+    class _Blk:
+        type, text = "text", "Target Segment 1 first."
+
+    class _Msg:
+        stop_reason, content = "end_turn", [_Blk()]
+
+    class _Stream:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get_final_message(self): return _Msg()
+
+    def run(beta_failure):
+        tried = []
+
+        def endpoint(name):
+            def stream(**kw):
+                tried.append(name)
+                if name == "beta":
+                    raise beta_failure
+                return _Stream()
+            return type("E", (), {"stream": staticmethod(stream)})
+
+        client = type("C", (), {"beta": type("B", (), {"messages": endpoint("beta")}),
+                                "messages": endpoint("plain")})
+        monkeypatch.setattr(_real, "Anthropic", lambda api_key=None: client)
+        monkeypatch.setattr(ai, "have_sdk", lambda: True)
+        text, _ = ai.chat_once("REPORT", None, None, api_key="sk-ant-test-not-real")
+        return text, tried
+
+    http_400 = _real.BadRequestError(
+        "beta not enabled",
+        response=type("R", (), {"status_code": 400, "headers": {}, "request": None})(),
+        body=None)
+
+    for failure in (http_400,                                  # account lacks the beta
+                    TypeError("unexpected keyword 'fallbacks'"),  # older SDK, unknown kwarg
+                    AttributeError("no attribute 'beta'")):       # older SDK, no beta namespace
+        text, tried = run(failure)
+        assert "Target Segment 1" in text, f"chat broke on {type(failure).__name__}"
+        assert tried[0] == "beta" and "plain" in tried, tried
