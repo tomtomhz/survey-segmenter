@@ -2444,16 +2444,18 @@ def run_analysis(data, cfg=None, force_items=None):
     # Lift the confidence light out of the prose so the UI can show it as a state, not a sentence:
     # how much to trust the answer is the first thing a reader needs, not a line buried mid-report.
     m = re.search(r"\*\*Confidence: .{0,3} (High|Moderate|Low)\.\*\*", seg.report_markdown)
+    _chart_errors = []          # this analysis's own; the server runs several at once
     return {"title": title, "method": method,
             "report_html": notes_html + _markdown_to_html(seg.report_markdown),
             "digest": notes_md + "\n" + seg.report_markdown,
             "files": files, "n_people": int(len(seg.assignments)),
             "k": int(seg.recommended_k), "columns": roles,
-            "charts": build_charts(seg, method),
+            "charts": build_charts(seg, method, errors=_chart_errors),
             # Why any chart is missing, so a packaged build that cannot draw says so instead of
             # quietly showing nothing. Empty on a healthy run, and only ever carries exception
-            # text from the drawing layer — never anything from the respondent data.
-            "chart_errors": list(_charts.last_errors),
+            # text from the drawing layer — never anything from the respondent data. The list is
+            # created per analysis, so two people running at once cannot see each other's.
+            "chart_errors": _chart_errors,
             "confidence": (m.group(1).lower() if m else "unknown")}
 
 

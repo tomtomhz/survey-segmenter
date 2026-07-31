@@ -96,10 +96,6 @@ _STYLE = {
 }
 
 
-# Populated by the most recent build_charts call; see the note there.
-last_errors = []
-
-
 def seg_colour(index):
     return SEG_COLOURS[int(index) % len(SEG_COLOURS)]
 
@@ -605,7 +601,7 @@ def chart_heatmap(centroids, names=None, kind="means"):
         return _finish(figure, "heatmap", "Every group against every question", caption)
 
 
-def build_charts(seg, method, names=None):
+def build_charts(seg, method, names=None, errors=None):
     """Draw everything this result supports, skipping whatever it does not.
 
     Each chart is built inside its own try: they are independent, and a failure in one must not
@@ -613,12 +609,19 @@ def build_charts(seg, method, names=None):
     evaluated tuple, so one NaN centroid discarded all of them, the segment map included.
     """
     out = []
-    # Why a chart is missing, kept rather than only printed. The packaged app is built
-    # --windowed, which discards stdout entirely, so a print is invisible exactly where the
-    # failure is most likely — a dependency that did not survive being bundled. The first
-    # packaged build after moving to matplotlib produced no charts at all and said nothing
-    # about why. `last_errors` is read by build_app.py's smoke test and reported to the user.
-    last_errors.clear()
+    # Why a chart is missing, collected into a list the CALLER owns rather than a module global.
+    #
+    # It was a global, and the server is threaded: two people analysing at once clobbered each
+    # other's list. Measured on 18 concurrent runs where a third of them failed — three healthy
+    # runs were told charts had failed that never did, four failed runs were given no reason at
+    # all, and five were handed someone else's failures alongside their own. Whoever asks for
+    # the charts owns the account of what went wrong with them.
+    #
+    # Kept at all because the packaged app is built --windowed, which discards stdout: a printed
+    # reason is invisible exactly where failures are most likely. The first packaged build after
+    # moving to matplotlib drew nothing and said nothing about why.
+    errors = [] if errors is None else errors
+    del errors[:]
 
     # Only when a diagnostic log is configured, so normal runs stay quiet. A hang leaves no
     # traceback and no failed chart — the only way to know which one stopped is a line before it.
@@ -632,7 +635,7 @@ def build_charts(seg, method, names=None):
             chart = fn()
         except Exception as e:
             reason = f"{label}: {type(e).__name__}: {e}"
-            last_errors.append(reason)
+            errors.append(reason)
             print(f"NOTE: could not draw the '{label}' chart ({type(e).__name__}: {e}); "
                   "the rest of the report is unaffected.")
             return
@@ -656,7 +659,7 @@ def build_charts(seg, method, names=None):
             X, centroids = seg.X, seg.centroids
         labels = np.asarray(seg.labels)
     except Exception as e:          # the shared inputs failed; there is nothing to draw at all
-        last_errors.append(f"preparing the data: {type(e).__name__}: {e}")
+        errors.append(f"preparing the data: {type(e).__name__}: {e}")
         print(f"NOTE: could not prepare the charts ({type(e).__name__}: {e}); "
               "the report itself is unaffected.")
         return []

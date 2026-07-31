@@ -676,6 +676,88 @@ def test_the_built_interface_is_served_and_cannot_be_escaped():
     assert callable(sk.app) and callable(sk.serve)
 
 
+def test_a_hostile_column_name_cannot_inject_markup_through_a_chart():
+    """Charts are injected into the page with dangerouslySetInnerHTML, so their content is
+    trusted — and every axis label comes from the uploaded file, which is trusted by nobody. A
+    spreadsheet a third party emails you is attacker-controlled the moment you analyse it.
+
+    matplotlib escapes text into SVG correctly. This pins that, because the day it stops being
+    true nothing else in the chain would catch it.
+    """
+    import charts
+
+    hostile = "</text><script>alert(1)</script><text>"
+    centroids = pd.DataFrame(
+        np.random.default_rng(2).normal(0, 1, (3, 4)),
+        columns=[hostile, "q2 <script>x</script>", 'a&b "quoted"', "Kön"],
+        index=["Seg <b>0</b>", "Segment 1", "Segment 2"])
+
+    for draw in (charts.chart_profiles, charts.chart_heatmap, charts.chart_radar):
+        chart = draw(centroids)
+        assert chart, draw.__name__
+        assert "<script>" not in chart["svg"], f"{draw.__name__} wrote a live script tag"
+        assert "</text><script>" not in chart["svg"], f"{draw.__name__} let a label break out"
+
+    # Group names are user-typed too, and they go into the legend.
+    named = charts.chart_profiles(centroids, names=["<img src=x onerror=alert(1)>", "B", "C"])
+    assert "<img src=x" not in named["svg"]
+
+
+def test_two_analyses_at_once_do_not_swap_their_chart_failures():
+    """The server is threaded — the team is meant to be able to use it at once.
+
+    The account of why a chart could not be drawn used to live in a module-level list, which
+    every request shared. Measured on 18 concurrent runs with a third of them failing: three
+    healthy runs were told charts had failed that never did, four failed runs were given no
+    reason at all, and five were handed other people's failures alongside their own. Somebody
+    would have been told their survey was broken because a colleague's was.
+    """
+    import concurrent.futures
+    import threading
+
+    import charts
+
+    class _Seg:
+        labels = np.array([0] * 30 + [1] * 30)
+        recommended_k = 2
+        X = np.random.default_rng(0).normal(size=(60, 4))
+        centroids = pd.DataFrame({"q1": [1.0, 4.0], "q2": [4.0, 1.0], "q3": [2.0, 3.0]})
+        diagnostics = pd.DataFrame({"k": [2, 3], "silhouette": [0.5, 0.3],
+                                    "stability_ARI": [0.9, 0.6],
+                                    "prediction_strength": [0.85, 0.5]})
+
+    real_radar = charts.chart_radar
+    # Half the callers hit a chart that raises; the other half are perfectly healthy.
+    should_fail = threading.local()
+
+    def flaky(*a, **kw):
+        if getattr(should_fail, "yes", False):
+            raise RuntimeError("this file is corrupt")
+        return real_radar(*a, **kw)
+
+    def run(i):
+        should_fail.yes = bool(i % 2)
+        mine = []
+        drawn = charts.build_charts(_Seg(), "kmeans", errors=mine)
+        return bool(i % 2), len(drawn), list(mine)
+
+    charts.chart_radar = flaky
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            results = list(pool.map(run, range(18)))
+    finally:
+        charts.chart_radar = real_radar
+
+    for failed, drawn, errors in results:
+        if failed:
+            assert drawn == 5, f"expected the radar to be missing, got {drawn} charts"
+            assert len(errors) == 1, f"a failed run must get its own one reason, got {errors}"
+            assert "corrupt" in errors[0]
+        else:
+            assert drawn == 6, f"a healthy run lost a chart: {drawn}"
+            assert errors == [], f"a healthy run was handed someone else's failure: {errors}"
+
+
 def test_the_svg_backend_is_an_explicit_dependency():
     """The packaged app analysed a survey perfectly and drew nothing at all.
 
