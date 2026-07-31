@@ -22,6 +22,8 @@ lets the interpretation be based on the same picture the reader is looking at.
 """
 import base64
 import io
+import os
+import time
 
 import numpy as np
 import pandas as pd
@@ -614,7 +616,14 @@ def build_charts(seg, method, names=None):
     # about why. `last_errors` is read by build_app.py's smoke test and reported to the user.
     last_errors.clear()
 
+    # Only when a diagnostic log is configured, so normal runs stay quiet. A hang leaves no
+    # traceback and no failed chart — the only way to know which one stopped is a line before it.
+    trace = bool(os.environ.get("SEG_LOG"))
+
     def attempt(label, fn):
+        started = time.monotonic()
+        if trace:
+            print(f"chart: starting {label}")
         try:
             chart = fn()
         except Exception as e:
@@ -623,6 +632,8 @@ def build_charts(seg, method, names=None):
             print(f"NOTE: could not draw the '{label}' chart ({type(e).__name__}: {e}); "
                   "the rest of the report is unaffected.")
             return
+        if trace:
+            print(f"chart: {label} took {time.monotonic() - started:.1f}s")
         if chart:
             out.append(chart)
 

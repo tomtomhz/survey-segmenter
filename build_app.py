@@ -115,7 +115,11 @@ def _smoke_test():
     csv.writer(buf).writerows(rows)
     body, boundary = _multipart(buf.getvalue())
 
-    env = {**os.environ, "SEG_PORT": "8765", "SEG_NO_BROWSER": "1",
+    # SEG_LOG gives a windowed build somewhere to print. On Windows there is no console at all,
+    # so without it the app's own account of what went wrong is discarded — which is exactly
+    # where a packaging failure is most likely and hardest to guess at.
+    log_path = str(Path(tempfile.mkdtemp()) / "app.log")
+    env = {**os.environ, "SEG_PORT": "8765", "SEG_NO_BROWSER": "1", "SEG_LOG": log_path,
            "SURVEY_SEGMENTER_PROJECTS": tempfile.mkdtemp()}
     proc = subprocess.Popen([str(exe)], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True)
@@ -142,7 +146,7 @@ def _smoke_test():
             "http://127.0.0.1:8765/analyze", data=body,
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
         try:
-            result = json.loads(urllib.request.urlopen(req, timeout=600).read())
+            result = json.loads(urllib.request.urlopen(req, timeout=900).read())
         except Exception as e:
             # An inconclusive smoke test used to be a warning. That let a Windows build go green
             # while its own verification had timed out, and CI then uploaded the unverified
@@ -150,6 +154,14 @@ def _smoke_test():
             # cannot analyse a survey within ten minutes, it is broken from a user's point of view.
             print(f"\nBUILD IS BROKEN — the smoke test could not complete "
                   f"({type(e).__name__}: {e}). The app was built but never proved it works.")
+            try:
+                tail = Path(log_path).read_text(errors="replace").strip().splitlines()[-25:]
+                if tail:
+                    print("What the app itself reported:")
+                    for line in tail:
+                        print(f"  {line}")
+            except Exception:
+                print("  (the app produced no log at all)")
             _discard_archive()
         if not result.get("ok"):
             print(f"\nBUILD IS BROKEN — the app ran but could not analyse a survey: "

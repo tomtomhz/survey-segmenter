@@ -129,6 +129,21 @@ def _use_utf8_for_output():
     `errors="replace"` as well as UTF-8: a console genuinely stuck on a legacy code page should
     print a question mark, never abort the analysis.
     """
+    # A windowed Windows build has no console at all: PyInstaller leaves sys.stdout and
+    # sys.stderr as None, so every print() in this module would raise AttributeError. Give them
+    # somewhere to go — a file when SEG_LOG is set, which is how the packaged app is diagnosed,
+    # and the bit bucket otherwise.
+    if sys.stdout is None or sys.stderr is None:
+        target = os.environ.get("SEG_LOG")
+        try:
+            sink = open(target, "a", buffering=1) if target else open(os.devnull, "w")
+        except Exception:
+            sink = io.StringIO()
+        if sys.stdout is None:
+            sys.stdout = sink
+        if sys.stderr is None:
+            sys.stderr = sink
+
     for stream in (sys.stdout, sys.stderr):
         try:
             # line_buffering is not optional here. reconfigure() rebuilds the text wrapper and
