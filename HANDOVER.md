@@ -3,7 +3,7 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-07-31 · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ 108 Python + 38 frontend tests, CI green
+**Last updated:** 2026-07-31 · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ 109 Python + 50 frontend tests, CI green
 
 ---
 
@@ -13,7 +13,7 @@ this says where it stands, what was decided and why, and what to do next.
 |---|---|
 | Repo | `github.com/tomtomhz/survey-segmenter` — **private**, MIT, owner `tomtomhz` |
 | CI | Python 3.9 / 3.11 / 3.12 + a clean-install job, green |
-| Tests | 108 Python (`pytest`) + 38 frontend (`cd frontend && npm test`) |
+| Tests | 109 Python (`pytest`) + 50 frontend (`cd frontend && npm test`) |
 | Shipped app | macOS `.app`, ~76 MB, attached to the **v1.0.0 Release** — never in git history |
 | Local path | `~/Desktop/bd-gtm-review-team 3/tools/survey-segmenter/` |
 

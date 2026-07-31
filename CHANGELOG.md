@@ -17,6 +17,30 @@ the version is set in `pyproject.toml` and stamped into every report footer.
   are refused before upload, that a dropped folder is explained, and that the result blocks behave.
 - The design is unchanged — it was not the problem.
 
+### Fixed — audit
+
+- **Any path beginning `/quit` shut the app down.** Routes were matched by prefix, so
+  `/quitting-time` reached the shutdown handler and `/projects-of-mine` was answered with the
+  project list. `/project` only avoided swallowing `/projects` because of the order the branches
+  happened to be written in. Routes are matched exactly now.
+- **The HTML shell was cached for a year** whenever it was reached by anything other than exactly
+  `/` or `/index.html` — including `/?utm_source=x` and every single-page fallback route. A stale
+  shell loads asset hashes that no longer exist: a blank page that survives reloading, which is
+  what `no-store` is there to prevent.
+- **Error text from the server was injected as markup** on the chat failure path. The raw
+  exception can carry text out of the uploaded file, so a column heading is attacker-controlled
+  the moment someone analyses a spreadsheet a third party sent them.
+- **Any render error blanked the whole application.** React unmounts the entire tree when a
+  component throws. There is now a boundary around the app and one around each result card.
+- **The settings form accepted keys it would then ignore** when `ANTHROPIC_API_KEY` was set.
+- **The thread yanked the reader to the bottom** on every new message, mid-report.
+- **Deleting a project was one stray click away**, with no undo and the original upload going
+  with it. It arms, then asks.
+- **The settings dialog ignored Escape** and did not announce itself as a dialog; two controls
+  were spans with `role="button"` — focusable but not operable from the keyboard.
+- **The busy guard is a ref rather than state**, and the global `unhandledrejection`/`error`
+  safety net from the previous interface is back, so a stuck spinner cannot strand anyone.
+
 ### Fixed
 
 - **The opening Claude interpretation never ran.** The handler closed over `sessionId` from before
