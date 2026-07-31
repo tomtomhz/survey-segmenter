@@ -786,7 +786,10 @@ def test_a_messy_maxdiff_export_is_read_without_losing_people_quietly():
                            worst[quitter][real][None], design[quitter][real][None] >= 0)
     with_padding = md._loglik(beta, design[quitter][None], best[quitter][None],
                               worst[quitter][None], design[quitter][None] >= 0)
-    assert np.isclose(float(only_real), float(with_padding)), (
+    # Compared as arrays: _loglik returns one value per respondent, and NumPy 2 refuses to
+    # convert even a one-element array with float(). That passed here on an older NumPy and
+    # failed on CI, which is exactly what the version matrix is for.
+    assert np.allclose(only_real, with_padding), (
         "abandoned sets are being scored as if they were answers")
 
 
