@@ -121,13 +121,25 @@ def _smoke_test():
     log_path = str(Path(tempfile.mkdtemp()) / "app.log")
     env = {**os.environ, "SEG_PORT": "8765", "SEG_NO_BROWSER": "1", "SEG_LOG": log_path,
            "SURVEY_SEGMENTER_PROJECTS": tempfile.mkdtemp()}
-    proc = subprocess.Popen([str(exe)], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    # Output goes to a FILE, not a pipe. A pipe nobody reads has a fixed buffer — a few tens of
+    # kilobytes on Windows — and the moment it fills, the app blocks forever on its next print.
+    # That is a deadlock in the test harness masquerading as a hung application, and it is what
+    # the Windows smoke test was actually dying of: enough chatter (matplotlib's font-cache
+    # notice, the per-chart trace) to fill the buffer part-way through drawing.
+    log_file = open(log_path, "w+", buffering=1)
+    proc = subprocess.Popen([str(exe)], env=env, stdout=log_file, stderr=subprocess.STDOUT,
                             text=True)
+
+    def app_output():
+        try:
+            return Path(log_path).read_text(errors="replace")
+        except Exception:
+            return ""
     try:
         for _ in range(60):
             if proc.poll() is not None:
                 print("\nBUILD IS BROKEN — the app exited on launch:\n"
-                      + ((proc.stdout.read() or "").strip()[-1500:] or
+                      + (app_output().strip()[-1500:] or
                          "(it produced no output — a windowed macOS build discards stdout, so "
                          "check the signature with: codesign --verify --deep --strict "
                          "'dist/Survey Segmenter.app')"))
@@ -155,7 +167,7 @@ def _smoke_test():
             print(f"\nBUILD IS BROKEN — the smoke test could not complete "
                   f"({type(e).__name__}: {e}). The app was built but never proved it works.")
             try:
-                tail = Path(log_path).read_text(errors="replace").strip().splitlines()[-25:]
+                tail = app_output().strip().splitlines()[-25:]
                 if tail:
                     print("What the app itself reported:")
                     for line in tail:

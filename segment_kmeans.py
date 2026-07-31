@@ -133,15 +133,18 @@ def _use_utf8_for_output():
     # sys.stderr as None, so every print() in this module would raise AttributeError. Give them
     # somewhere to go — a file when SEG_LOG is set, which is how the packaged app is diagnosed,
     # and the bit bucket otherwise.
-    if sys.stdout is None or sys.stderr is None:
-        target = os.environ.get("SEG_LOG")
+    target = os.environ.get("SEG_LOG")
+    if target or sys.stdout is None or sys.stderr is None:
         try:
             sink = open(target, "a", buffering=1) if target else open(os.devnull, "w")
         except Exception:
             sink = io.StringIO()
-        if sys.stdout is None:
+        # SEG_LOG redirects unconditionally, not only when the streams are missing: the whole
+        # point is to get the app's own account of itself out of a build machine, and on Windows
+        # the streams may well exist while going somewhere nobody can read.
+        if target or sys.stdout is None:
             sys.stdout = sink
-        if sys.stderr is None:
+        if target or sys.stderr is None:
             sys.stderr = sink
 
     for stream in (sys.stdout, sys.stderr):
