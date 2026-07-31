@@ -12,11 +12,14 @@ export function NamePanel({
   busy,
   setBusy,
   onNeedsKey,
+  onSaved,
 }: {
   result: Analysis
   busy: boolean
   setBusy: (busy: boolean) => void
   onNeedsKey: () => void
+  /** Hands the refreshed file list back to the card, which owns the download links. */
+  onSaved: (downloads: string[]) => void
 }) {
   const [names, setNames] = useState<string[]>(() =>
     Array.from({ length: result.k }, (_, i) => result.names?.[i] ?? ''),
@@ -38,6 +41,7 @@ export function NamePanel({
       return
     }
     setNames((current) => current.map((name, i) => reply.names[i] || name))
+    if (reply.downloads) onSaved(reply.downloads)
     setState({ kind: 'saved' })
   }
 
@@ -104,24 +108,12 @@ export function NamePanel({
             </span>
           )}
           {state.kind === 'saved' && (
+            // No links here any more. This used to print two of its own because the download bar
+            // above kept showing the file list from the original analysis; now that list updates,
+            // so a second copy would just be somewhere else for the two to disagree.
             <>
-              <b>Saved.</b> The names are now in the downloads.
-              <div className="chips" style={{ margin: '8px 0 0' }}>
-                <a
-                  className="chip"
-                  href={api.downloadUrl(result.session_id, 'group_names.csv')}
-                  download
-                >
-                  Group names (CSV)
-                </a>
-                <a
-                  className="chip"
-                  href={api.downloadUrl(result.session_id, 'segment_assignments.csv')}
-                  download
-                >
-                  Who is in which group (CSV)
-                </a>
-              </div>
+              <b>Saved.</b> Your names are in the download links above, including a new
+              <strong> Your group names (CSV)</strong>.
             </>
           )}
         </div>

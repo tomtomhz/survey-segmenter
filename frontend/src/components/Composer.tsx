@@ -80,7 +80,10 @@ export function Composer({
           placeholder={hasSession ? 'Ask about your segments…' : 'Attach a survey file to begin'}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
+            // `isComposing` guards input methods that use Enter to accept a candidate — Japanese,
+            // Chinese, Korean, and the accent composers on several European layouts. Without it,
+            // confirming a character sends the half-finished message instead.
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault()
               send()
             }

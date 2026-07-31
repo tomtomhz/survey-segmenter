@@ -54,7 +54,9 @@ export function Thread({
 
   return (
     <div className="thread" ref={thread}>
-      <div className="wrap">
+      {/* Replies arrive without any focus change, so a screen reader would otherwise never be
+          told the answer had come back. Polite: it waits for the reader to finish a sentence. */}
+      <div className="wrap" role="log" aria-live="polite" aria-relevant="additions">
         {messages.map((message) => {
           if (message.kind === 'you') {
             return (

@@ -9,10 +9,13 @@ import { DOWNLOAD_LABEL } from '../lib/labels'
  */
 export function DownloadBar({
   result,
+  downloads,
   busy,
   setBusy,
 }: {
   result: Analysis
+  /** Passed in rather than read off `result`: naming the groups adds a file to it. */
+  downloads: string[]
   busy: boolean
   setBusy: (busy: boolean) => void
 }) {
@@ -21,7 +24,7 @@ export function DownloadBar({
   const [scoring, setScoring] = useState(false)
   const picker = useRef<HTMLInputElement>(null)
 
-  if (result.downloads.length === 0) return null
+  if (downloads.length === 0) return null
 
   async function score(file: File) {
     setScoring(true)
@@ -40,7 +43,7 @@ export function DownloadBar({
       <b>Take it away.</b> Use these to act on the groups — load them into your CRM, an ad
       audience, or a mail tool.
       <div className="chips" style={{ margin: '10px 0 0' }}>
-        {result.downloads.map((file) => (
+        {downloads.map((file) => (
           <a
             key={file}
             className="chip"

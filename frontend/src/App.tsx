@@ -8,6 +8,7 @@ import { SettingsModal } from './components/SettingsModal'
 import { Sidebar } from './components/Sidebar'
 import { Thread } from './components/Thread'
 import { useDropTarget } from './hooks/useDropTarget'
+import { usePrintExpansion } from './hooks/usePrintExpansion'
 import { droppedADirectory, fileProblem } from './lib/upload'
 import { messageId, replace, withoutSuggestions, type Message } from './lib/thread'
 
@@ -42,6 +43,10 @@ export function App() {
   const running = useRef(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [regroupError, setRegroupError] = useState<string | null>(null)
+  // Where focus goes when the settings dialog closes: back to whatever opened it.
+  const returnFocusTo = useRef<HTMLElement | null>(null)
+
+  usePrintExpansion()
 
   const append = useCallback((message: Message) => {
     setMessages((current) => [...current, message])
@@ -241,6 +246,12 @@ export function App() {
     [sessionId],
   )
 
+  /** Remember what had focus, so closing the dialog can hand it back. */
+  const openSettings = useCallback(() => {
+    returnFocusTo.current = document.activeElement as HTMLElement | null
+    setSettingsOpen(true)
+  }, [])
+
   const startNew = useCallback(() => {
     if (busy) return
     setSessionId(null)
@@ -268,7 +279,7 @@ export function App() {
 
   return (
     <Boundary fallback={(error) => <AppFailure error={error} />}>
-      <Header onNew={startNew} onSettings={() => setSettingsOpen(true)} />
+      <Header onNew={startNew} onSettings={() => openSettings()} />
       <div className="body">
         <Sidebar
           projects={projects}
@@ -284,7 +295,7 @@ export function App() {
             setBusy={setWorking}
             regroupError={regroupError}
             onRegroup={(items) => void regroup(items)}
-            onNeedsKey={() => setSettingsOpen(true)}
+            onNeedsKey={() => openSettings()}
             onAsk={(question) => void ask(question, false)}
           />
           <Composer
@@ -298,7 +309,12 @@ export function App() {
       </div>
       <SettingsModal
         open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          setSettingsOpen(false)
+          // Dropping focus to the top of the document after a dialog closes strands anyone
+          // navigating by keyboard, who then has to tab back through the whole page.
+          returnFocusTo.current?.focus()
+        }}
         onConfigured={(configured) => {
           if (configured && sessionId) void ask(null, true)
         }}

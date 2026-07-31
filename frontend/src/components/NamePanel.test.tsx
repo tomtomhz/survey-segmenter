@@ -7,7 +7,7 @@ import { analysis } from '../test/fixtures'
 
 afterEach(() => vi.restoreAllMocks())
 
-const props = { busy: false, setBusy: () => {}, onNeedsKey: () => {} }
+const props = { busy: false, setBusy: () => {}, onNeedsKey: () => {}, onSaved: () => {} }
 
 describe('naming the groups', () => {
   it('offers one box per group, pre-filled with names already saved', () => {
@@ -32,8 +32,10 @@ describe('naming the groups', () => {
     const user = userEvent.setup()
     const save = vi.spyOn(api, 'saveNames').mockResolvedValue({
       ok: true, names: ['Sceptics', 'Fans', 'Lurkers'],
+      downloads: ['segment_assignments.csv', 'group_profiles.csv', 'group_names.csv'],
     })
-    render(<NamePanel result={analysis()} {...props} />)
+    const onSaved = vi.fn()
+    render(<NamePanel result={analysis()} {...props} onSaved={onSaved} />)
 
     const boxes = screen.getAllByRole('textbox')
     await user.type(boxes[0], '  Sceptics  ')
@@ -42,15 +44,22 @@ describe('naming the groups', () => {
     await user.click(screen.getByRole('button', { name: 'Save these names' }))
 
     expect(save).toHaveBeenCalledWith('sess-1', ['Sceptics', 'Fans', 'Lurkers'])
-    expect(await screen.findByText(/The names are now in the downloads/)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Group names/ }))
-      .toHaveAttribute('href', expect.stringContaining('group_names.csv'))
+    expect(await screen.findByText(/Your names are in the download links above/))
+      .toBeInTheDocument()
+    // The panel no longer prints links of its own — it hands the refreshed list to the card,
+    // so there is one file list rather than two that can disagree.
+    expect(onSaved).toHaveBeenCalledWith(
+      ['segment_assignments.csv', 'group_profiles.csv', 'group_names.csv'],
+    )
+    expect(screen.queryByRole('link')).toBeNull()
   })
 
   it('fills the boxes with what Claude suggested', async () => {
     const user = userEvent.setup()
     vi.spyOn(api, 'suggestNames').mockResolvedValue({
-      ok: true, names: ['Privacy-First Lurkers', 'Social Sharers', 'Quiet Readers'],
+      ok: true,
+      names: ['Privacy-First Lurkers', 'Social Sharers', 'Quiet Readers'],
+      downloads: ['segment_assignments.csv', 'group_names.csv'],
     })
     render(<NamePanel result={analysis()} {...props} />)
 

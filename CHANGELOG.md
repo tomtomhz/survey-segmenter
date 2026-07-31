@@ -17,6 +17,29 @@ the version is set in `pyproject.toml` and stamped into every report footer.
   are refused before upload, that a dropped folder is explained, and that the result blocks behave.
 - The design is unchanged — it was not the problem.
 
+### Fixed — audit, second pass
+
+- **Save PDF was dropping the full statistical report.** The report, the group names and the
+  column picker are collapsed `<details>`, and a browser does not paint the contents of one — so
+  the print rule `.card[open] .rep` only ever applied to panels that were already open, and the
+  PDF someone circulated was missing the statistics it was supposed to carry. Every panel is now
+  opened before the snapshot and put back exactly as the reader had it.
+- **Enter sent half-finished words** for anyone using an input method that uses Enter to accept a
+  candidate — Japanese, Chinese, Korean, and several European accent composers.
+- **A request that never came back left a spinner nobody could cancel.** There is now a fifteen
+  minute ceiling — generous, because clustering 17,000 people legitimately takes about a minute —
+  after which it becomes an error message like any other.
+- **The chart tabs claimed `role="tablist"` without behaving like one.** Arrow keys, Home and End
+  now move between the six charts, with a roving tabindex and each panel tied to its tab; before,
+  the only way through by keyboard was Tab, which walked out of the group entirely.
+- **Naming the groups left the download links stale.** The server has always returned the
+  refreshed file list, and the interface ignored it — the name panel compensated by printing two
+  hardcoded links of its own. There is one file list now, and it updates.
+- **Closing the settings dialog dropped focus to the top of the document**, stranding anyone
+  navigating by keyboard.
+- **The conversation was not announced.** Replies arrive with no focus change, so a screen reader
+  was never told the answer had come back; the thread is a polite live region now.
+
 ### Fixed — audit
 
 - **Any path beginning `/quit` shut the app down.** Routes were matched by prefix, so

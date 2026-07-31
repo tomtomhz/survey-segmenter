@@ -108,6 +108,9 @@ export interface ChatReply {
 export interface NamesResult {
   ok: true
   names: string[]
+  /** The refreshed file list — naming the groups creates group_names.csv and rewrites the
+      assignments. The server has always sent this; ignoring it left the download links stale. */
+  downloads: string[]
 }
 
 /** Every endpoint either succeeds with its own shape or fails with `Failure`. */

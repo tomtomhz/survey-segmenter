@@ -14,17 +14,35 @@ import type {
 const UNREACHABLE =
   'Could not reach the app. It may have been closed — reopen Survey Segmenter and try again.'
 const UNPARSEABLE = 'The app sent back something unexpected. Please try again.'
+const TOO_SLOW =
+  'That took too long and was stopped. A very large file can genuinely need a few minutes — '
+  + 'if it keeps happening, try a smaller export, or close and reopen the app.'
+
+/**
+ * How long to wait before giving up. Generous on purpose: clustering 17,000 people with the full
+ * stability suite takes about 45 seconds, and a slower machine with a bigger file can legitimately
+ * take minutes. The ceiling exists only so that a server which has stopped answering altogether
+ * ends as an error message rather than as a spinner nobody can cancel.
+ */
+const CEILING_MS = 15 * 60 * 1000
 
 async function request<T extends { ok: true }>(
   url: string,
   init?: RequestInit,
 ): Promise<Result<T>> {
   let text: string
+  const abort = new AbortController()
+  const timer = setTimeout(() => abort.abort(), CEILING_MS)
   try {
-    const response = await fetch(url, init)
+    const response = await fetch(url, { ...init, signal: abort.signal })
     text = await response.text()
-  } catch {
-    return { ok: false, error: UNREACHABLE }
+  } catch (error) {
+    return {
+      ok: false,
+      error: (error as Error)?.name === 'AbortError' ? TOO_SLOW : UNREACHABLE,
+    }
+  } finally {
+    clearTimeout(timer)
   }
   try {
     return JSON.parse(text) as Result<T>
