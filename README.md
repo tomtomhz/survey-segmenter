@@ -13,6 +13,7 @@ files to act on. Everything runs on your own machine — see [PRIVACY.md](PRIVAC
 | **Non-technical users** | Download the app, double-click, drag your file in. [Setup guide](APP_README.md). |
 | **Analysts** | `pip install ".[ai,excel]"` then `segment-kmeans --serve`. |
 | **What is new** | [CHANGELOG.md](CHANGELOG.md) |
+| **Picking this up** | [HANDOVER.md](HANDOVER.md) — current state, decisions, known limits |
 
 ---
 
