@@ -292,6 +292,15 @@ def read_maxdiff(df):
         print(f"NOTE: skipped {dropped} MaxDiff set(s) without exactly one best and one worst.")
 
     usable = [r for r in respondents if per_resp.get(r)]
+    # Losing a respondent entirely is a different matter from losing a set, and has to be said
+    # out loud. Someone who skipped the exercise, or whose every set came back malformed, simply
+    # disappears here — and a study that reports 400 respondents when 380 were analysed has an
+    # inaccurate sample size in the write-up. The count is the only place it can be noticed.
+    lost = len(respondents) - len(usable)
+    if lost:
+        print(f"NOTE: {lost} of {len(respondents)} respondents gave no usable best-worst answers "
+              f"at all and are not in the utilities; {len(usable)} were analysed. Check the "
+              "export if that number is higher than you expect.")
     if len(usable) < 2:
         raise ValueError("_MAXDIFF_TOO_FEW")
     n_sets = max(len(v) for v in per_resp.values())

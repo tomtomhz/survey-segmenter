@@ -11,6 +11,7 @@ A segmentation tool that fails either of those is worse than useless, because it
 import io
 import json
 import re
+import contextlib
 import sys
 import warnings
 from pathlib import Path
@@ -674,6 +675,66 @@ def test_the_built_interface_is_served_and_cannot_be_escaped():
 
     assert "The app has closed" in sk._shutdown_page()
     assert callable(sk.app) and callable(sk.serve)
+
+
+def test_a_messy_maxdiff_export_is_read_without_losing_people_quietly():
+    """Real exports are not tidy, and the ways they are untidy must not change the answer
+    silently. The one that matters most is respondent loss: someone who skipped the exercise
+    disappears from the utilities, and a study that reports 400 respondents when 380 were
+    analysed has the wrong sample size in its write-up. Sets are counted; people are now too.
+    """
+    md = pytest.importorskip("maxdiff")
+    rng = np.random.default_rng(0)
+    items = [f"item_{i}" for i in range(8)]
+
+    def export(n_resp=10, n_sets=8):
+        rows = []
+        for r in range(n_resp):
+            for s in range(n_sets):
+                shown = list(rng.choice(items, 4, replace=False))
+                for i, item in enumerate(shown):
+                    rows.append([f"R{r}", f"R{r}-s{s}", item,
+                                 "best" if i == 0 else "worst" if i == 1 else ""])
+        return pd.DataFrame(rows, columns=["respondent_id", "set", "item", "choice"])
+
+    # Shapes a survey tool really does emit, none of which should raise or drop anybody.
+    for label, frame in [
+        ("upper-cased labels", export().assign(choice=lambda d: d["choice"].str.upper())),
+        ("padded labels", export().replace({"choice": {"best": "  Best "}})),
+        ("numeric item codes",
+         export().assign(item=lambda d: d["item"].str.replace("item_", "").astype(int))),
+    ]:
+        _, _, _, names, resp = md.read_maxdiff(frame)
+        assert len(resp) == 10, f"{label}: lost respondents"
+        assert len(names) == 8, f"{label}: lost items"
+
+    # A respondent who answered nothing is dropped — and said so, with the count.
+    silent = export()
+    silent.loc[silent["respondent_id"].isin(["R0", "R3"]), "choice"] = ""
+    printed = io.StringIO()
+    with contextlib.redirect_stdout(printed):
+        _, _, _, _, resp = md.read_maxdiff(silent)
+    said = printed.getvalue()
+    assert len(resp) == 8
+    assert "2 of 10 respondents" in said, f"respondent loss was not reported: {said!r}"
+
+    # Sets abandoned partway contribute nothing at all — they are padding, not data.
+    ragged = pd.concat([export(n_resp=9, n_sets=8),
+                        export(n_resp=1, n_sets=2).assign(respondent_id="RQ",
+                                                          set=lambda d: "RQ-" + d["set"])])
+    design, best, worst, names, resp = md.read_maxdiff(ragged)
+    quitter = resp.index("RQ")
+    padded = (design[quitter] < 0).all(axis=1)
+    assert padded.sum() > 0, "expected the short respondent to be padded"
+
+    beta = rng.normal(0, 1, (1, len(names)))
+    real = ~padded
+    only_real = md._loglik(beta, design[quitter][real][None], best[quitter][real][None],
+                           worst[quitter][real][None], design[quitter][real][None] >= 0)
+    with_padding = md._loglik(beta, design[quitter][None], best[quitter][None],
+                              worst[quitter][None], design[quitter][None] >= 0)
+    assert np.isclose(float(only_real), float(with_padding)), (
+        "abandoned sets are being scored as if they were answers")
 
 
 def test_a_hostile_column_name_cannot_inject_markup_through_a_chart():
