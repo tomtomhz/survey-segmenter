@@ -1,0 +1,10 @@
+{
+  // What VS Code offers to install when this folder is opened. Kept to the few that this
+  // project actually relies on, so the prompt is worth reading rather than dismissing.
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "oxc.oxc-vscode",
+    "dbaeumer.vscode-eslint"
+  ]
+}

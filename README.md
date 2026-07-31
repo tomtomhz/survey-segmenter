@@ -6,16 +6,30 @@
 
 **Turn a survey export into customer segments you can defend.** It finds the groups, tells you
 how much to trust them, draws the data so you can check the answer yourself, and gives you the
-files to act on. Everything runs on your own machine — see [PRIVACY.md](PRIVACY.md).
+files to act on. Everything runs on your own machine — see [PRIVACY.md](docs/PRIVACY.md).
 
 | | |
 |---|---|
-| **Non-technical users** | Download the app, double-click, drag your file in. [Setup guide](APP_README.md). |
+| **Non-technical users** | Download the app, double-click, drag your file in. [Setup guide](docs/USING-THE-APP.md). |
 | **Analysts** | `pip install ".[ai,excel]"` then `segment-kmeans --serve`. |
 | **What is new** | [CHANGELOG.md](CHANGELOG.md) |
-| **Picking this up** | [HANDOVER.md](HANDOVER.md) — current state, decisions, known limits |
+| **Picking this up** | [HANDOVER.md](docs/HANDOVER.md) — current state, decisions, known limits |
 
 ---
+
+## Where everything is
+
+| | |
+|---|---|
+| `segment_kmeans.py` | The engine: preparation, clustering, validation, report, typing rule, and the local web server |
+| `charts.py` | Drawing only, with matplotlib. **scikit-learn computes, matplotlib draws** — nothing here decides anything about the segmentation |
+| `maxdiff.py` | Hierarchical Bayes scoring for best-worst (MaxDiff) exports |
+| `ai_interpret.py` | The optional Claude layer. Sends the aggregate report and the charts, never a respondent row |
+| `frontend/` | The interface: React + TypeScript, built with Vite |
+| `webui/` | The **compiled** interface that Python serves. Generated — see `webui/README.md` |
+| `tests/` | `pytest` from the repository root |
+| `docs/` | [Using the app](docs/USING-THE-APP.md) · [Handover](docs/HANDOVER.md) · [Privacy](docs/PRIVACY.md) |
+| `run_app.py` / `build_app.py` | Start the app · build and smoke-test the desktop app |
 
 ## The method
 
@@ -36,8 +50,8 @@ The engine is expert-grade, but you do not have to be an expert to use it. See t
 One-time setup (ask a colleague if you have never used a terminal): install Python 3, then, from
 this folder, run `pip install .` once. That installs everything and gives you a `segment-kmeans`
 command you can run from anywhere (add `pip install ".[excel,ai]"` for `.xlsx` files and Claude
-interpretation). If you would rather not install it, `pip install -r requirements.txt`
-also works and you then run it as `python3 segment_kmeans.py`.
+interpretation). If you would rather not install it, `pip install -e .` puts the dependencies in
+place without the command, and you run it as `python3 segment_kmeans.py`.
 
 **The point-and-click way (no terminal after setup) — a Claude-style chat.** Start the built-in
 web app once:
@@ -83,7 +97,7 @@ Read the box at the top of the report: a **green / amber / red confidence light*
 it found, who they are, and what to do next. If you only read one thing, read that box.
 
 **The download-and-double-click way (no Python, no terminal, nothing to install).** There is a
-packaged desktop app for exactly this audience. See `APP_README.md`. Build it with
+packaged desktop app for exactly this audience. See `docs/USING-THE-APP.md`. Build it with
 `python3 build_app.py` (produces `dist/Survey Segmenter.app` on Mac, or a `Survey Segmenter` folder
 with an `.exe` on Windows); zip the result and anyone on the team can download it, double-click, and
 drop a survey file onto the page that opens. It is fully self-contained — recipients need no Python.
@@ -93,7 +107,7 @@ Everything below is for analysts who want to control the method, scaling, valida
 ## Install and run (for analysts)
 
 ```bash
-pip install -r requirements.txt
+pip install .            # or: pip install ".[excel,ai]" for .xlsx files and Claude
 
 python3 segment_kmeans.py utilities.csv --id-col respondent_id --kmin 2 --kmax 8 \
     --scaling range --method kmeans --demographics demos.csv --outdir results
@@ -261,7 +275,7 @@ k-means finds spherical, roughly equal-size clusters. For genuinely elongated, u
 
 The honest remaining boundary is *upstream*: this tool does not design the experimental stimuli — the part of a full Moskowitz/Sawtooth pipeline it still leaves to you.
 
-It does now estimate individual-level utilities from raw MaxDiff choices. Drop a tidy best-worst export (`respondent_id | set | item | choice`) in and it is detected, scored by hierarchical Bayes (`maxdiff.py`), and segmented on the resulting utilities. Measured against known utilities on simulated data, HB recovers individual utilities markedly better than counting (0.76 → 0.92 correlation at strong separation); its effect on the segmentation itself is small but consistent, and neither method rescues genuinely weak structure. **It has not yet been run on real MaxDiff responses** — see `HANDOVER.md` for the full sweep, including where HB does not help.
+It does now estimate individual-level utilities from raw MaxDiff choices. Drop a tidy best-worst export (`respondent_id | set | item | choice`) in and it is detected, scored by hierarchical Bayes (`maxdiff.py`), and segmented on the resulting utilities. Measured against known utilities on simulated data, HB recovers individual utilities markedly better than counting (0.76 → 0.92 correlation at strong separation); its effect on the segmentation itself is small but consistent, and neither method rescues genuinely weak structure. **It has not yet been run on real MaxDiff responses** — see `docs/HANDOVER.md` for the full sweep, including where HB does not help.
 
 ## Versioning, deployment, and licensing
 

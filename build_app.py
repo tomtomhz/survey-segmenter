@@ -267,6 +267,6 @@ _smoke_test()
 
 if sys.platform == "darwin":
     print("\nBuilt. Share 'dist/Survey Segmenter.zip'. On first launch each recipient must approve "
-          "it once:\n  System Settings > Privacy & Security > 'Open Anyway'  (see APP_README.md).")
+          "it once:\n  System Settings > Privacy & Security > 'Open Anyway'  (see docs/USING-THE-APP.md).")
 else:
     print("\nBuilt. The app is in the dist/ folder. Zip it and share it with the team.")

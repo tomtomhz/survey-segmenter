@@ -115,7 +115,7 @@ the version is set in `pyproject.toml` and stamped into every report footer.
 - Measured against known utilities on simulated data, HB recovers *individual* utilities markedly
   better than counting (0.76 → 0.92 correlation at strong separation, 0.67 → 0.84 at moderate).
   Its effect on the segmentation itself is small but consistent. Neither method rescues genuinely
-  weak structure — see `HANDOVER.md`, which reports the full sweep including where HB does not
+  weak structure — see `docs/HANDOVER.md`, which reports the full sweep including where HB does not
   help. No real MaxDiff responses have been through it yet.
 
 ### Charts
@@ -183,7 +183,7 @@ point; it is recorded here so the starting state is documented rather than assum
 
 ### Privacy
 
-- All analysis is local. See [PRIVACY.md](PRIVACY.md).
+- All analysis is local. See [PRIVACY.md](docs/PRIVACY.md).
 - Only an aggregate digest is ever transmitted, and only when an API key is configured. This is
   enforced by a test that fails the build if any respondent identifier or free-text answer
   reaches the payload.

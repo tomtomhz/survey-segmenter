@@ -22,7 +22,6 @@ cd ~/dev/survey-segmenter
 pytest                  # 112 tests, ~95s
 python3 run_app.py      # opens the web app
 python3 build_app.py    # rebuilds + signs + smoke-tests the .app
-./finish-setup.sh       # re-runs the GitHub publish flow
 ```
 
 ## The one thing never verified
