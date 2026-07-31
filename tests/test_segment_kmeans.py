@@ -677,6 +677,59 @@ def test_the_built_interface_is_served_and_cannot_be_escaped():
     assert callable(sk.app) and callable(sk.serve)
 
 
+def test_saving_one_project_from_several_threads_at_once(tmp_path):
+    """The store writes to disk from a threaded server, and one project is saved repeatedly —
+    after the analysis, after every chat reply, after the groups are named. Two of those
+    overlapping is ordinary, not exotic.
+
+    The scratch file used for the atomic rename had a fixed name, so overlapping saves of the
+    same project shared it: the first rename moved it away and the second raised
+    FileNotFoundError straight out of the request handler. The user saw an error and lost the
+    save. It failed within the first few of 60 concurrent attempts.
+    """
+    import concurrent.futures
+
+    store = sk.ProjectStore(tmp_path)
+
+    def save(i):
+        store.save("sess-abc", {"title": f"survey {i}", "k": 3, "n_people": 100 + i,
+                                "report_html": "x" * 40_000}, raw=b"id,q1\n1,2\n")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
+        list(pool.map(save, range(60)))          # raises if any save failed
+
+    for f in tmp_path.glob("*.json"):
+        json.loads(f.read_text())                # every file is complete, not half-written
+    assert list(tmp_path.glob("*.tmp")) == [], "scratch files were left behind"
+    assert store.load("sess-abc") is not None
+    assert len(store.list()) == 1
+
+
+def test_the_project_store_survives_hostile_and_broken_input(tmp_path):
+    """It holds the user's surveys, including the original uploads, and its directory is one the
+    user can open. It has to stay inside itself and keep working when something on disk is not
+    what it expects."""
+    store = sk.ProjectStore(tmp_path)
+
+    # A project id reaches this from a request body, so it is not trusted.
+    for pid in ["../../ESCAPED", "..", "/etc/passwd", "....//....//x", "", "  ", "a" * 300]:
+        store.save(pid, {"title": "x", "k": 2})
+        store.delete(pid)
+    assert not [p for p in tmp_path.parent.iterdir() if "ESCAPED" in p.name], "wrote outside"
+
+    # One unreadable project must not take the sidebar down with it.
+    store.save("good", {"title": "fine", "k": 2, "n_people": 10})
+    (tmp_path / "broken.meta.json").write_text("{not json at all")
+    (tmp_path / "broken.json").write_text("{also broken")
+    assert [d["title"] for d in store.list()] == ["fine"]
+    assert store.load("broken") is None
+
+    # An upload too big to keep is declined without losing the analysis it belongs to.
+    store.save("big", {"title": "big", "k": 2}, raw=b"x" * (store.MAX_RAW + 1))
+    assert not (tmp_path / "big.data").exists()
+    assert store.load("big") is not None
+
+
 def test_a_messy_maxdiff_export_is_read_without_losing_people_quietly():
     """Real exports are not tidy, and the ways they are untidy must not change the answer
     silently. The one that matters most is respondent loss: someone who skipped the exercise

@@ -98,6 +98,7 @@ import os
 import re
 import sys
 import tempfile
+import uuid
 import warnings
 from dataclasses import dataclass, asdict, replace
 from datetime import datetime, timezone
@@ -2621,12 +2622,27 @@ class ProjectStore:
 
     @staticmethod
     def _write_atomic(path, text_or_bytes):
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        if isinstance(text_or_bytes, bytes):
-            tmp.write_bytes(text_or_bytes)
-        else:
-            tmp.write_text(text_or_bytes)
-        tmp.replace(path)                                         # never leave a half-written file
+        """Write, then rename into place, so a reader never sees a half-written file.
+
+        The scratch name carries a random suffix because the server is threaded and one project
+        is saved repeatedly — after the analysis, after every chat reply, after the groups are
+        named. With a fixed `.tmp` name, two overlapping saves of the same project used the same
+        scratch file: the first rename moved it away and the second raised FileNotFoundError out
+        of the request handler, so the user saw an error and the save was lost. Reproduced with
+        60 concurrent saves; it failed on the first few.
+        """
+        tmp = path.with_suffix(f"{path.suffix}.{uuid.uuid4().hex}.tmp")
+        try:
+            if isinstance(text_or_bytes, bytes):
+                tmp.write_bytes(text_or_bytes)
+            else:
+                tmp.write_text(text_or_bytes)
+            tmp.replace(path)                                     # atomic on POSIX and Windows
+        except Exception:
+            # Never leave scratch files behind for a save that failed; the store is a directory
+            # the user can open, and a drift of dead .tmp files is its own small bug report.
+            tmp.unlink(missing_ok=True)
+            raise
 
     def save(self, pid, data, raw=None):
         p = self._path(pid)
