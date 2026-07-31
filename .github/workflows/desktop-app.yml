@@ -12,6 +12,11 @@ on:
   release:
     types: [published]
 
+# The default token is read-only, which is right for a workflow that mostly just builds. The
+# release job needs to write one thing: the finished app, attached to the release being cut.
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
