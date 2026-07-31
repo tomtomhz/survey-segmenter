@@ -31,7 +31,11 @@ from pathlib import Path
 # setting SURVEY_SEGMENTER_MODEL, but the default needs no configuration.)
 MODEL = os.environ.get("SURVEY_SEGMENTER_MODEL", "claude-opus-5")
 
-_CONFIG_DIR = Path.home() / ".survey_segmenter"
+# Where the user's own API key is kept. Overridable so the test suite can point at a temporary
+# directory: without that, the tests read whatever key the person running them happens to have
+# configured, which makes results depend on the machine and quietly puts a real credential in the
+# path of every test run. Same variable the projects store already uses for the same reason.
+_CONFIG_DIR = Path(os.environ.get("SURVEY_SEGMENTER_HOME") or (Path.home() / ".survey_segmenter"))
 _CONFIG_FILE = _CONFIG_DIR / "config.json"
 
 # Room for adaptive thinking PLUS a full written answer (thinking and text share this budget on
@@ -210,30 +214,56 @@ def _first_turn_content(report_markdown: str, question: "str | None") -> str:
             "----- BEGIN REPORT -----\n" + report_markdown + "\n----- END REPORT -----")
 
 
-def build_messages(report_markdown: str, question: "str | None", history: "list | None") -> list:
+# How many charts to attach. The segment map is the one that can falsify the whole result, and
+# the profile and grid charts are what "which segment should we target" is actually answered
+# from. Sending all six costs tokens for two that mostly restate numbers already in the report.
+_CHARTS_FOR_CLAUDE = ("map", "profiles", "heatmap")
+
+
+def _chart_blocks(charts: "list | None") -> list:
+    """Image blocks for the charts, so Claude reads the same picture the user is looking at.
+
+    Worth being precise about the privacy position, because this is the only place images leave
+    the machine: these are the *rendered charts*, drawn from group-level aggregates — centroids,
+    silhouette summaries, a PCA projection of the answer matrix. The segment map plots one dot
+    per respondent, but a dot is a position in a rotated two-dimensional projection with no
+    identifier, no label and no answers attached; it is the same aggregate the report already
+    describes in words. No respondent row, id or free-text answer is in any of these.
+    """
+    blocks = []
+    for chart in charts or []:
+        if chart.get("id") not in _CHARTS_FOR_CLAUDE or not chart.get("png_b64"):
+            continue
+        blocks.append({"type": "text", "text": f"Chart — {chart.get('title', chart['id'])}"})
+        blocks.append({"type": "image", "source": {
+            "type": "base64", "media_type": "image/png", "data": chart["png_b64"]}})
+    return blocks
+
+
+def build_messages(report_markdown: str, question: "str | None", history: "list | None",
+                   charts: "list | None" = None) -> list:
     """Pure helper (no network): produce the Anthropic `messages` list for the next turn.
 
-    On the FIRST turn (`history` empty/None) the report is embedded into the user message and
-    `question` may be None (auto-interpretation). On later turns the running `history` already
-    carries the report, so we just append the new question. Returned as a fresh list."""
+    On the FIRST turn (`history` empty/None) the report and the charts are embedded into the user
+    message and `question` may be None (auto-interpretation). On later turns the running `history`
+    already carries both, so we just append the new question. Returned as a fresh list."""
     if history:
         msgs = list(history)
         msgs.append({"role": "user", "content": (question or "Please continue.").strip()})
         return msgs
-    # The report is the large, unchanging part of every request in this conversation — each
-    # follow-up question resends the whole thing. Marking it cacheable means later turns are
-    # billed at roughly a tenth of the input rate and come back faster. Caching is a prefix
-    # match, so the marker belongs on this first block: everything before it (the system prompt)
-    # is cached with it, and the varying question is appended after it on later turns.
-    return [{"role": "user", "content": [{
-        "type": "text",
-        "text": _first_turn_content(report_markdown, question),
-        "cache_control": {"type": "ephemeral"},
-    }]}]
+    # The report and the charts are the large, unchanging part of every request in this
+    # conversation — each follow-up question resends the whole thing. Marking the last block
+    # cacheable means later turns are billed at roughly a tenth of the input rate and come back
+    # faster. Caching is a prefix match, so the marker goes on the final block of the fixed
+    # prefix: everything before it is cached with it, and the varying question is appended after.
+    content = [{"type": "text", "text": _first_turn_content(report_markdown, question)}]
+    content += _chart_blocks(charts)
+    content[-1] = {**content[-1], "cache_control": {"type": "ephemeral"}}
+    return [{"role": "user", "content": content}]
 
 
 def chat_once(history: "list | None", report_markdown: str, question: "str | None" = None,
-              api_key: "str | None" = None, model: str = MODEL):
+              api_key: "str | None" = None, model: str = MODEL, charts: "list | None" = None):
     """Advance the conversation by one turn and call Claude.
 
     `history` is the running message list (empty on the first turn). Returns
@@ -249,7 +279,7 @@ def chat_once(history: "list | None", report_markdown: str, question: "str | Non
 
     import anthropic
 
-    messages = build_messages(report_markdown, question, history)
+    messages = build_messages(report_markdown, question, history, charts)
     client = anthropic.Anthropic(api_key=key)
 
     # Stream + get_final_message: robust against timeouts on long input/output, per the Anthropic SDK

@@ -1258,9 +1258,15 @@ def test_web_server_endpoints_end_to_end(monkeypatch):
             return {"sdk_installed": True, "configured": self.key is not None,
                     "source": "test" if self.key else None, "env_key": False, "model": "claude-opus-5"}
 
-        def chat_once(self, history, digest, question=None):
+        def chat_once(self, history, digest, question=None, charts=None):
             if self.key is None:
                 raise self.AIError("Add your Anthropic API key in Settings.", kind="nokey")
+            # Recorded, not asserted on content: this fixture is two respondents and two
+            # questions, which honestly supports no charts at all. What matters here is that the
+            # server passes the argument through — a double that silently swallowed it would let
+            # the wiring rot without a test noticing. The content is covered where charts exist,
+            # in test_the_ai_digest_contains_no_individual_respondent_data.
+            self.charts_seen = charts
             reply = ("## Your segments\n- **Privacy-First Students** value real-life meetups."
                      if question is None else "Target the largest group first.")
             return reply, list(history) + [{"role": "assistant", "content": reply}]
@@ -1605,6 +1611,39 @@ def test_the_ai_digest_contains_no_individual_respondent_data():
 
     # And it is not empty-by-accident: the aggregate content the feature needs IS present.
     assert "Confidence" in payload and "Segment" in payload
+
+    # Images are now attached too, which widens the guarantee: it is no longer enough that the
+    # TEXT is aggregate, because a chart could carry a label. Build the actual request and check
+    # every part of it — the text blocks for the strings, and the images for what they contain.
+    import base64
+    import json as _json
+
+    import ai_interpret
+
+    request = ai_interpret.build_messages(r["digest"], None, None, charts=r["charts"])
+    blocks = request[0]["content"]
+    images = [b for b in blocks if b["type"] == "image"]
+    assert images, "the charts were not attached at all"
+
+    # Nothing identifying in any text block, including the chart titles.
+    as_text = _json.dumps([b for b in blocks if b["type"] == "text"])
+    assert not [x for x in ids if x in as_text]
+    assert not [c for c in comments if c in as_text]
+
+    # And nothing identifying inside the PNGs. matplotlib writes the labels it was given as glyph
+    # data, not as recoverable strings, but a PNG can also carry text chunks of metadata — so the
+    # bytes are checked directly rather than assumed clean.
+    for image in images:
+        raw = base64.b64decode(image["source"]["data"])
+        assert raw[:8] == b"\x89PNG\r\n\x1a\n", "not actually a PNG"
+        for identifier in ids[:20] + comments[:20]:
+            assert identifier.encode() not in raw, f"{identifier} is embedded in a chart"
+
+    # The charts the browser receives carry no raster copy: it draws the vector one, and shipping
+    # both would add a quarter of a megabyte to every response for bytes the page never reads.
+    for chart in sk._charts_for_browser(r["charts"]):
+        assert "png_b64" not in chart
+        assert chart["svg"]
 
     # The digest is the whole of what gets transmitted, so pin that too: what ai.build_messages
     # puts on the wire is the digest and nothing else drawn from the raw file.

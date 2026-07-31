@@ -2547,6 +2547,18 @@ def _missing_ui_page():
             "the command line and needs nothing extra.</p></div></body></html>")
 
 
+def _charts_for_browser(charts):
+    """The charts, minus the raster copies.
+
+    Each chart carries both an SVG (what the page draws) and a PNG (what Claude is shown). The
+    PNG is roughly 40 kB of base64 apiece, so sending all six to a browser that renders only the
+    vector version would add a quarter of a megabyte to every analysis response and every project
+    reopen, for bytes nothing on the page reads. They stay in the session, where the Claude layer
+    picks them up.
+    """
+    return [{k: v for k, v in chart.items() if k != "png_b64"} for chart in (charts or [])]
+
+
 class ProjectStore:
     """Saved projects — one per survey you analyse, like a chat history.
 
@@ -2768,7 +2780,7 @@ def serve(port=8000):
                             "k": saved.get("k"), "n_people": saved.get("n_people"),
                             "columns": saved.get("columns") or {},
                             "confidence": saved.get("confidence") or "unknown",
-                            "charts": saved.get("charts") or [],
+                            "charts": _charts_for_browser(saved.get("charts")),
                             "names": saved.get("names") or [],
                             "transcript": saved.get("transcript") or [],
                             "ai_available": bool(st.get("configured") and st.get("sdk_installed")),
@@ -2887,7 +2899,8 @@ def serve(port=8000):
                     "report_html": r["report_html"],
                     "ai_available": bool(st.get("configured") and st.get("sdk_installed")),
                     "downloads": sorted(r["files"]), "k": r["k"], "n_people": r["n_people"],
-                    "columns": r.get("columns", {}), "charts": r.get("charts", []),
+                    "columns": r.get("columns", {}),
+                    "charts": _charts_for_browser(r.get("charts")),
                     "confidence": r.get("confidence", "unknown")}
 
         def _do_regroup(self):
@@ -3030,7 +3043,11 @@ def serve(port=8000):
                 return
             question = None if body.get("initial") else (body.get("message") or "").strip()
             try:
-                reply, sess["messages"] = _ai.chat_once(sess["messages"], sess["digest"], question)
+                # The charts go with the digest so Claude reads the same picture the user is
+                # looking at — the segment map in particular shows whether the groups separate,
+                # which no amount of summary statistics conveys as directly.
+                reply, sess["messages"] = _ai.chat_once(sess["messages"], sess["digest"], question,
+                                                        charts=sess.get("charts"))
             except _ai.AIError as e:
                 self._json({"ok": False, "kind": e.kind, "error": str(e)})
                 return
