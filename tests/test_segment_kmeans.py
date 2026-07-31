@@ -676,6 +676,21 @@ def test_the_built_interface_is_served_and_cannot_be_escaped():
     assert callable(sk.app) and callable(sk.serve)
 
 
+def test_output_is_utf8_so_windows_consoles_do_not_break_the_analysis():
+    """The first Windows build failed every analysis with "something went wrong reading that
+    file". The real cause was the confidence line printing a coloured circle to a console using
+    Windows' legacy cp1252 encoding, which cannot encode it — UnicodeEncodeError, thrown from
+    inside the run and reported as a file problem.
+
+    The emoji was only the symptom. Any Swedish column name would have done the same, which for
+    a tool built for Nordic surveys is the more serious half of the bug."""
+    assert (sys.stdout.encoding or "").lower().replace("-", "") == "utf8"
+
+    # The characters that actually broke it: the confidence lights, and Swedish.
+    for char in ("\U0001f7e2", "\U0001f7e1", "\U0001f534", "Kön", "Ålder", "Göteborg"):
+        char.encode(sys.stdout.encoding)          # raises if the stream could not carry it
+
+
 def test_routes_match_exactly_so_the_app_owns_every_other_path():
     """Routes were matched by prefix, which handed API responses to paths that merely started the
     same way. `/projects-of-mine` was answered with the project list, and — worse — anything
@@ -1675,12 +1690,17 @@ def test_one_broken_chart_does_not_take_the_others_down():
     assert [c["id"] for c in sk.build_charts(_Seg(), "kmeans")] == \
         ["map", "fit", "k", "profiles", "radar", "heatmap"]
 
-    original = sk.chart_segment_map
-    sk.chart_segment_map = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    # Patched on `charts`, not on `segment_kmeans`: the drawing moved into its own module, and
+    # build_charts calls its neighbours directly. Replacing the re-exported alias would have
+    # patched a name nothing calls, and the test would have passed while proving nothing.
+    import charts
+
+    original = charts.chart_segment_map
+    charts.chart_segment_map = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
     try:
         survivors = [c["id"] for c in sk.build_charts(_Seg(), "kmeans")]
     finally:
-        sk.chart_segment_map = original
+        charts.chart_segment_map = original
     assert survivors == ["fit", "k", "profiles", "radar", "heatmap"], survivors
 
 
@@ -1698,9 +1718,11 @@ def test_charts_survive_degenerate_data():
     assert partial is not None and "q2" in partial["svg"]
     assert sk.chart_profiles(pd.DataFrame({"q1": [np.nan, np.nan]})) is None
 
-    # A NaN span previously raised StopIteration out of _nice_step, far from its cause.
-    assert sk._nice_step(float("nan")) == 1.0
-    assert sk._nice_step(float("inf")) == 1.0
+    # A NaN span used to raise StopIteration out of the hand-written tick-spacing helper, far
+    # from its cause. That helper is gone — matplotlib chooses ticks now — so the check is that
+    # non-finite data still produces a chart or an honest None, never an exception.
+    assert sk.chart_k_choice(pd.DataFrame({"k": [2, 3], "silhouette": [float("nan")] * 2}), 2)
+    assert sk.chart_profiles(pd.DataFrame({"q1": [float("inf"), 1.0]})) is not None
 
 
 def test_it_will_not_recommend_segments_too_small_to_target():

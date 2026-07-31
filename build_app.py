@@ -23,7 +23,8 @@ from pathlib import Path
 # `anthropic` (+pydantic) powers the optional "ask Claude about your segments" chat; it is bundled
 # so the app has it out of the box (the user still supplies their own API key in Settings).
 subprocess.run([sys.executable, "-m", "pip", "install", "--user",
-                "numpy", "pandas", "scipy", "scikit-learn", "openpyxl", "anthropic", "pyinstaller"],
+                "numpy", "pandas", "scipy", "scikit-learn", "matplotlib", "openpyxl",
+                "anthropic", "pyinstaller"],
                check=True)
 
 # Always analyse from scratch. PyInstaller caches its analysis in build/, and a cache written while
@@ -60,6 +61,9 @@ _build_frontend()
 cmd = [sys.executable, "-m", "PyInstaller", "--name", "Survey Segmenter", "--windowed",
        "--noconfirm", "--collect-submodules", "sklearn",
        "--collect-all", "anthropic", "--collect-all", "pydantic", "--collect-all", "pydantic_core",
+       # matplotlib draws every chart. Its data directory carries the font it measures and
+       # renders with, so without this the packaged app raises on the first chart it tries.
+       "--collect-data", "matplotlib",
        # The interface itself. Without this the packaged app starts, serves its API, and shows
        # nothing at all — the failure looks like a broken server rather than a missing folder.
        "--add-data", f"webui{os.pathsep}webui",

@@ -17,11 +17,13 @@ dependencies = [
     "pandas>=1.5",
     "scipy>=1.10",
     "scikit-learn>=1.2",
+    # Core, not optional: every result draws six charts, and "see the data yourself" is the
+    # feature that lets a reader disagree with the write-up rather than take it on trust.
+    "matplotlib>=3.6",
 ]
 
 [project.optional-dependencies]
 excel = ["openpyxl>=3.0"]         # read .xlsx survey exports
-figures = ["matplotlib>=3.6"]     # the diagnostics.png figure
 tables = ["tabulate>=0.9"]        # prettier Markdown tables in the report
 ai = ["anthropic>=0.40"]          # "ask Claude about your segments" chat (optional; bring your own key)
 dev = ["pytest>=7.0", "pyflakes>=3.0"]
@@ -35,4 +37,4 @@ Changelog = "https://github.com/tomtomhz/survey-segmenter/blob/main/CHANGELOG.md
 segment-kmeans = "segment_kmeans:_cli"
 
 [tool.setuptools]
-py-modules = ["segment_kmeans", "ai_interpret", "maxdiff"]
+py-modules = ["segment_kmeans", "charts", "ai_interpret", "maxdiff"]
