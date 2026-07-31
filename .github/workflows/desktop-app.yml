@@ -1,0 +1,55 @@
+name: Desktop app
+
+# Builds the double-clickable app for both platforms and smoke-tests it.
+#
+# Not on every push: a build is several minutes and a few hundred megabytes of runner time, and
+# the thing it protects — packaging — only breaks when dependencies or the entry point change.
+# Run it before cutting a release, or whenever build_app.py, the frontend or the dependency list
+# has moved. build_app.py refuses to ship a binary it could not start and analyse a survey with,
+# so a green tick here means the artefact actually runs, not merely that PyInstaller exited 0.
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artefact: Survey Segmenter (Windows)
+            path: dist/Survey Segmenter
+          - os: macos-latest
+            artefact: Survey Segmenter (macOS)
+            path: dist/Survey Segmenter.zip
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # The packaged app serves webui/, so the interface has to be built before it is bundled.
+      # build_app.py does this itself when npm is present; installing here keeps it cached.
+      - name: Install the interface's dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build and smoke-test
+        run: python build_app.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artefact }}
+          path: ${{ matrix.path }}
+          if-no-files-found: error

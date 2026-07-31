@@ -86,11 +86,16 @@ def _smoke_test():
     # PyInstaller the macOS bundle carries a half-written signature, and the OS refuses to run it —
     # silently, with exit status 0 and no output — so testing it before signing measures nothing
     # about the build and fails every time.
-    exe = (Path("dist/Survey Segmenter.app/Contents/MacOS/Survey Segmenter")
-           if sys.platform == "darwin" else Path("dist/Survey Segmenter/Survey Segmenter"))
+    if sys.platform == "darwin":
+        exe = Path("dist/Survey Segmenter.app/Contents/MacOS/Survey Segmenter")
+    else:
+        # PyInstaller appends .exe on Windows. Without the suffix the path never exists, the
+        # smoke test prints a warning and returns, and a broken build ships looking tested.
+        exe = Path("dist/Survey Segmenter") / (
+            "Survey Segmenter.exe" if os.name == "nt" else "Survey Segmenter")
     if not exe.exists():
-        print("\nWARNING: could not find the built binary to smoke-test.")
-        return
+        sys.exit(f"BUILD IS BROKEN — no binary at {exe}. PyInstaller reported success, so this is "
+                 "a packaging problem rather than a compile error.")
     # Two obvious mind-sets, jittered. Perfectly identical answers within a group leave zero
     # variance, which makes the validation maths degenerate and the run crawl — the check would
     # then fail on its own test data rather than on anything wrong with the build.
@@ -122,8 +127,10 @@ def _smoke_test():
             except Exception:
                 time.sleep(1)
         else:
-            print("\nWARNING: the built app never answered on its port; smoke test inconclusive.")
-            return
+            proc.terminate()
+            sys.exit("BUILD IS BROKEN — the app started but never answered on its port. It is "
+                     "running without serving, which is worse than crashing: a user would see a "
+                     "window that does nothing.")
         req = urllib.request.Request(
             "http://127.0.0.1:8765/analyze", data=body,
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
