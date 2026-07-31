@@ -35,4 +35,4 @@ Changelog = "https://github.com/tomtomhz/survey-segmenter/blob/main/CHANGELOG.md
 segment-kmeans = "segment_kmeans:_cli"
 
 [tool.setuptools]
-py-modules = ["segment_kmeans", "ai_interpret"]
+py-modules = ["segment_kmeans", "ai_interpret", "maxdiff"]

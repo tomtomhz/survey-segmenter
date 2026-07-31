@@ -50,8 +50,31 @@ expect it in *response handling*, not request construction.
   named individuals' work email addresses — personal data under GDPR. Publishing needs a human
   decision, not a tidy-up.
 
+## MaxDiff / Hierarchical Bayes (added 2026-07-31)
+
+`maxdiff.py` estimates individual-level utilities from best-worst data — the input the study's
+instrument requires, and the gap that previously blocked the Stockholm-Cluster survey. Drop a tidy
+best-worst export (`respondent_id | set | item | choice`) into the tool and it is detected, scored
+by HB, and segmented on the utilities, with the report saying so.
+
+Measured on simulated Block D data (15 items, 5 per set, 12 sets), against known utilities:
+
+| Separation | Individual recovery, counting → HB | Segment ARI, counting → HB |
+|---|---|---|
+| Strong | 0.76 → **0.92** | 1.00 → 1.00 |
+| Moderate | 0.67 → **0.84** | 0.978 → 0.992 |
+| Weak | 0.57 → **0.67** | 0.646 → 0.677 |
+| Very weak | 0.48 → 0.47 | 0.137 → 0.146 |
+
+**Read this honestly:** HB clearly improves *individual* utilities, which is what the instrument
+asks for and what you report per respondent. Its effect on the *segmentation* is small but
+consistent, and neither method rescues genuinely weak structure. Do not claim HB "fixes" a
+segmentation — claim it gives defensible individual scores. The simulation also generates choices
+from the same model HB assumes, which flatters it; real data will differ.
+
 ## Known limitations (real, not hypothetical)
 
+- **HB is validated on simulated data only.** No real MaxDiff responses have gone through it.
 - **Windows build doesn't exist.** `build_app.py` is cross-platform but must run *on* Windows to
   produce the `.exe`. Needs a Windows machine or a CI runner.
 - **The segment-size floor is a search-time guard, not a hard bound.** It filters the search fit;

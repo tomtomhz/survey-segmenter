@@ -126,6 +126,11 @@ __version__ = "1.0.0"    # keep in sync with pyproject.toml
 # Optional "ask Claude about your segments" add-on. Imported here (not lazily) so the packaged app
 # bundles it; wrapped so a missing file/SDK never stops the core segmentation tool from loading.
 try:
+    import maxdiff as _maxdiff
+except Exception:            # MaxDiff scoring is optional; rating-grid surveys never touch it
+    _maxdiff = None
+
+try:
     import ai_interpret as _ai
 except Exception:       # pragma: no cover - defensive: the tool must run without the AI layer
     _ai = None
@@ -2798,6 +2803,20 @@ def run_analysis(data, cfg=None, force_items=None):
     percentages — never an individual respondent's row. Pass cfg only to speed up tests; the app
     uses full-quality defaults."""
     df = _read_table(data)
+    # A MaxDiff export is not a rating grid and cannot be clustered as one: its rows are
+    # best/worst choices, not scores. Detect that shape and convert it to individual-level
+    # utilities first — that conversion IS the analysis for a MaxDiff study, and doing it
+    # silently wrong (by clustering the raw choice codes) would look like a working result.
+    maxdiff_note = None
+    if _maxdiff is not None and _maxdiff.looks_like_maxdiff(df):
+        est = _maxdiff.utilities_from_export(df)
+        df = est.as_frame().reset_index().rename(columns={"index": "respondent_id"})
+        maxdiff_note = (
+            f"This file is a MaxDiff (best-worst) export, not a rating grid, so it was scored "
+            f"first: individual-level utilities for {len(est.item_names)} items were estimated "
+            f"for {len(est.respondent_ids)} respondents by Hierarchical Bayes, and the groups "
+            f"below are built on those utilities. Counting how often each item was picked best "
+            f"minus worst would have been too coarse to describe a single person.")
     clean, method, id_col, items, plan = auto_prepare(df, force_items=force_items)
     base = replace(cfg, method=method) if cfg is not None else SegmentationConfig(method=method)
     demo_df = df[[id_col] + plan["demographics"]] if (plan["demographics"] and id_col) else None
@@ -2809,6 +2828,8 @@ def run_analysis(data, cfg=None, force_items=None):
         seg = Segmenter(base).run(clean, id_col=id_col, item_cols=items, demographics=demo_df,
                                   weights=weights)
     title = "Latent class segmentation report" if method == "lca" else "Segmentation report"
+    if maxdiff_note:
+        plan["notes"].insert(0, maxdiff_note)
     notes_html = ("<blockquote><strong>What I found in your file:</strong><ul>"
                   + "".join(f"<li>{_html.escape(n)}</li>" for n in plan["notes"])
                   + "</ul></blockquote>")

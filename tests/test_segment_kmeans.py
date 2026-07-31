@@ -1781,3 +1781,152 @@ def test_hopkins_is_caveated_when_it_cannot_be_trusted():
                          cfg=sk.SegmentationConfig(k_min=2, k_max=5, **FAST))
     assert "Do not lean on the Hopkins number" not in r2["digest"]
     assert r2["confidence"] == "high"
+
+
+# ------------------------------------------------------------------ MaxDiff / Hierarchical Bayes
+def _simulate_maxdiff(n_resp=200, sep=1.4, n_items=15, set_size=5, n_sets=12, seed=1, n_seg=3):
+    """Simulate best-worst answers under the study's Block D design (15 items, 5 shown, 12 sets).
+
+    Choices are generated from the same sequential logit the estimator assumes, with `n_seg`
+    planted mind-sets, so recovery is a fair test of the sampler rather than of model fit.
+    """
+    rng = np.random.default_rng(seed)
+    centres = np.zeros((n_seg, n_items))
+    block = n_items // n_seg
+    for g in range(n_seg):
+        centres[g, g * block:(g + 1) * block] = sep
+        nxt = (g + 1) % n_seg
+        centres[g, nxt * block:(nxt + 1) * block] = -sep
+    who = rng.integers(0, n_seg, n_resp)
+    true_b = centres[who] + rng.normal(0, 0.45, (n_resp, n_items))
+    true_b -= true_b.mean(1, keepdims=True)
+
+    design = np.zeros((n_resp, n_sets, set_size), int)
+    best = np.zeros((n_resp, n_sets), int)
+    worst = np.zeros((n_resp, n_sets), int)
+    for i in range(n_resp):
+        pool = np.repeat(np.arange(n_items), set_size * n_sets // n_items)
+        rng.shuffle(pool)
+        sets = pool.reshape(n_sets, set_size)
+        for s in range(n_sets):
+            if len(set(sets[s])) < set_size:
+                sets[s] = rng.choice(n_items, set_size, replace=False)
+            u = true_b[i, sets[s]]
+            p = np.exp(u - u.max()); p /= p.sum()
+            bb = rng.choice(set_size, p=p)
+            rem = [j for j in range(set_size) if j != bb]
+            nu = -u[rem]; q = np.exp(nu - nu.max()); q /= q.sum()
+            best[i, s], worst[i, s] = bb, rem[rng.choice(len(rem), p=q)]
+        design[i] = sets
+    return design, best, worst, true_b, who
+
+
+def _tidy_export(design, best, worst, prefix="use_case_"):
+    """The simulated design as the tidy long table the reader documents."""
+    rows = []
+    for i in range(design.shape[0]):
+        for s in range(design.shape[1]):
+            for pos, item in enumerate(design[i, s]):
+                if item < 0:
+                    continue
+                rows.append({"respondent_id": f"R{i:04d}", "set": s,
+                             "item": f"{prefix}{item:02d}",
+                             "choice": "best" if pos == best[i, s] else
+                                       ("worst" if pos == worst[i, s] else "")})
+    return pd.DataFrame(rows)
+
+
+def test_hb_recovers_individual_utilities_it_was_never_shown():
+    """The load-bearing claim: HB reconstructs each respondent's private preferences.
+
+    Everything downstream — the segments, the personas, the build priority — rests on these
+    numbers being a fair estimate of what each person actually wanted. Simulated answers are
+    generated from known utilities and the estimator must find them back.
+    """
+    md = pytest.importorskip("maxdiff")
+    design, best, worst, true_b, _ = _simulate_maxdiff(n_resp=200)
+    res = md.estimate_hb(design, best, worst, [f"i{j}" for j in range(15)],
+                         [f"R{j}" for j in range(200)],
+                         n_draws=2000, n_burn=700, progress=False)
+
+    per = np.array([np.corrcoef(true_b[i], res.utilities[i])[0, 1] for i in range(200)])
+    assert per.mean() > 0.80, f"individual recovery only r={per.mean():.3f}"
+    assert per.min() > 0.20, f"worst respondent recovered at r={per.min():.3f}"
+    # Utilities are identified only up to a constant, so each respondent must sum to zero.
+    assert np.allclose(res.utilities.sum(axis=1), 0, atol=1e-8)
+    # A chain that accepts nearly everything or nearly nothing has not explored the posterior.
+    assert 0.10 < res.acceptance_rate < 0.70, res.acceptance_rate
+
+
+def test_hb_beats_counting_at_describing_an_individual():
+    """Why this module exists at all.
+
+    The instrument specifies HB and rejects best-minus-worst counting as "too coarse for
+    individual-level segmentation". That is a testable claim, not a matter of taste — and it is
+    the entire justification for carrying an MCMC sampler in a marketing tool.
+    """
+    md = pytest.importorskip("maxdiff")
+    design, best, worst, true_b, _ = _simulate_maxdiff(n_resp=200)
+
+    counts = np.zeros((200, 15))
+    for i in range(200):
+        for s in range(design.shape[1]):
+            counts[i, design[i, s, best[i, s]]] += 1
+            counts[i, design[i, s, worst[i, s]]] -= 1
+
+    hb = md.estimate_hb(design, best, worst, [f"i{j}" for j in range(15)],
+                        [f"R{j}" for j in range(200)],
+                        n_draws=2000, n_burn=700, progress=False).utilities
+
+    r_counts = np.mean([np.corrcoef(true_b[i], counts[i])[0, 1] for i in range(200)])
+    r_hb = np.mean([np.corrcoef(true_b[i], hb[i])[0, 1] for i in range(200)])
+    assert r_hb > r_counts + 0.05, f"HB {r_hb:.3f} vs counting {r_counts:.3f} — no real gain"
+
+
+def test_a_raw_maxdiff_export_segments_correctly_end_to_end():
+    """A best-worst export is not a rating grid, and clustering its raw choice codes would
+    produce a confident-looking result from nonsense. Dropping the export straight into the tool
+    must score it first and then recover the mind-sets that were planted in it."""
+    pytest.importorskip("maxdiff")
+    design, best, worst, _true_b, who = _simulate_maxdiff(n_resp=200, sep=1.4)
+    raw = _tidy_export(design, best, worst).to_csv(index=False).encode()
+
+    r = sk.run_analysis(raw, cfg=sk.SegmentationConfig(k_min=2, k_max=6, **FAST))
+
+    assign = pd.read_csv(io.StringIO(r["files"]["segment_assignments.csv"]))
+    order = {f"R{i:04d}": i for i in range(200)}
+    labels = np.zeros(200, dtype=int)
+    for _, row in assign.iterrows():
+        labels[order[str(row["id"])]] = int(row["segment"])
+
+    from sklearn.metrics import adjusted_rand_score as _ari
+    assert _ari(who, labels) > 0.85, f"only recovered the planted mind-sets at ARI {_ari(who, labels):.2f}"
+    # The reader must say what it did — a silent transformation of the input is not acceptable
+    # in a report someone will present.
+    assert "Hierarchical Bayes" in r["digest"]
+
+
+def test_maxdiff_detection_does_not_fire_on_a_rating_grid():
+    """A false positive here would score an ordinary survey as best-worst data and produce
+    nonsense, so detection has to be specific, not merely sensitive."""
+    md = pytest.importorskip("maxdiff")
+    grid = pd.DataFrame({"respondent_id": ["R1", "R2"], "q1": [4, 2], "q2": [1, 5],
+                         "item": ["a", "b"]})          # has 'item' but is not best-worst
+    assert not md.looks_like_maxdiff(grid)
+    assert md.looks_like_maxdiff(
+        pd.DataFrame({"respondent_id": [], "set": [], "item": [], "choice": []}))
+
+
+def test_maxdiff_reader_drops_incomplete_sets_rather_than_inventing_choices():
+    """A set with no 'worst' recorded carries no worst-choice information. Guessing one would
+    fabricate preference data, so the set is dropped and the loss reported."""
+    md = pytest.importorskip("maxdiff")
+    design, best, worst, _, _ = _simulate_maxdiff(n_resp=30, n_sets=12)
+    df = _tidy_export(design, best, worst)
+    victim = (df["respondent_id"] == "R0000") & (df["set"] == 0) & (df["choice"] == "worst")
+    df.loc[victim, "choice"] = ""
+
+    d2, b2, w2, items, respondents = md.read_maxdiff(df)
+    assert len(items) == 15 and len(respondents) == 30
+    kept_for_r0 = int((d2[respondents.index("R0000")] >= 0).any(axis=1).sum())
+    assert kept_for_r0 == 11, f"expected the damaged set to be dropped, kept {kept_for_r0}"
