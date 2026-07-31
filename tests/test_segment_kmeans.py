@@ -644,16 +644,46 @@ def test_version_stamped_in_manifest_and_report(tmp_path):
     assert sk.__version__ in seg.report_markdown
 
 
-def test_web_app_chat_page_and_shutdown():
-    """The redesigned front end is a Claude-style chat page wired to the analyze / chat / settings
-    endpoints, with a clean shutdown page and the app() entry point present."""
-    p = sk._CHAT_PAGE
-    assert "<!doctype html>" in p and "Survey Segmenter" in p
-    for frag in ("/analyze", "/chat", "/settings", "Ask about your segments", "Settings",
-                 "suggestChips", "Save PDF"):     # guided follow-up chips + save-to-PDF
-        assert frag in p, f"missing {frag}"
+def test_the_built_interface_is_served_and_cannot_be_escaped():
+    """The interface is a compiled React bundle in webui/, not a string in this file.
+
+    Python's job is now only to hand out those files, so that is what is checked: the page comes
+    back, hashed assets come back with the right type, and nothing outside the bundle is
+    reachable. The server listens on localhost only, which is a reason to be careful about path
+    traversal rather than a reason not to bother.
+    """
+    assert sk._webui_dir(), "webui/ is missing — run: cd frontend && npm run build"
+
+    index = sk._webui_asset("/")
+    assert index and b"<!doctype html>" in index[0].lower()
+    assert index[1].startswith("text/html")
+    assert sk._webui_asset("/index.html")[0] == index[0]
+
+    # The real bundle, whatever this build's content hash happens to be.
+    import os
+    asset = next(f for f in os.listdir(os.path.join(sk._webui_dir(), "assets"))
+                 if f.endswith(".js"))
+    served = sk._webui_asset(f"/assets/{asset}")
+    assert served and served[1].startswith("text/javascript")
+
+    for escape in ("/../segment_kmeans.py", "/assets/../../ai_interpret.py",
+                   "/%2e%2e/%2e%2e/maxdiff.py", "/../../../../etc/hosts"):
+        assert sk._webui_asset(escape) is None, escape
+    # Not an asset type we serve, even if the file exists next to the bundle.
+    assert sk._webui_asset("/build_app.py") is None
+
     assert "The app has closed" in sk._shutdown_page()
     assert callable(sk.app) and callable(sk.serve)
+
+
+def test_a_missing_interface_says_how_to_build_it():
+    """webui/ is committed, so this is only reachable in a checkout where it was deleted. It must
+    name the command that fixes it — a blank page would look like the whole tool is broken, when
+    in fact the statistics are fine and only the interface is absent."""
+    page = sk._missing_ui_page()
+    assert "npm run build" in page and "not been built" in page
+    # The command line still works without any of this, and should say so.
+    assert "segment_kmeans.py your_survey.csv" in page
 
 
 def test_report_not_dumped_to_stdout_when_saved(tmp_path, capsys):
@@ -1024,24 +1054,11 @@ def test_projects_persist_to_disk_and_reopen(tmp_path):
     assert not list(tmp_path.glob("withraw*"))
 
 
-def test_front_end_is_hardened_against_the_obvious_ways_to_break_it():
-    """The page is used by non-technical people, so no interaction may wedge it. Every request goes
-    through one helper that cannot throw, files are checked before upload, dropped folders are
-    explained, and a crash anywhere still releases the busy state."""
-    js = sk._CHAT_JS
-    # exactly one real fetch — inside the helper that turns every failure into a message
-    assert js.count("fetch(") == 1 and "function req(" in js
-    assert "Could not reach the app" in js               # app closed / network gone
-    assert "sent back something unexpected" in js        # non-JSON reply
-    # pre-upload validation instead of a pointless round trip
-    for msg in ("That file is empty", "bigger than 100 MB", "does not look like one",
-                "That is a folder"):
-        assert msg in js, msg
-    # a stuck spinner is never acceptable
-    assert "unhandledrejection" in js and "window.addEventListener('error'" in js
-    # user- and file-supplied text is escaped, never injected as markup
-    assert "function esc(" in js and "b.textContent=text" in js
-    assert "esc(p.title" in js and "esc(d.error)" in js
+# The front end's own hardening — one un-throwable request helper, pre-upload validation,
+# dropped-folder handling, no stuck spinner, no injected markup — is now tested where it lives,
+# against the real components: frontend/src/**/*.test.tsx, run by `npm test`. Grepping the
+# compiled bundle for those strings from here would assert less than those tests do, and would
+# break on a minifier rather than on a regression.
 
 
 def test_markdown_renders_numbered_lists_and_errors_stay_plain_language():

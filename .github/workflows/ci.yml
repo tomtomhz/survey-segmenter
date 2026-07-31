@@ -36,10 +36,44 @@ jobs:
           pip install ".[ai,excel,dev]"
 
       - name: Lint
-        run: pyflakes segment_kmeans.py ai_interpret.py run_app.py build_app.py tests/
+        run: pyflakes segment_kmeans.py ai_interpret.py maxdiff.py run_app.py build_app.py tests/
 
       - name: Test
         run: pytest -q
+
+  frontend:
+    # The interface is a React + TypeScript app in frontend/, compiled to webui/. Its own tests
+    # cover what the Python suite no longer can: that a failed request never wedges the page,
+    # that unreadable files are refused before upload, and that the result blocks behave.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/survey-segmenter/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tools/survey-segmenter/frontend/package-lock.json
+
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc -b
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm test
+
+      - name: The committed build must match the source
+        # webui/ is committed so the app runs without Node and PyInstaller can bundle it. That
+        # only works if it is current: rebuild here and fail if the result differs, rather than
+        # shipping an interface one commit behind its own source.
+        run: |
+          npm run build
+          cd "$GITHUB_WORKSPACE"
+          git diff --exit-code --stat tools/survey-segmenter/webui \
+            || { echo "::error::webui/ is stale — run 'npm run build' in frontend/ and commit."; exit 1; }
 
   package:
     # Proves the thing is installable from a clean checkout, which is the failure mode a test

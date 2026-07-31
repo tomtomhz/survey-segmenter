@@ -96,6 +96,7 @@ import io
 import json
 import os
 import re
+import sys
 import tempfile
 import warnings
 from dataclasses import dataclass, asdict, replace
@@ -3083,648 +3084,75 @@ def _parse_multipart_file(content_type, body, with_name=False):
     return (None, None) if with_name else None
 
 
-_CHAT_CSS = """
-/* ---------------------------------------------------------------------------------------------
-   Survey Segmenter — visual system.
-   A tool, not a document: it is scanned and operated, so state (how many groups, how much to
-   trust them) is encoded in form and colour, and the long statistical report is tucked behind a
-   disclosure. Palette is a beige paper ground with a fern-green accent; the neutrals carry a
-   green bias so they read as chosen rather than default grey. System fonts only — the app runs
-   offline, so a web font would silently fall back.
-   --------------------------------------------------------------------------------------------- */
-*{box-sizing:border-box}
-:root{
- /* Tell the browser we handle both themes ourselves. Without this, Chrome's auto-dark-mode
-    repaints buttons and inputs with its own washed-out greys and the labels stop being legible. */
- color-scheme:light dark;
- --bg:#F4F2E8; --surface:#FBFAF3; --card:#FFFFFF; --sunk:#EFEDE1;
- --ink:#1B2420; --ink-soft:#3C4842; --muted:#6D7A71; --line:#E4E1D3; --line-strong:#D3CFBE;
- --accent:#46785C; --accent-hover:#3A6650; --accent-soft:#E9F1EA; --accent-ink:#FFFFFF;
- --ok:#3C7D5B; --ok-bg:#E7F1E9; --warn:#8A6410; --warn-bg:#F6EEDA; --risk:#9C4029; --risk-bg:#F7E7E2;
- --ring:rgba(70,120,92,.30);
- --shadow-sm:0 1px 2px rgba(27,36,32,.05);
- --shadow:0 1px 2px rgba(27,36,32,.05),0 12px 28px rgba(27,36,32,.07);
- --r-sm:8px; --r-md:12px; --r-lg:16px;
- --step-0:.95rem; --step-1:1.02rem; --step-2:1.18rem; --step-3:1.45rem;
-}
-@media(prefers-color-scheme:dark){:root{
- --bg:#161A17; --surface:#1C201D; --card:#222724; --sunk:#1A1E1B;
- --ink:#E9EBE4; --ink-soft:#C7CEC6; --muted:#95A29A; --line:#2F3531; --line-strong:#3C433D;
- --accent:#7FB48F; --accent-hover:#93C4A1; --accent-soft:#23302A; --accent-ink:#12201A;
- --ok:#7FB48F; --ok-bg:#1F2C25; --warn:#D6A94F; --warn-bg:#2E2718; --risk:#DE8C74; --risk-bg:#2E1E1A;
- --ring:rgba(127,180,143,.35);
- --shadow-sm:0 1px 2px rgba(0,0,0,.3); --shadow:0 1px 2px rgba(0,0,0,.3),0 12px 28px rgba(0,0,0,.28);
-}}
-:root[data-theme="dark"]{
- --bg:#161A17; --surface:#1C201D; --card:#222724; --sunk:#1A1E1B;
- --ink:#E9EBE4; --ink-soft:#C7CEC6; --muted:#95A29A; --line:#2F3531; --line-strong:#3C433D;
- --accent:#7FB48F; --accent-hover:#93C4A1; --accent-soft:#23302A; --accent-ink:#12201A;
- --ok:#7FB48F; --ok-bg:#1F2C25; --warn:#D6A94F; --warn-bg:#2E2718; --risk:#DE8C74; --risk-bg:#2E1E1A;
-}
-:root[data-theme="light"]{
- --bg:#F4F2E8; --surface:#FBFAF3; --card:#FFFFFF; --sunk:#EFEDE1;
- --ink:#1B2420; --ink-soft:#3C4842; --muted:#6D7A71; --line:#E4E1D3; --line-strong:#D3CFBE;
- --accent:#46785C; --accent-hover:#3A6650; --accent-soft:#E9F1EA; --accent-ink:#FFFFFF;
- --ok:#3C7D5B; --ok-bg:#E7F1E9; --warn:#8A6410; --warn-bg:#F6EEDA; --risk:#9C4029; --risk-bg:#F7E7E2;
-}
-html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;height:100vh;
- overflow:hidden;font:var(--step-1)/1.6 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",
- Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
-:where(a,button,input,textarea,summary):focus-visible{outline:2px solid var(--accent);
- outline-offset:2px;border-radius:var(--r-sm)}
-@media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+_WEBUI_DIRNAME = "webui"
 
-/* chrome ------------------------------------------------------------------------------------- */
-header{display:flex;align-items:center;gap:10px;padding:12px 20px;flex:none;background:var(--surface);
- border-bottom:1px solid var(--line)}
-.brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:1.05rem;
- letter-spacing:-.015em}
-.brand .mark{width:22px;height:22px;color:var(--accent);flex:none}
-header .sp{flex:1}
-.hbtn{border:1px solid var(--line-strong);background:var(--card);color:var(--ink-soft);
- border-radius:var(--r-sm);padding:7px 13px;font:inherit;font-size:.85rem;cursor:pointer;
- transition:border-color .15s,color .15s,background .15s}
-.hbtn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
-.hbtn.ghost{border-color:transparent;background:transparent}
-.hbtn:disabled{opacity:.45;cursor:default}
+# What the built interface is allowed to be made of. Anything else in the directory is not served
+# — a stray file sitting next to the bundle should not become a route.
+_WEBUI_TYPES = {".html": "text/html", ".js": "text/javascript", ".css": "text/css",
+                ".map": "application/json", ".svg": "image/svg+xml", ".ico": "image/x-icon",
+                ".png": "image/png", ".woff2": "font/woff2", ".json": "application/json"}
 
-/* projects sidebar ----------------------------------------------------------------------------- */
-.body{flex:1;display:flex;min-height:0}
-.main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
-.side{width:250px;flex:none;background:var(--surface);border-right:1px solid var(--line);
- display:flex;flex-direction:column;min-height:0}
-.side.hidden{display:none}
-.side .head{padding:16px 16px 10px;display:flex;align-items:center;gap:8px}
-.side .list{flex:1;overflow-y:auto;padding:2px 10px 14px;display:flex;flex-direction:column;gap:2px}
-.newbtn{margin:0 10px 10px;padding:9px 12px;border:1px dashed var(--line-strong);background:transparent;
- border-radius:var(--r-sm);color:var(--ink-soft);font:inherit;font-size:.86rem;font-weight:600;
- cursor:pointer;text-align:left;display:flex;align-items:center;gap:8px;transition:.15s}
-.newbtn:hover{border-color:var(--accent);border-style:solid;color:var(--accent);
- background:var(--accent-soft)}
-.projrow{display:flex;align-items:flex-start;gap:2px}
-.projrow .xbtn{opacity:0;margin-top:9px;transition:opacity .12s}
-.projrow:hover .xbtn,.projrow:focus-within .xbtn{opacity:1}
-.proj{border:1px solid transparent;background:transparent;border-radius:var(--r-sm);padding:9px 11px;
- text-align:left;font:inherit;cursor:pointer;color:var(--ink-soft);flex:1;min-width:0;
- transition:background .12s,border-color .12s}
-.proj:hover{background:var(--accent-soft)}
-.proj.active{background:var(--accent-soft);border-color:var(--accent)}
-.proj .t{font-size:.88rem;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;
- white-space:nowrap}
-.proj .m{font-size:.72rem;color:var(--muted);margin-top:3px;display:flex;gap:6px;align-items:center}
-.dot{width:6px;height:6px;border-radius:50%;flex:none}
-.dot.high{background:var(--ok)}.dot.moderate{background:var(--warn)}.dot.low{background:var(--risk)}
-.dot.unknown{background:var(--line-strong)}
-.side .empty{color:var(--muted);font-size:.82rem;padding:10px 12px;line-height:1.5}
-.xbtn{border:none;background:transparent;color:var(--muted);cursor:pointer;font-size:.95rem;
- padding:2px 6px;border-radius:5px;line-height:1}
-.xbtn:hover{color:var(--risk);background:var(--risk-bg)}
 
-/* thread ------------------------------------------------------------------------------------- */
-.thread{flex:1;overflow-y:auto;scroll-behavior:smooth;min-width:0}
-.wrap{max-width:780px;margin:0 auto;padding:26px 20px 48px;display:flex;flex-direction:column;gap:20px}
-.msg{display:flex;gap:13px}
-.msg .av{width:25px;height:25px;border-radius:7px;flex:none;display:flex;align-items:center;
- justify-content:center;font-size:12px;margin-top:3px;background:var(--accent);color:var(--accent-ink)}
-.msg.ai .bubble{flex:1;min-width:0;display:flex;flex-direction:column;gap:12px}
-.msg.you{flex-direction:row-reverse}
-.msg.you .bubble{background:var(--accent-soft);color:var(--ink);border-radius:14px 14px 3px 14px;
- padding:10px 15px;max-width:80%}
-.bubble h1{font-size:var(--step-3)}.bubble h2{font-size:var(--step-2)}.bubble h3{font-size:var(--step-1)}
-.bubble h1,.bubble h2,.bubble h3{margin:.2em 0 -.2em;line-height:1.3;text-wrap:balance;letter-spacing:-.01em}
-.bubble p,.bubble li{margin:0}
-.bubble ul,.bubble ol{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:5px}
-.bubble strong{font-weight:640}
-.bubble code{background:var(--sunk);padding:.12em .38em;border-radius:5px;font-size:.87em}
-.think{color:var(--muted);display:flex;gap:9px;align-items:center;font-size:.92rem}
-.dots{flex:none;white-space:nowrap}
-.dots i{display:inline-block;width:5px;height:5px;margin:0 1px;border-radius:50%;background:var(--muted);
- animation:bl 1.2s infinite}.dots i:nth-child(2){animation-delay:.2s}.dots i:nth-child(3){animation-delay:.4s}
-@keyframes bl{0%,60%,100%{opacity:.25}30%{opacity:1}}
+def _webui_dir():
+    """Where the built interface lives.
 
-/* result summary: the answer, legible at a glance ---------------------------------------------- */
-.eyebrow{font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600}
-.stats{display:flex;flex-wrap:wrap;gap:10px}
-.stat{flex:1 1 120px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);
- padding:11px 14px;box-shadow:var(--shadow-sm)}
-.stat .v{font-size:1.5rem;font-weight:650;line-height:1.15;font-variant-numeric:tabular-nums;
- letter-spacing:-.02em;margin-top:2px}
-.pill{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:5px 12px;
- font-size:.83rem;font-weight:600;border:1px solid transparent}
-.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
-.pill.high{color:var(--ok);background:var(--ok-bg);border-color:var(--ok)}
-.pill.moderate{color:var(--warn);background:var(--warn-bg);border-color:var(--warn)}
-.pill.low{color:var(--risk);background:var(--risk-bg);border-color:var(--risk)}
-.pill.unknown{color:var(--muted);background:var(--sunk);border-color:var(--line-strong)}
+    The interface's source is `frontend/` (React + TypeScript); `npm run build` compiles it into
+    `webui/`, which is what actually ships. That directory is committed so a clone runs without
+    Node installed, and PyInstaller bundles it into the packaged app — where it lands beside the
+    unpacked modules in sys._MEIPASS rather than next to this file.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    for path in (os.path.join(getattr(sys, "_MEIPASS", here), _WEBUI_DIRNAME),
+                 os.path.join(here, _WEBUI_DIRNAME)):
+        if os.path.isdir(path):
+            return path
+    return None
 
-/* panels --------------------------------------------------------------------------------------- */
-.note{background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:14px 16px;
- color:var(--ink-soft);font-size:.93rem;box-shadow:var(--shadow-sm)}
-.note b{color:var(--ink)}
-.note.err{border-color:var(--risk);background:var(--risk-bg);color:var(--ink)}
-.link{color:var(--accent);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
-.card{border:1px solid var(--line);border-radius:var(--r-md);background:var(--card);overflow:hidden;
- box-shadow:var(--shadow-sm)}
-.card>summary{cursor:pointer;padding:13px 16px;font-weight:600;font-size:.95rem;list-style:none;
- display:flex;align-items:center;gap:9px}
-.card>summary::-webkit-details-marker{display:none}
-.card>summary:hover{background:var(--accent-soft)}
-.card>summary .chev{color:var(--muted);transition:transform .18s;display:inline-block}
-.card[open]>summary .chev{transform:rotate(90deg)}
-.card[open]>summary{border-bottom:1px solid var(--line)}
-.card .rep{padding:4px 18px 18px}
-/* --- Charts ------------------------------------------------------------------------------
-   The SVGs inherit `color` and `font-family` from here, which is how a single drawing works in
-   both themes: chrome is stroked in currentColor, only the segment hues are fixed. */
-.charts .cbody{padding:14px 18px 18px;color:var(--ink)}
-.ctabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
-.ctab{appearance:none;border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);
- font:inherit;font-size:.83rem;padding:6px 11px;border-radius:999px;cursor:pointer;
- transition:background .15s,border-color .15s,color .15s}
-.ctab:hover{background:var(--accent-soft);border-color:var(--line-strong)}
-.ctab.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
-.ctab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.cpane.hide{display:none}
-.ctitle{font-weight:600;font-size:.95rem;margin-bottom:10px}
-/* The chart is vector and fluid, but below ~430px the axis labels collide, so let it scroll
-   inside its own box rather than squeezing the type into illegibility. */
-.cwrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);
- border-radius:var(--r-sm);padding:10px}
-.cwrap>.chart{display:block;min-width:430px;max-width:100%;height:auto}
-.ccap{margin:11px 0 0;font-size:.85rem;line-height:1.55;color:var(--muted)}
-.ccap strong{color:var(--ink-soft)}
-@media(prefers-reduced-motion:reduce){.ctab{transition:none}}
-.rep table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.85rem;display:block;
- overflow-x:auto;font-variant-numeric:tabular-nums}
-.rep th,.rep td{border:1px solid var(--line);padding:6px 10px;text-align:left;white-space:nowrap}
-.rep thead th{background:var(--sunk);font-weight:600}
-.rep tbody tr:nth-child(even){background:var(--sunk)}
-.rep h1{font-size:var(--step-2)}.rep h2{font-size:var(--step-1)}.rep h3{font-size:var(--step-0)}
-.rep h1,.rep h2,.rep h3{letter-spacing:-.01em;margin:1.2em 0 .4em}
-.rep p,.rep li{font-size:.92rem;color:var(--ink-soft)}
-.rep blockquote{margin:1em 0;padding:.7em 1em;background:var(--accent-soft);border-left:3px solid var(--accent);
- border-radius:0 var(--r-sm) var(--r-sm) 0}
-.rep code{background:var(--sunk);padding:.1em .3em;border-radius:4px}
-.rep hr{border:none;border-top:1px solid var(--line);margin:1.4em 0}
 
-/* actions ---------------------------------------------------------------------------------------- */
-.chips{display:flex;flex-wrap:wrap;gap:8px}
-.chip{border:1px solid var(--line-strong);background:var(--card);color:var(--ink-soft);
- border-radius:999px;padding:7px 14px;font:inherit;font-size:.85rem;cursor:pointer;
- text-decoration:none;display:inline-flex;align-items:center;gap:6px;
- transition:border-color .15s,color .15s,background .15s}
-.chip:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
-.field{width:100%;padding:8px 11px;border:1px solid var(--line-strong);border-radius:var(--r-sm);
- background:var(--card);color:var(--ink);font:inherit;font-size:.9rem}
-.field:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--ring)}
-.err-text{color:var(--risk);font-size:.88rem}
-.sep{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+def _webui_asset(url_path):
+    """Resolve a URL to a file inside the built interface, returning (bytes, content-type).
 
-/* composer ---------------------------------------------------------------------------------------- */
-.composer{flex:none;border-top:1px solid var(--line);background:var(--surface);padding:14px 20px 16px}
-/* Centre the controls against the text, not the box floor: bottom-aligning them left the icons
-   sitting ~5px below the field's optical centre. */
-.cbox{max-width:780px;margin:0 auto;background:var(--card);border:1px solid var(--line-strong);
- border-radius:var(--r-lg);padding:5px;display:flex;align-items:center;gap:4px;
- box-shadow:var(--shadow-sm);transition:border-color .15s,box-shadow .15s}
-.cbox:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--ring)}
-.cbox.drag{border-color:var(--accent);border-style:dashed;box-shadow:0 0 0 3px var(--ring)}
-textarea#in{flex:1;border:none;background:transparent;resize:none;font:inherit;color:var(--ink);
- padding:10px 4px;max-height:180px;outline:none}
-textarea#in::placeholder{color:var(--muted)}
-.iconbtn{width:36px;height:36px;border-radius:10px;border:none;background:transparent;color:var(--muted);
- cursor:pointer;flex:none;display:flex;align-items:center;justify-content:center;transition:.15s}
-.iconbtn:hover{background:var(--accent-soft);color:var(--accent)}
-.iconbtn:disabled{opacity:.4;cursor:default}
-#send{background:var(--accent);color:var(--accent-ink)}
-#send:hover:enabled{background:var(--accent-hover)}
-#send:disabled{background:var(--line-strong);color:var(--muted)}
-.hint{max-width:780px;margin:8px auto 0;color:var(--muted);font-size:.76rem;text-align:center}
+    Everything is resolved through realpath and checked to be inside the bundle. The server only
+    listens on localhost, but "only listens locally" has never been a good reason to let a path
+    escape its directory.
+    """
+    root = _webui_dir()
+    if not root:
+        return None
+    from urllib.parse import unquote, urlparse
+    rel = unquote(urlparse(url_path).path).lstrip("/")
+    if not rel or rel.endswith("/"):
+        rel = "index.html"
+    if os.path.splitext(rel)[1].lower() not in _WEBUI_TYPES:
+        return None
+    real_root = os.path.realpath(root)
+    target = os.path.realpath(os.path.join(real_root, rel))
+    if os.path.commonpath([real_root, target]) != real_root or not os.path.isfile(target):
+        return None
+    with open(target, "rb") as fh:
+        return fh.read(), _WEBUI_TYPES[os.path.splitext(rel)[1].lower()] + "; charset=utf-8"
 
-/* settings ---------------------------------------------------------------------------------------- */
-.scrim{position:fixed;inset:0;background:rgba(20,26,22,.5);display:none;align-items:center;
- justify-content:center;z-index:50;padding:20px;backdrop-filter:blur(2px)}
-.scrim.on{display:flex}
-.modal{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);max-width:480px;
- width:100%;padding:24px;box-shadow:var(--shadow)}
-.modal h2{margin:0 0 6px;font-size:var(--step-2);letter-spacing:-.01em}
-.modal p{color:var(--muted);font-size:.88rem;margin:.5em 0}
-.modal label{display:block;font-size:.7rem;letter-spacing:.09em;text-transform:uppercase;
- font-weight:600;color:var(--muted);margin:16px 0 6px}
-.modal input{width:100%;padding:10px 12px;border:1px solid var(--line-strong);border-radius:var(--r-sm);
- background:var(--card);color:var(--ink);font:inherit}
-.modal input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--ring)}
-.modal .row{display:flex;gap:8px;margin-top:20px;align-items:center}
-.btn{border:none;border-radius:var(--r-sm);padding:10px 16px;font:inherit;font-weight:600;
- font-size:.9rem;cursor:pointer;transition:.15s}
-.btn:disabled{opacity:.45;cursor:default}
-.btn.primary{background:var(--accent);color:var(--accent-ink)}
-.btn.primary:hover:enabled{background:var(--accent-hover)}
-.btn.sub{background:var(--sunk);color:var(--ink-soft)}
-.btn.sub:hover:enabled{background:var(--line)}
-.status{font-size:.85rem;padding:11px 13px;border-radius:var(--r-sm);background:var(--sunk);
- margin-top:10px;line-height:1.5;color:var(--ink-soft)}
-.status.ok{color:var(--ok);background:var(--ok-bg)}
-.status.warn{color:var(--warn);background:var(--warn-bg)}
 
-@media print{header,.composer,.chips,.scrim{display:none}.thread{overflow:visible}
- body{height:auto;overflow:visible}.card[open] .rep{display:block}
- /* Paper has no tabs. Print every chart, not just whichever one happened to be in front —
-    otherwise the PDF someone circulates silently drops three quarters of the evidence. */
- .ctabs{display:none}.cpane.hide{display:block}
- .cpane{break-inside:avoid;margin-bottom:14px}.cwrap{border:none;padding:0;overflow:visible}}
-/* A 250px sidebar on a small window leaves no room to read the result, so drop it there. */
-@media(max-width:820px){.side{display:none}}
-@media(max-width:560px){.wrap{padding:18px 14px 40px}.stat{flex:1 1 100%}
- header{padding:10px 14px}}
-"""
+def _missing_ui_page():
+    """Shown when the interface has not been built.
 
-_CHAT_BODY = ("<header><div class=\"brand\">"
-              "<svg class=\"mark\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\">"
-              "<path d=\"M12 2l2.6 6.8L21.5 12l-6.9 3.2L12 22l-2.6-6.8L2.5 12l6.9-3.2z\"/></svg>"
-              "<span>Survey Segmenter</span></div>"
-              "<span class=\"sp\"></span>"
-              "<button class=\"hbtn ghost\" id=\"newbtn\" title=\"Start over\">+ New</button>"
-              "<button class=\"hbtn\" id=\"printbtn\" title=\"Save this conversation as a PDF\">Save PDF</button>"
-              "<button class=\"hbtn\" id=\"setbtn\">Settings</button>"
-              "<button class=\"hbtn\" id=\"quitbtn\">Quit</button></header>"
-              "<div class=\"body\">"
-              "<aside class=\"side\" id=\"side\">"
-              "<div class=\"head\"><span class=\"eyebrow\">Projects</span></div>"
-              "<button class=\"newbtn\" id=\"sidenew\">+ &nbsp;New analysis</button>"
-              "<div class=\"list\" id=\"projlist\"></div></aside>"
-              "<div class=\"main\">"
-              "<div class=\"thread\" id=\"thread\"><div class=\"wrap\" id=\"wrap\"></div></div>"
-              "<div class=\"composer\"><div class=\"cbox\" id=\"cbox\">"
-              "<button class=\"iconbtn\" id=\"attach\" title=\"Attach a survey file (.csv or .xlsx)\">"
-              "<svg width=\"19\" height=\"19\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" "
-              "stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">"
-              "<path d=\"M21.4 11.05l-8.49 8.49a5 5 0 01-7.07-7.07l8.49-8.49a3.33 3.33 0 014.71 4.71"
-              "l-8.49 8.49a1.67 1.67 0 01-2.36-2.36l7.78-7.78\"/></svg></button>"
-              "<textarea id=\"in\" rows=\"1\" placeholder=\"Attach a survey file to begin\">"
-              "</textarea>"
-              "<button class=\"iconbtn\" id=\"send\" title=\"Send\" disabled>"
-              "<svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" "
-              "stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\">"
-              "<path d=\"M12 19V5M6 11l6-6 6 6\"/></svg></button>"
-              "<input type=\"file\" id=\"file\" accept=\".csv,.xlsx,.xls\" hidden></div>"
-              "<div class=\"hint\" id=\"hint\">Your file and your data stay on this computer. "
-              "Nothing is uploaded.</div></div></div></div>"
-              "<div class=\"scrim\" id=\"scrim\"><div class=\"modal\">"
-              "<h2>AI interpretation</h2>"
-              "<p>Survey Segmenter can send your <b>results</b> &mdash; the group sizes, profiles and "
-              "confidence, never anyone&rsquo;s individual answers &mdash; to Claude to interpret them "
-              "and answer your questions, using your own Anthropic account.</p>"
-              "<div class=\"status\" id=\"setstatus\">Checking&hellip;</div>"
-              "<label for=\"keyin\">Anthropic API key</label>"
-              "<input id=\"keyin\" type=\"password\" placeholder=\"sk-ant-...\" autocomplete=\"off\" "
-              "spellcheck=\"false\">"
-              "<p>Get one at <span class=\"link\" id=\"consolelink\">console.anthropic.com</span>. "
-              "It is stored only on this computer.</p>"
-              "<div class=\"row\"><button class=\"btn primary\" id=\"savekey\">Save key</button>"
-              "<button class=\"btn sub\" id=\"removekey\">Remove</button>"
-              "<span style=\"flex:1\"></span>"
-              "<button class=\"btn sub\" id=\"closeset\">Close</button></div></div></div>")
-
-# Raw string: the JS contains regex escapes (\. in the filename check) that Python would otherwise
-# treat as unknown escape sequences — a DeprecationWarning today, a SyntaxError in a future Python.
-_CHAT_JS = r"""
-(function(){
-function $(id){return document.getElementById(id);}
-function el(t,c,h){var e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;}
-/* Quotes are escaped too, not just angle brackets: esc() is also used inside quoted attributes
-   (a group name the user typed), where a stray " would otherwise break out of the attribute. */
-var _ESC={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
-function esc(s){return (s==null?'':String(s)).replace(/[&<>"']/g,function(c){return _ESC[c];});}
-var thread=$('thread'),wrap=$('wrap'),input=$('in'),send=$('send'),fileEl=$('file'),cbox=$('cbox'),hint=$('hint');
-var HINT='Your file and your data stay on this computer. Nothing is uploaded.';
-var S={sid:null,busy:false,ai:false};
-function scroll(){thread.scrollTop=thread.scrollHeight;}
-// Every request goes through here, so a dropped connection, a crashed handler or a non-JSON reply
-// can never surface as a raw exception or leave the page stuck mid-action.
-function req(url,opts){
- return fetch(url,opts||{}).then(function(r){
-  return r.text().then(function(txt){
-   try{return JSON.parse(txt);}
-   catch(e){return {ok:false,error:'The app sent back something unexpected. Please try again.'};}
-  });
- }).catch(function(){
-  return {ok:false,error:'Could not reach the app. It may have been closed — reopen Survey Segmenter and try again.'};
- });
-}
-function postJSON(url,body){
- return req(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
-}
-// Catch the obvious problems before uploading, so the answer is instant instead of a round trip.
-function fileProblem(f){
- if(!f)return 'Please choose a file.';
- if(typeof f.size==='number'&&f.size===0)return 'That file is empty. Export your survey again and try once more.';
- if(typeof f.size==='number'&&f.size>100*1024*1024)return 'That file is bigger than 100 MB. Please export a smaller one — one row per person is all I need.';
- var n=(f.name||'').toLowerCase();
- if(n&&!/\.(csv|tsv|txt|xlsx|xlsm|xls)$/.test(n))
-  return 'I can read .csv and .xlsx survey exports. "'+f.name+'" does not look like one.';
- return null;
-}
-function addAI(){var m=el('div','msg ai');m.appendChild(el('div','av','✦'));var b=el('div','bubble');m.appendChild(b);wrap.appendChild(m);scroll();return b;}
-function addYou(text){var m=el('div','msg you');var b=el('div','bubble');b.textContent=text;m.appendChild(b);wrap.appendChild(m);scroll();return b;}
-function typing(label){var b=addAI();b.innerHTML='<div class="think"><span class="dots"><i></i><i></i><i></i></span>'+esc(label)+'</div>';return b;}
-function note(inner){var b=addAI();b.innerHTML='<div class="note">'+inner+'</div>';scroll();return b;}
-function fmtWhen(s){ if(!s)return ''; var d=new Date(s); if(isNaN(d))return '';
- var t=(Date.now()-d.getTime())/1000;
- if(t<60)return 'just now'; if(t<3600)return Math.floor(t/60)+' min ago';
- if(t<86400)return Math.floor(t/3600)+' h ago'; if(t<604800)return Math.floor(t/86400)+' d ago';
- return d.toLocaleDateString();}
-function renderProjects(list){
- var el=$('projlist'); el.innerHTML='';
- if(!list||!list.length){ el.innerHTML='<div class="empty">Your analysed surveys will be saved here, so you can come back to them.</div>'; return; }
- list.forEach(function(p){
-  var row=el2('div','projrow');
-  var b=el2('button','proj'+(p.id===S.sid?' active':''),
-   '<div class="t">'+esc(p.title||'Untitled survey')+'</div>'
-   +'<div class="m"><span class="dot '+esc(p.confidence||'unknown')+'"></span>'
-   +esc((p.k!=null?p.k+' groups · ':'')+(p.n_people!=null?p.n_people+' people':''))
-   +'</div><div class="m">'+esc(fmtWhen(p.updated))+'</div>');
-  b.addEventListener('click',function(){openProject(p.id);});
-  var x=el2('button','xbtn','&times;'); x.title='Delete this project';
-  x.addEventListener('click',function(ev){ev.stopPropagation();deleteProject(p.id);});
-  row.appendChild(b); row.appendChild(x); el.appendChild(row);
- });
-}
-function el2(t,c,h){var e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e;}
-function loadProjects(){
- return req('/projects').then(function(d){renderProjects(d.projects||[]); return d.projects||[];});
-}
-function deleteProject(id){
- postJSON('/delete_project',{session_id:id}).then(function(d){ if(id===S.sid){S.sid=null; greet();} renderProjects(d.projects||[]); });
-}
-function renderResult(d){
- var b=addAI();
- b.innerHTML=resultBlocks(d);
- wireScore(); wireRegroup(); wireNames(); wireCharts(); scroll();
- return b;
-}
-function openProject(id){
- if(S.busy)return;
- setBusy(true);
- req('/project?id='+encodeURIComponent(id)).then(function(d){
-  setBusy(false);
-  if(!d.ok){loadProjects();return;}
-  S.sid=d.session_id; S.ai=d.ai_available;
-  wrap.innerHTML='';
-  // Replay in the order it happened: the request, then the result, then the conversation about
-  // it. Appending the result last would show the report below answers that discuss it.
-  var tr=(d.transcript||[]).slice(), shown=false;
-  if(tr.length && tr[0].role==='you'){addYou(tr.shift().text||'');}
-  if(d.report_html){renderResult(d); shown=true;}
-  tr.forEach(function(m){
-   if(m.role==='you'){addYou(m.text||'');}
-   else if(m.html){var b=addAI(); b.innerHTML=m.html;}
-  });
-  if(!shown && !tr.length){greet();}
-  input.placeholder='Ask about your segments…';
-  loadProjects(); scroll();
- }).catch(function(){setBusy(false);});
-}
-function greet(){wrap.innerHTML='';var b=addAI();b.innerHTML='<div class="eyebrow">Start here</div><h2>Turn a survey into clear customer groups</h2><p>Drop a <code>.csv</code> or <code>.xlsx</code> export anywhere on this page, or use the paperclip. I will find the groups, tell you how much to trust them, and give you the files to act on.</p><p style="color:var(--muted);font-size:.9rem">With an API key in Settings, <strong>Claude</strong> also explains what the groups mean for your team and answers your questions about them.</p>';}
-function setBusy(v){S.busy=v;cbox.style.opacity=v?'.6':'';$('attach').disabled=v;updateSend();}
-function updateSend(){send.disabled=S.busy||!input.value.trim();}
-var CONF_TEXT={high:'Trust these groups',moderate:'Treat as directional',low:'Do not rely on these',unknown:'Confidence unclear'};
-function statStrip(d){
- var c=(d.confidence||'unknown'), label=c.charAt(0).toUpperCase()+c.slice(1);
- return '<div><div class="eyebrow">Result</div><div class="stats" style="margin-top:8px">'
-  +'<div class="stat"><div class="eyebrow">Groups found</div><div class="v">'+esc(String(d.k))+'</div></div>'
-  +'<div class="stat"><div class="eyebrow">People</div><div class="v">'+esc(String(d.n_people))+'</div></div>'
-  +'<div class="stat"><div class="eyebrow">Confidence</div><div style="margin-top:7px"><span class="pill '+esc(c)+'">'+esc(label)+'</span></div>'
-  +'<div class="muted" style="font-size:.78rem;color:var(--muted);margin-top:6px">'+esc(CONF_TEXT[c]||'')+'</div></div>'
-  +'</div></div>';
-}
-/* The three places a finished analysis gets painted (fresh run, re-group, reopened project) must
-   stay identical — they drifted apart once already, so they share one builder. */
-function resultBlocks(d){return statStrip(d)+chartsCard(d)+reportCard(d.title,d.report_html)+downloadBar(d)+namePanel(d)+columnPicker(d);}
-function reportCard(title,html){return '<details class="card"><summary><span class="chev">▸</span>'+esc(title)+' &mdash; full statistical report</summary><div class="rep">'+html+'</div></details>';}
-/* Charts. The point of showing them is that a reader can disagree with the write-up: a wrong
-   conclusion (mine, Claude's, or the statistics') is visible in the segment map in a second.
-   Tabbed rather than stacked so the evidence is one glance, not two metres of scrolling. */
-var CHART_TAB={map:'Segment map',fit:'Who belongs',k:'How many groups',profiles:'What differs',radar:'Group shapes',heatmap:'Full grid'};
-function chartsCard(d){
- if(!d.charts||!d.charts.length)return '';
- var tabs='',panes='';
- d.charts.forEach(function(c,i){
-  tabs+='<button type="button" class="ctab'+(i?'':' on')+'" data-ci="'+i+'">'+esc(CHART_TAB[c.id]||('Chart '+(i+1)))+'</button>';
-  panes+='<div class="cpane'+(i?' hide':'')+'" data-cp="'+i+'"><div class="ctitle">'+esc(c.title)+'</div>'
-        +'<div class="cwrap">'+c.svg+'</div><p class="ccap">'+c.caption+'</p></div>';
- });
- return '<details class="card charts" open><summary><span class="chev">▸</span>See the data yourself'
-  +' &mdash; check the groups with your own eyes</summary><div class="cbody">'
-  +'<div class="ctabs" role="tablist">'+tabs+'</div>'+panes+'</div></details>';
-}
-function wireCharts(){
- /* One delegated listener per card rather than one per tab: fewer handlers to leak when a card is
-    re-rendered, and it keeps working if a chart set is swapped in place. */
- [].slice.call(document.querySelectorAll('.charts .ctabs')).forEach(function(bar){
-  if(bar.dataset.wired)return; bar.dataset.wired='1';
-  bar.addEventListener('click',function(ev){
-   var b=ev.target.closest('.ctab'); if(!b||!bar.contains(b))return;
-   var card=bar.closest('.charts'), i=b.dataset.ci;
-   [].slice.call(card.querySelectorAll('.ctab')).forEach(function(x){x.classList.toggle('on',x===b);});
-   [].slice.call(card.querySelectorAll('.cpane')).forEach(function(p){p.classList.toggle('hide',p.dataset.cp!==i);});
-  });
- });
-}
-/* Every file the app can produce needs an entry — the two the user creates through the UI
-   (naming the groups, scoring new people) were falling through to the raw filename. */
-var DL_LABEL={'segment_assignments.csv':'Who is in which group (CSV)','group_profiles.csv':'What defines each group (CSV)','typing_rule.json':'Scoring rule (JSON)','group_names.csv':'Your group names (CSV)','scored_new_people.csv':'Newly scored people (CSV)'};
-function downloadBar(d){
- if(!d.downloads||!d.downloads.length)return '';
- var b=d.downloads.map(function(f){return '<a class="chip" href="/download?session_id='+encodeURIComponent(d.session_id)+'&file='+encodeURIComponent(f)+'" download>'+esc(DL_LABEL[f]||f)+'</a>';}).join('');
- return '<div class="note" style="margin-top:12px"><b>Take it away.</b> Use these to act on the groups &mdash; load them into your CRM, an ad audience, or a mail tool.<div class="chips" style="margin:10px 0 0">'+b+'</div>'
-  +'<div class="sep"><b>Score new people.</b> Upload a file of people who were not in this study and I will put each of them into one of these groups.<div class="chips" style="margin:10px 0 0"><button class="chip" id="scorebtn">Choose a file of new people…</button></div><div id="scoreout" style="margin-top:8px"></div></div></div>';
-}
-function namePanel(d){
- var k=d.k||0; if(!k)return '';
- var saved=d.names||[];
- var rows=''; for(var i=0;i<k;i++){
-  rows+='<label style="display:flex;gap:8px;align-items:center;margin:5px 0;font-size:.9rem"><span class="muted" style="min-width:74px">Group '+i+'</span>'
-   +'<input class="namebox field" data-i="'+i+'" placeholder="e.g. Privacy-First Lurkers" value="'+esc(saved[i]||'')+'" style="flex:1"></label>';
- }
- return '<details class="card" style="margin-top:12px"><summary><span class="chev">▸</span>Name the groups</summary><div class="rep">'
-  +'<p class="muted">The automatic labels are built from question codes. Give the groups names your team will recognise &mdash; they go into the downloads.</p>'
-  +rows+'<div class="chips" style="margin-top:10px"><button class="chip" id="namesuggest">Suggest names with Claude</button><button class="chip" id="nameapply">Save these names</button></div>'
-  +'<div id="nameout" style="margin-top:8px"></div></div></details>';
-}
-function wireNames(){
- var ap=$('nameapply'); if(!ap)return;
- function boxes(){return [].slice.call(document.querySelectorAll('.namebox'));}
- function send(payload,out){
-  setBusy(true); out.innerHTML='<span class="think">Working…</span>';
-  postJSON('/name',Object.assign({session_id:S.sid},payload)).then(function(d){
-    setBusy(false);
-    if(!d.ok){var m=esc(d.error);if(d.kind==='nokey'||d.kind==='nosdk')m+=' <span class="link js-settings">Open Settings</span>';out.innerHTML='<span class="err-text">'+m+'</span>';return;}
-    boxes().forEach(function(b,i){b.value=d.names[i]||b.value;});
-    out.innerHTML='<b>Saved.</b> The names are now in the downloads.<div class="chips" style="margin:8px 0 0"><a class="chip" href="/download?session_id='+encodeURIComponent(S.sid)+'&file=group_names.csv" download>Group names (CSV)</a><a class="chip" href="/download?session_id='+encodeURIComponent(S.sid)+'&file=segment_assignments.csv" download>Who is in which group (CSV)</a></div>';
-    scroll();
-   }).catch(function(e){setBusy(false);out.innerHTML='<span class="err-text">'+esc(e)+'</span>';});
- }
- $('namesuggest').addEventListener('click',function(){if(!S.busy)send({suggest:true},$('nameout'));});
- ap.addEventListener('click',function(){
-  if(S.busy)return;
-  var vals=boxes().map(function(b){return b.value.trim();});
-  if(vals.some(function(v){return !v;})){$('nameout').innerHTML='<span class="err-text">Give every group a name, or use Suggest.</span>';return;}
-  send({names:vals},$('nameout'));
- });
-}
-var ROLE={used:'grouped on',background:'background trait',choice:'multiple choice',rating:'rating',skipped:'set aside'};
-function columnPicker(d){
- var cols=d.columns||{}, names=Object.keys(cols);
- if(!names.length)return '';
- var rows=names.map(function(c){
-  var on=cols[c]==='used';
-  return '<label style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:.9rem">'
-   +'<input type="checkbox" class="colbox" value="'+esc(c)+'"'+(on?' checked':'')+'>'
-   +'<span>'+esc(c)+'</span><span class="eyebrow" style="margin-left:auto">'+esc(ROLE[cols[c]]||cols[c])+'</span></label>';
- }).join('');
- return '<details class="card" style="margin-top:12px"><summary><span class="chev">▸</span>Group people on different questions</summary>'
-  +'<div class="rep"><p class="muted">I chose the ticked questions. Tick or untick to group people on something else &mdash; useful if a question you care about was set aside as a background trait.</p>'
-  +rows+'<div class="chips" style="margin-top:10px"><button class="chip" id="regroupbtn">Re-group with these questions</button></div>'
-  +'<div id="regroupout" style="margin-top:8px"></div></div></details>';
-}
-function wireRegroup(){
- var b=$('regroupbtn'); if(!b)return;
- b.addEventListener('click',function(){
-  if(S.busy)return;
-  var picked=[].slice.call(document.querySelectorAll('.colbox')).filter(function(x){return x.checked;}).map(function(x){return x.value;});
-  var out=$('regroupout');
-  if(picked.length<2){out.innerHTML='<span style="color:var(--accent)">Pick at least two questions.</span>';return;}
-  out.innerHTML='<span class="think">Re-grouping…</span>'; setBusy(true);
-  postJSON('/regroup',{session_id:S.sid,items:picked}).then(function(d){
-    setBusy(false);
-    if(!d.ok){out.innerHTML='<span class="err-text">'+esc(d.error)+'</span>';return;}
-    addYou('Group people on: '+picked.join(', '));
-    var b2=addAI(); b2.innerHTML=resultBlocks(d);
-    wireScore(); wireRegroup(); wireNames(); wireCharts(); scroll();
-    if(d.ai_available)ask(null,true);
-   }).catch(function(e){setBusy(false);out.innerHTML='<span class="err-text">'+esc(e)+'</span>';});
- });
-}
-function wireScore(){
- var btn=$('scorebtn'); if(!btn)return;
- btn.addEventListener('click',function(){
-  if(S.busy)return;
-  var f=document.createElement('input'); f.type='file'; f.accept='.csv,.xlsx,.xls';
-  f.addEventListener('change',function(){
-   if(!f.files.length)return;
-   var out=$('scoreout'); out.innerHTML='<span class="think">Scoring…</span>';
-   var fd=new FormData(); fd.append('file',f.files[0]);
-   setBusy(true);
-   req('/score?session_id='+encodeURIComponent(S.sid),{method:'POST',body:fd}).then(function(d){
-     setBusy(false);
-     if(!d.ok){out.innerHTML='<span class="err-text">'+esc(d.error)+'</span>';return;}
-     var rows=Object.keys(d.breakdown).map(function(k){return 'Group '+esc(k)+': '+d.breakdown[k];}).join(' &middot; ');
-     out.innerHTML='<b>'+d.n+' people scored.</b> '+rows+'<br><span class="muted">Average confidence '+d.mean_confidence+'.</span><div class="chips" style="margin:8px 0 0"><a class="chip" href="/download?session_id='+encodeURIComponent(S.sid)+'&file='+encodeURIComponent(d.file)+'" download>Download the scored list (CSV)</a></div>';
-     scroll();
-    }).catch(function(e){setBusy(false);out.innerHTML='<span class="err-text">'+esc(e)+'</span>';});
-  });
-  f.click();
- });
-}
-function aiNudge(){return 'Add your Anthropic API key in <span class="link js-settings">Settings</span> to have Claude interpret these results and answer questions about them. The statistics above are complete either way.';}
-function suggestChips(){var qs=['Which segment should we target first?','Draft a landing-page headline for the top segment.','How much should we trust these groups?','What would make the least-clear segment sharper?'];var row=el('div','chips');qs.forEach(function(q){var b=el('button','chip',esc(q));b.addEventListener('click',function(){if(S.busy)return;row.remove();ask(q,false);});row.appendChild(b);});wrap.appendChild(row);scroll();}
-function analyze(file){
- var bad=fileProblem(file);
- if(bad){addYou('Analyse my survey: '+((file&&file.name)||'file'));note('<b>I cannot use that file.</b> '+esc(bad));return;}
- addYou('Analyse my survey: '+(file.name||'file'));
- var tip=typing('Crunching the numbers — clustering and validating. This can take up to a minute…');
- setBusy(true);
- var fd=new FormData();fd.append('file',file);
- req('/analyze',{method:'POST',body:fd}).then(function(d){
-  setBusy(false);
-  if(!d.ok){tip.innerHTML='<div class="note err">'+esc(d.error)+'</div>';scroll();return;}
-  S.sid=d.session_id;S.ai=d.ai_available;
-  tip.innerHTML=resultBlocks(d);
-  wireScore(); wireRegroup(); wireNames(); wireCharts(); loadProjects();
-  input.placeholder='Ask about your segments…';scroll();
-  if(d.ai_available){ask(null,true);}else{note(aiNudge());}
- }).catch(function(e){setBusy(false);tip.innerHTML='<div class="note err">Something went wrong reading that file: '+esc(e)+'</div>';});
-}
-function ask(text,initial){
- var oc=wrap.querySelector('.chips');if(oc)oc.remove();
- if(text!=null)addYou(text);
- var tip=typing(initial?'Claude is reading your results…':'Claude is thinking…');
- setBusy(true);
- postJSON('/chat',{session_id:S.sid,message:text||'',initial:!!initial}).then(function(d){
-  setBusy(false);
-  if(!d.ok){var m=esc(d.error);if(d.kind==='nokey'||d.kind==='nosdk'||d.kind==='auth'){m+=' <span class="link js-settings">Open Settings</span>';}tip.innerHTML='<div class="note err">'+m+'</div>';scroll();return;}
-  tip.innerHTML=d.reply_html;if(initial)suggestChips();loadProjects();scroll();
- }).catch(function(e){setBusy(false);tip.innerHTML='<div class="note err">Could not reach the app: '+esc(e)+'</div>';});
-}
-function doSend(){
- if(S.busy)return;var t=input.value.trim();if(!t)return;
- if(!S.sid){hint.textContent='Attach a survey file first (the paperclip) so I have results to talk about.';setTimeout(function(){hint.textContent=HINT;},4000);return;}
- input.value='';autogrow();updateSend();ask(t,false);
-}
-function autogrow(){input.style.height='auto';input.style.height=Math.min(input.scrollHeight,180)+'px';}
-input.addEventListener('input',function(){autogrow();updateSend();});
-input.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();doSend();}});
-send.addEventListener('click',doSend);
-$('attach').addEventListener('click',function(){if(!S.busy)fileEl.click();});
-fileEl.addEventListener('change',function(){if(fileEl.files&&fileEl.files.length){var f=fileEl.files[0];fileEl.value='';if(!S.busy)analyze(f);}});
-['dragover','dragenter'].forEach(function(ev){document.addEventListener(ev,function(e){e.preventDefault();cbox.classList.add('drag');});});
-document.addEventListener('dragleave',function(e){if(e.relatedTarget===null)cbox.classList.remove('drag');});
-document.addEventListener('drop',function(e){
- e.preventDefault();cbox.classList.remove('drag');
- if(S.busy)return;
- var dt=e.dataTransfer; if(!dt)return;
- // A dropped folder shows up as an entry with no real file behind it; uploading it would send
- // zero bytes and look like a mysterious failure, so say what happened instead.
- if(dt.items&&dt.items.length){
-  var it=dt.items[0];
-  if(it.webkitGetAsEntry){var entry=it.webkitGetAsEntry();
-   if(entry&&entry.isDirectory){note('<b>That is a folder.</b> Please drop the survey file itself — a .csv or .xlsx.');return;}}
- }
- if(dt.files&&dt.files.length)analyze(dt.files[0]);
-});
-// Last line of defence: whatever goes wrong, never leave the page stuck in a busy state with the
-// composer disabled and no way back.
-window.addEventListener('unhandledrejection',function(){setBusy(false);});
-window.addEventListener('error',function(){setBusy(false);});
-function renderStatus(d){var s=$('setstatus'),k=$('keyin'),save=$('savekey'),rm=$('removekey');
- if(!d||!d.sdk_installed){s.className='status warn';s.innerHTML='The AI add-on is not installed. Install it with <code>pip install anthropic</code> (or rebuild the app), then reopen this page. The statistics work without it.';k.disabled=true;save.disabled=true;rm.disabled=true;return;}
- k.disabled=false;save.disabled=false;
- if(d.env_key){s.className='status ok';s.textContent='A key is set from your environment (ANTHROPIC_API_KEY) and will be used. Claude interpretation is on.';k.disabled=true;save.disabled=true;rm.disabled=true;}
- else if(d.configured){s.className='status ok';s.textContent='A key is saved on this computer. Claude interpretation is on.';rm.disabled=false;}
- else{s.className='status warn';s.textContent='No API key yet. Paste one below to turn on Claude interpretation.';rm.disabled=true;}
-}
-function openSettings(){$('scrim').classList.add('on');req('/settings').then(renderStatus);}
-function closeSettings(){$('scrim').classList.remove('on');$('keyin').value='';}
-$('setbtn').addEventListener('click',openSettings);
-$('closeset').addEventListener('click',closeSettings);
-$('scrim').addEventListener('click',function(e){if(e.target===$('scrim'))closeSettings();});
-$('consolelink').addEventListener('click',function(){window.open('https://console.anthropic.com/','_blank');});
-$('savekey').addEventListener('click',function(){var key=$('keyin').value.trim();if(!key)return;var save=$('savekey');save.disabled=true;
- postJSON('/settings',{api_key:key}).then(function(d){
-  if(!d.ok){save.disabled=false;$('setstatus').className='status warn';$('setstatus').textContent=d.error||'Could not save the key.';return;}
-  $('keyin').value='';renderStatus(d);S.ai=d.configured;closeSettings();if(S.sid)ask(null,true);
- }).catch(function(){save.disabled=false;});
-});
-$('removekey').addEventListener('click',function(){postJSON('/settings',{clear:true}).then(function(d){renderStatus(d);S.ai=false;});});
-$('printbtn').addEventListener('click',function(){window.print();});
-function startNew(){if(S.busy)return;S.sid=null;input.value='';autogrow();updateSend();
- input.placeholder='Attach a survey file to begin';greet();loadProjects();}
-$('newbtn').addEventListener('click',startNew);
-$('sidenew').addEventListener('click',startNew);
-$('quitbtn').addEventListener('click',function(){window.location.href='/quit';});
-wrap.addEventListener('click',function(e){var t=e.target.closest?e.target.closest('.js-settings'):null;if(t)openSettings();});
-greet();
-loadProjects();
-req('/settings').then(function(d){S.ai=d&&d.configured;});
-})();
-"""
-
-_CHAT_PAGE = ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-              "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-              "<title>Survey Segmenter</title><style>" + _CHAT_CSS + "</style></head><body>"
-              + _CHAT_BODY + "<script>" + _CHAT_JS + "</script></body></html>")
+    Only reachable from a source checkout where `webui/` was deleted — the packaged app always
+    carries it. Names the one command that fixes it rather than showing a blank page.
+    """
+    return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+            "<title>Survey Segmenter</title><style>body{margin:0;min-height:100vh;display:flex;"
+            "align-items:center;justify-content:center;background:#F4F2E8;color:#1B2420;"
+            "font:16px/1.6 ui-sans-serif,-apple-system,system-ui,sans-serif;padding:24px}"
+            "div{max-width:34rem}code{background:#EFEDE1;padding:.15em .4em;border-radius:5px;"
+            "font-size:.9em}h1{font-size:1.3rem;margin:0 0 .6em}"
+            "@media(prefers-color-scheme:dark){body{background:#161A17;color:#E9EBE4}"
+            "code{background:#2F3531}}</style></head><body><div>"
+            "<h1>The interface has not been built yet.</h1>"
+            "<p>The statistics engine is fine \u2014 only the web interface is missing. Build it "
+            "once with:</p><p><code>cd frontend &amp;&amp; npm install &amp;&amp; npm run build"
+            "</code></p><p>Then reload this page. If you do not have Node installed, "
+            "<code>python3 segment_kmeans.py your_survey.csv</code> runs the whole analysis from "
+            "the command line and needs nothing extra.</p></div></body></html>")
 
 
 class ProjectStore:
@@ -3942,7 +3370,32 @@ def serve(port=8000):
                             "ai_available": bool(st.get("configured") and st.get("sdk_installed")),
                             "reopened": True})
                 return
-            self._bytes(_CHAT_PAGE)
+            self._serve_ui()
+
+        def _serve_ui(self):
+            """Serve the built interface.
+
+            Anything that is not an API route is either a file in the bundle or the app itself:
+            the single page is returned for unknown paths so a reload of any URL comes back to a
+            working app rather than a 404 from a server that has one page.
+            """
+            asset = _webui_asset(self.path)
+            if asset is None:
+                asset = _webui_asset("/index.html")
+            if asset is None:
+                self._bytes(_missing_ui_page(), code=503)
+                return
+            body, ctype = asset
+            # Hashed filenames are content-addressed, so they can be cached hard; index.html names
+            # which hashes are current and must never be, or a rebuilt app serves the old bundle.
+            cache = ("no-store" if self.path in ("/", "/index.html")
+                     else "public, max-age=31536000, immutable")
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Cache-Control", cache)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         def _do_download(self):
             """Hand back one of this run's result files (who is in which group, what defines each

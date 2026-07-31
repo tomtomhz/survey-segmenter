@@ -32,9 +32,37 @@ subprocess.run([sys.executable, "-m", "pip", "install", "--user",
 # Re-analysing costs about a minute and removes a whole class of "it worked on my machine".
 shutil.rmtree("build", ignore_errors=True)
 
+
+def _build_frontend():
+    """Compile the React interface into webui/ before packaging it.
+
+    webui/ is committed, so a build can proceed without Node — but shipping whatever happened to
+    be committed while frontend/ has moved on is exactly how a released app ends up one version
+    behind its own source. If npm is here, rebuild; if it is not, say which it is rather than
+    letting the difference pass silently.
+    """
+    npm = shutil.which("npm")
+    if not npm:
+        if not Path("webui/index.html").exists():
+            sys.exit("No npm and no built interface in webui/. Install Node, then re-run:\n"
+                     "    cd frontend && npm install && npm run build")
+        print("NOTE: npm not found — packaging the committed build in webui/ as-is.\n"
+              "      If frontend/ has changed since it was built, the app will not show it.")
+        return
+    print("Building the interface (npm run build)…")
+    if not Path("frontend/node_modules").is_dir():
+        subprocess.run([npm, "ci"], cwd="frontend", check=True)
+    subprocess.run([npm, "run", "build"], cwd="frontend", check=True)
+
+
+_build_frontend()
+
 cmd = [sys.executable, "-m", "PyInstaller", "--name", "Survey Segmenter", "--windowed",
        "--noconfirm", "--collect-submodules", "sklearn",
        "--collect-all", "anthropic", "--collect-all", "pydantic", "--collect-all", "pydantic_core",
+       # The interface itself. Without this the packaged app starts, serves its API, and shows
+       # nothing at all — the failure looks like a broken server rather than a missing folder.
+       "--add-data", f"webui{os.pathsep}webui",
        "run_app.py"]
 if sys.platform == "darwin":
     cmd += ["--osx-bundle-identifier", "io.github.tomtomhz.surveysegmenter"]

@@ -30,3 +30,10 @@ results/
 *.csv
 *.xlsx
 !examples/*.csv
+
+# Node. node_modules is 5,885 files; webui/ is the build output and IS committed on purpose —
+# it is what the Python app serves, so a clone runs without Node and PyInstaller has something
+# to bundle. CI rebuilds it and fails if the committed copy has drifted from frontend/.
+frontend/node_modules/
+frontend/.vite/
+frontend/*.tsbuildinfo
