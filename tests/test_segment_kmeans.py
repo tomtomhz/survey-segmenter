@@ -24,6 +24,7 @@ import pytest
 # rather than relying on the working directory pytest happened to be invoked from.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import segment_kmeans as sk
+import webapp
 from sklearn.metrics import adjusted_rand_score
 from sklearn.cluster import KMeans
 
@@ -622,8 +623,8 @@ def test_multipart_parser_extracts_uploaded_file():
     b = "BND123"; csv = b"id,q1\n1,4\n"
     body = (f"--{b}\r\n".encode() + b'Content-Disposition: form-data; name="file"; filename="s.csv"'
             b"\r\n\r\n" + csv + f"\r\n--{b}--\r\n".encode())
-    assert sk._parse_multipart_file(f"multipart/form-data; boundary={b}", body) == csv
-    assert sk._parse_multipart_file("text/plain", body) is None
+    assert webapp._parse_multipart_file(f"multipart/form-data; boundary={b}", body) == csv
+    assert webapp._parse_multipart_file("text/plain", body) is None
 
 
 def test_demographics_do_not_swallow_long_attitude_questions():
@@ -653,27 +654,27 @@ def test_the_built_interface_is_served_and_cannot_be_escaped():
     reachable. The server listens on localhost only, which is a reason to be careful about path
     traversal rather than a reason not to bother.
     """
-    assert sk._webui_dir(), "webui/ is missing — run: cd frontend && npm run build"
+    assert webapp._webui_dir(), "webui/ is missing — run: cd frontend && npm run build"
 
-    index = sk._webui_asset("/")
+    index = webapp._webui_asset("/")
     assert index and b"<!doctype html>" in index[0].lower()
     assert index[1].startswith("text/html")
-    assert sk._webui_asset("/index.html")[0] == index[0]
+    assert webapp._webui_asset("/index.html")[0] == index[0]
 
     # The real bundle, whatever this build's content hash happens to be.
     import os
-    asset = next(f for f in os.listdir(os.path.join(sk._webui_dir(), "assets"))
+    asset = next(f for f in os.listdir(os.path.join(webapp._webui_dir(), "assets"))
                  if f.endswith(".js"))
-    served = sk._webui_asset(f"/assets/{asset}")
+    served = webapp._webui_asset(f"/assets/{asset}")
     assert served and served[1].startswith("text/javascript")
 
     for escape in ("/../segment_kmeans.py", "/assets/../../ai_interpret.py",
                    "/%2e%2e/%2e%2e/maxdiff.py", "/../../../../etc/hosts"):
-        assert sk._webui_asset(escape) is None, escape
+        assert webapp._webui_asset(escape) is None, escape
     # Not an asset type we serve, even if the file exists next to the bundle.
-    assert sk._webui_asset("/build_app.py") is None
+    assert webapp._webui_asset("/build_app.py") is None
 
-    assert "The app has closed" in sk._shutdown_page()
+    assert "The app has closed" in webapp._shutdown_page()
     assert callable(sk.app) and callable(sk.serve)
 
 
@@ -780,7 +781,7 @@ def test_saving_one_project_from_several_threads_at_once(tmp_path):
     """
     import concurrent.futures
 
-    store = sk.ProjectStore(tmp_path)
+    store = webapp.ProjectStore(tmp_path)
 
     def save(i):
         store.save("sess-abc", {"title": f"survey {i}", "k": 3, "n_people": 100 + i,
@@ -800,7 +801,7 @@ def test_the_project_store_survives_hostile_and_broken_input(tmp_path):
     """It holds the user's surveys, including the original uploads, and its directory is one the
     user can open. It has to stay inside itself and keep working when something on disk is not
     what it expects."""
-    store = sk.ProjectStore(tmp_path)
+    store = webapp.ProjectStore(tmp_path)
 
     # A project id reaches this from a request body, so it is not trusted.
     for pid in ["../../ESCAPED", "..", "/etc/passwd", "....//....//x", "", "  ", "a" * 300]:
@@ -1044,7 +1045,7 @@ def test_a_missing_interface_says_how_to_build_it():
     """webui/ is committed, so this is only reachable in a checkout where it was deleted. It must
     name the command that fixes it — a blank page would look like the whole tool is broken, when
     in fact the statistics are fine and only the interface is absent."""
-    page = sk._missing_ui_page()
+    page = webapp._missing_ui_page()
     assert "npm run build" in page and "not been built" in page
     # The command line still works without any of this, and should say so.
     assert "segment_kmeans.py your_survey.csv" in page
@@ -1375,7 +1376,7 @@ def test_projects_persist_to_disk_and_reopen(tmp_path):
     """Analysed surveys are saved as projects, like a chat history, so closing the app does not
     throw away an analysis. A saved project must come back with its report, its downloads and its
     conversation — and the store must never write outside its own folder."""
-    store = sk.ProjectStore(tmp_path)
+    store = webapp.ProjectStore(tmp_path)
     store.save("abc123", {"title": "campus_wave1.csv", "digest": "# Report",
                           "report_html": "<h2>In plain language</h2>" + "x" * 300,
                           "files": {"segment_assignments.csv": "id,segment\n1,0\n"},
@@ -1722,7 +1723,7 @@ def test_naming_regrouping_and_scoring_all_survive_a_restart(tmp_path, monkeypat
     also replace the WHOLE stored result — a reopened project showing the previous grouping's report
     beside the new group count is worse than not saving at all."""
     monkeypatch.setenv("SURVEY_SEGMENTER_PROJECTS", str(tmp_path / "projects"))
-    store = sk.ProjectStore()
+    store = webapp.ProjectStore()
 
     # Jittered rather than perfectly constant: identical answers within a group make the ANOVA
     # undefined and flood the run with warnings that have nothing to do with what is being tested.
@@ -1952,7 +1953,7 @@ def test_the_ai_digest_contains_no_individual_respondent_data():
 
     # The charts the browser receives carry no raster copy: it draws the vector one, and shipping
     # both would add a quarter of a megabyte to every response for bytes the page never reads.
-    for chart in sk._charts_for_browser(r["charts"]):
+    for chart in webapp._charts_for_browser(r["charts"]):
         assert "png_b64" not in chart
         assert chart["svg"]
 
@@ -2162,7 +2163,7 @@ def test_actions_still_work_after_a_session_is_evicted_from_memory(tmp_path, mon
     whether or not the session happens to still be resident.
     """
     monkeypatch.setenv("SURVEY_SEGMENTER_PROJECTS", str(tmp_path / "projects"))
-    store = sk.ProjectStore()
+    store = webapp.ProjectStore()
 
     rng = np.random.default_rng(5)
     base = np.tile([5, 1], 40)

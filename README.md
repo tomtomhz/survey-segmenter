@@ -21,7 +21,8 @@ files to act on. Everything runs on your own machine — see [PRIVACY.md](docs/P
 
 | | |
 |---|---|
-| `segment_kmeans.py` | The engine: preparation, clustering, validation, report, typing rule, and the local web server |
+| `segment_kmeans.py` | The engine: preparation, clustering, validation, the report, and the typing rule |
+| `webapp.py` | The local web application: uploads, the API, saved projects. Imports the engine, never the other way round |
 | `charts.py` | Drawing only, with matplotlib. **scikit-learn computes, matplotlib draws** — nothing here decides anything about the segmentation |
 | `maxdiff.py` | Hierarchical Bayes scoring for best-worst (MaxDiff) exports |
 | `ai_interpret.py` | The optional Claude layer. Sends the aggregate report and the charts, never a respondent row |

@@ -132,6 +132,18 @@ Not a survey, but 17,000 real rows through the whole pipeline on 2026-07-31
 4. **Consolidate `segment-kmeans-tool.md`** in the assistant memory directory; it has grown to
    22 KB of appended paragraphs and is due a rewrite rather than another append.
 
+## How the modules divide up
+
+`segment_kmeans.py` decides what a segmentation is and what it means. `charts.py` draws it.
+`webapp.py` delivers it. `maxdiff.py` scores best-worst data before any of that happens.
+
+The direction of the imports is the point: `webapp` imports the engine, and the engine never
+imports `webapp`. `serve()` and `app()` remain on `segment_kmeans` as thin forwarders so the
+entry point does not change, and they import lazily because a module-scope import would be a
+cycle. `run_app.py` therefore imports `webapp` by name as well — a lazy import is invisible to
+PyInstaller, and shipping an app without its own web server is the same class of failure as the
+matplotlib SVG backend that was left out of the first packaged build.
+
 ## Working conventions
 
 - "Carte blanche" means execute through to completion; only stop if a finding invalidates an
