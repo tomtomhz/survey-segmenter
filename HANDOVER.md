@@ -3,7 +3,7 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-07-31 · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ 108 tests, CI green
+**Last updated:** 2026-07-31 · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ 108 Python + 38 frontend tests, CI green
 
 ---
 
@@ -13,7 +13,7 @@ this says where it stands, what was decided and why, and what to do next.
 |---|---|
 | Repo | `github.com/tomtomhz/survey-segmenter` — **private**, MIT, owner `tomtomhz` |
 | CI | Python 3.9 / 3.11 / 3.12 + a clean-install job, green |
-| Tests | 108, `pytest` from `tools/survey-segmenter/` |
+| Tests | 108 Python (`pytest`) + 38 frontend (`cd frontend && npm test`) |
 | Shipped app | macOS `.app`, ~76 MB, attached to the **v1.0.0 Release** — never in git history |
 | Local path | `~/Desktop/bd-gtm-review-team 3/tools/survey-segmenter/` |
 
@@ -36,6 +36,10 @@ expect it in *response handling*, not request construction.
 
 ## Decisions made, and why (don't silently reverse these)
 
+- **The interface is React + TypeScript in `frontend/`, compiled to `webui/`.** `webui/` is
+  committed — unusual for build output, and deliberate: a clone must run without Node, and the
+  packaged `.app` must have no build step. CI rebuilds it and fails on drift, so it cannot go
+  stale. `npm run dev` proxies to the Python app on 8000 for hot reload.
 - **Charts are hand-built SVG, not matplotlib.** Keeps the packaged app ~76 MB, keeps the
   PyInstaller build reliable, and the charts survive print/PDF and the standalone HTML report.
   Six views: segment map, per-person fit, quality across k, what differs, compare groups (radar),
@@ -86,12 +90,19 @@ from the same model HB assumes, which flatters it; real data will differ.
 - **Hopkins is unreliable on short surveys** and is now caveated in place rather than corrected —
   duplicate answer patterns inflate it (0.78 on pure noise with 2 Likert questions).
 - **Sidebar hides below 820px.** Offered a toggle; never requested.
+- **This machine's checkout is inside iCloud Drive** (`~/Desktop` is synced by default). With
+  ~6,000 files in `node_modules`, every read goes through the sync layer: `npm test` took over
+  half an hour instead of one second, Vitest workers timed out before starting, and macOS left
+  `App 2.tsx` conflict copies behind. Nothing is wrong with the code — move the repository
+  somewhere unsynced (`~/dev/`) before doing frontend work.
 
 ## Next candidates, roughly by value
 
-1. **Windows build** — the only platform gap. Blocked on a Windows runner.
-2. **Let Claude see the charts** — it currently reads only the text digest.
-3. **Consolidate `segment-kmeans-tool.md`** in the assistant memory directory; it has grown to
+1. **Move the repository out of iCloud Drive.** See the limitation above; it makes local
+   frontend work impractical, and CI is currently the only place the frontend suite runs quickly.
+2. **Windows build** — the only platform gap. Blocked on a Windows runner.
+3. **Let Claude see the charts** — it currently reads only the text digest.
+4. **Consolidate `segment-kmeans-tool.md`** in the assistant memory directory; it has grown to
    22 KB of appended paragraphs and is due a rewrite rather than another append.
 
 ## Working conventions

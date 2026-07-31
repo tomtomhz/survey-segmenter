@@ -5,6 +5,30 @@ the version is set in `pyproject.toml` and stamped into every report footer.
 
 ## [Unreleased]
 
+### The interface is now a real application
+
+- **Rebuilt in React 19 + TypeScript**, built with Vite, in `frontend/`. It replaces 640 lines of
+  CSS, markup and hand-written DOM manipulation that lived inside three string constants in
+  `segment_kmeans.py`, which had no type checking, no component boundaries and no tests of its own.
+- **Every server response is typed** against what the Python handlers actually return, so a change
+  on one side that is not reflected on the other fails the build rather than a user's afternoon.
+- **38 frontend tests** (Vitest + Testing Library) covering what the Python suite could only grep
+  for: that a dropped connection or a non-JSON reply never wedges the page, that unreadable files
+  are refused before upload, that a dropped folder is explained, and that the result blocks behave.
+- The design is unchanged — it was not the problem.
+
+### Fixed
+
+- **The opening Claude interpretation never ran.** The handler closed over `sessionId` from before
+  the analysis that had just set it, so it returned immediately and the automatic read-through of a
+  fresh result silently did not happen. Found by the new tests.
+- **The composer opened four lines tall, and briefly sat below the fold entirely.** Two separate
+  layout faults: the stylesheet made `<body>` the fixed-height flex column while React mounts into
+  a `#root` div in between, and measuring a flex item's `scrollHeight` after setting `height:auto`
+  returns the container's height rather than the content's.
+- **Two stale README claims.** MaxDiff hierarchical Bayes estimation now exists, and the licence is
+  MIT rather than absent — both were still described as missing.
+
 ### MaxDiff scoring (Hierarchical Bayes)
 
 - Drop a tidy best-worst export (`respondent_id | set | item | choice`) in and it is detected,
