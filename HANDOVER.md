@@ -3,7 +3,7 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-07-31 · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ 100 tests, CI green
+**Last updated:** 2026-07-31 · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ 108 tests, CI green
 
 ---
 
@@ -13,13 +13,13 @@ this says where it stands, what was decided and why, and what to do next.
 |---|---|
 | Repo | `github.com/tomtomhz/survey-segmenter` — **private**, MIT, owner `tomtomhz` |
 | CI | Python 3.9 / 3.11 / 3.12 + a clean-install job, green |
-| Tests | 100, `pytest` from `tools/survey-segmenter/` |
+| Tests | 108, `pytest` from `tools/survey-segmenter/` |
 | Shipped app | macOS `.app`, ~76 MB, attached to the **v1.0.0 Release** — never in git history |
 | Local path | `~/Desktop/bd-gtm-review-team 3/tools/survey-segmenter/` |
 
 ```bash
 cd ~/Desktop/"bd-gtm-review-team 3"/tools/survey-segmenter
-pytest                  # 100 tests, ~75s
+pytest                  # 108 tests, ~80s
 python3 run_app.py      # opens the web app
 python3 build_app.py    # rebuilds + signs + smoke-tests the .app
 ./finish-setup.sh       # re-runs the GitHub publish flow
@@ -38,6 +38,9 @@ expect it in *response handling*, not request construction.
 
 - **Charts are hand-built SVG, not matplotlib.** Keeps the packaged app ~76 MB, keeps the
   PyInstaller build reliable, and the charts survive print/PDF and the standalone HTML report.
+  Six views: segment map, per-person fit, quality across k, what differs, compare groups (radar),
+  full grid (heatmap). The bar chart trims to nine questions for legibility — the full grid is
+  the uncensored version, and the bars link to it.
 - **Only an aggregate digest goes to Claude — never a respondent row.** Enforced by
   `test_the_ai_digest_contains_no_individual_respondent_data` against 400 respondents. This is the
   load-bearing privacy guarantee; see `PRIVACY.md`.

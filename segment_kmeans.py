@@ -1605,12 +1605,174 @@ def chart_profiles(centroids, names=None, max_items=9, kind="means"):
                 "around; bars of near-identical length mean that question does not distinguish "
                 "anybody, whatever the report calls it.")
     if trimmed > 0:
-        caption += (f" ({trimmed} further one{'' if trimmed == 1 else 's'} separated the groups "
-                    "less and would not fit legibly — they are all in the "
-                    "<em>What defines each group</em> download.)")
+        # Now that the full grid exists, send the reader there rather than only to a download —
+        # the answer to "what about the other questions" is one tab away, not in a spreadsheet.
+        caption += (f" ({trimmed} more question{'' if trimmed == 1 else 's'} separated the groups "
+                    "less and would not fit legibly here. The <strong>Full grid</strong> tab "
+                    "shows every question with nothing left out.)")
     return {"id": "profiles", "title": "What makes the groups different",
             "svg": _svg(W, H, "".join(body), "Average answer per group for the most separating items"),
             "caption": caption}
+
+
+def chart_radar(centroids, names=None, max_axes=12, kind="means"):
+    """One outline per segment on a shared set of spokes — the persona view.
+
+    The profile bars answer "how do the groups differ on this question"; a radar answers "what
+    SHAPE is this group", which is how a brief gets written. Overlaying the segments is the point:
+    a persona is only meaningful relative to the others, and outlines that nest inside one another
+    rather than crossing mean the groups differ in degree, not in kind — worth knowing before
+    anyone writes four different pitches.
+    """
+    if centroids is None or centroids.empty:
+        return None
+    C = centroids.select_dtypes(include=[np.number])
+    C = C.loc[:, np.isfinite(C.to_numpy(float)).all(axis=0)] if not C.empty else C
+    k = len(C)
+    if C.empty or k < 2 or C.shape[1] < 3:        # a triangle is the smallest readable radar
+        return None
+    # Spokes get unreadable past about a dozen; keep the ones that actually separate the groups.
+    spread = (C.max(axis=0) - C.min(axis=0)).sort_values(ascending=False)
+    items = list(spread.index[:max_axes])
+    trimmed = len(spread) - len(items)
+    C = C[items]
+    n = len(items)
+
+    W, H = 720, 470
+    cx, cy, R = W / 2, 218, 150
+    lo = C.to_numpy(float).min(axis=0)
+    hi = C.to_numpy(float).max(axis=0)
+    span = np.where(hi - lo > 0, hi - lo, 1.0)
+    ang = -np.pi / 2 + np.arange(n) * 2 * np.pi / n
+
+    def xy(values):
+        # Scale each spoke to its own observed range: the axes carry different units, and a shared
+        # scale would flatten every difference on the smaller-numbered ones into invisibility.
+        f = 0.18 + 0.82 * (np.asarray(values, float) - lo) / span
+        return np.column_stack([cx + R * f * np.cos(ang), cy + R * f * np.sin(ang)])
+
+    body = []
+    for ring in (0.25, 0.5, 0.75, 1.0):
+        pts = " ".join(f"{cx + R*ring*np.cos(a):.1f},{cy + R*ring*np.sin(a):.1f}" for a in ang)
+        body.append(f'<polygon points="{pts}" fill="none" stroke="currentColor" '
+                    f'stroke-opacity="{0.16 if ring < 1 else 0.3}"/>')
+    for a in ang:
+        body.append(f'<line x1="{cx:.1f}" y1="{cy:.1f}" x2="{cx + R*np.cos(a):.1f}" '
+                    f'y2="{cy + R*np.sin(a):.1f}" stroke="currentColor" stroke-opacity=".14"/>')
+    for i, (a, label) in enumerate(zip(ang, items)):
+        lx, ly = cx + (R + 16) * np.cos(a), cy + (R + 16) * np.sin(a)
+        anchor_ = "middle" if abs(np.cos(a)) < 0.3 else ("start" if np.cos(a) > 0 else "end")
+        body.append(f'<text x="{lx:.1f}" y="{ly + 4:.1f}" font-size="10.5" text-anchor="{anchor_}" '
+                    f'fill="currentColor" fill-opacity=".7">'
+                    f'{_html.escape(_short_label(str(label), 14))}</text>')
+    for c in range(k):
+        pts = xy(C.iloc[c].to_numpy(float))
+        poly = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
+        col = _seg_colour(c)
+        body.append(f'<polygon points="{poly}" fill="{col}" fill-opacity=".13" stroke="{col}" '
+                    f'stroke-width="2"/>')
+        for x, y in pts:
+            body.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="2.6" fill="{col}"/>')
+    body.append(_legend(40, H - 14, k, names))
+
+    caption = ("Each outline is one group, drawn across the questions that separate the groups "
+               "most. A spoke reaching further out means that group scores higher on it. "
+               "<strong>What to look for:</strong> outlines with genuinely different shapes are "
+               "distinct personas you can write separate briefs for. Outlines that nest neatly "
+               "inside one another describe the same people at different intensities &mdash; one "
+               "message with a volume knob, not several audiences. Each spoke is scaled to its "
+               "own range, so shapes are comparable but distances between spokes are not.")
+    if trimmed > 0:
+        caption += (f" ({trimmed} more question{'' if trimmed == 1 else 's'} separated the groups "
+                    "less and would have crowded the spokes; the <strong>Full grid</strong> tab "
+                    "has all of them.)")
+    return {"id": "radar", "title": "Group shapes \u2014 the persona view",
+            "svg": _svg(W, H, "".join(body), "Radar chart of each group across the most separating items"),
+            "caption": caption}
+
+
+def chart_heatmap(centroids, names=None, kind="means"):
+    """Every group against every item at once, coloured by distance from the overall average.
+
+    The bar chart has to stop at nine questions to stay legible, which on a fifteen-item MaxDiff
+    block hides a third of the study. A heatmap has no such limit: the whole grid fits, and
+    reading it is one job — find the strong colours. Colour is diverging around each item's mean
+    so "unusually high for this group" and "unusually low" are distinguishable at a glance rather
+    than requiring the reader to compare numbers across a row.
+    """
+    if centroids is None or centroids.empty:
+        return None
+    C = centroids.select_dtypes(include=[np.number])
+    C = C.loc[:, np.isfinite(C.to_numpy(float)).all(axis=0)] if not C.empty else C
+    k = len(C)
+    if C.empty or k < 1:
+        return None
+    items = list(C.columns)
+    n = len(items)
+    V = C.to_numpy(float)
+    # Standardise per item: the cells answer "high or low FOR THIS QUESTION", which is the only
+    # comparison that makes sense when the columns carry different units and ranges.
+    mean = V.mean(axis=0)
+    sd = V.std(axis=0)
+    Z = (V - mean) / np.where(sd > 0, sd, 1.0)
+    zmax = max(1e-9, float(np.abs(Z).max()))
+
+    cell_w = max(30, min(64, int(620 / max(n, 1))))
+    cell_h = 34
+    L, T = 150, 92
+    W = L + cell_w * n + 26
+    H = T + cell_h * k + 76
+
+    def colour(z):
+        """Blue (below) through neutral to orange (above) — colourblind-safe, unlike red/green."""
+        t = float(np.clip(z / zmax, -1, 1))
+        if t >= 0:
+            r, g, b = 245 + (213 - 245) * t, 243 + (94 - 243) * t, 232 + (0 - 232) * t
+        else:
+            r, g, b = 245 + (0 - 245) * -t, 243 + (114 - 243) * -t, 232 + (178 - 232) * -t
+        return f"rgb({int(r)},{int(g)},{int(b)})"
+
+    body = []
+    for j, item in enumerate(items):
+        x = L + j * cell_w + cell_w / 2
+        body.append(f'<text x="{x:.1f}" y="{T - 8}" font-size="10.5" text-anchor="start" '
+                    f'fill="currentColor" fill-opacity=".7" '
+                    f'transform="rotate(-45 {x:.1f} {T - 8})">'
+                    f'{_html.escape(_short_label(str(item), 16))}</text>')
+    for c in range(k):
+        y = T + c * cell_h
+        label = (names[c] if names and c < len(names) and names[c] else f"Group {c}")
+        body.append(f'<text x="{L - 10}" y="{y + cell_h/2 + 4:.1f}" font-size="12" '
+                    f'text-anchor="end" fill="currentColor" fill-opacity=".85">'
+                    f'{_html.escape(_short_label(str(label), 17))}</text>')
+        for j in range(n):
+            x = L + j * cell_w
+            val = V[c, j]
+            txt = _num(val, 2 if abs(val) <= 1.5 else 1)
+            body.append(f'<rect x="{x}" y="{y}" width="{cell_w - 2}" height="{cell_h - 2}" '
+                        f'rx="2" fill="{colour(Z[c, j])}"/>'
+                        f'<text x="{x + (cell_w-2)/2:.1f}" y="{y + cell_h/2 + 3.5:.1f}" '
+                        f'font-size="9.5" text-anchor="middle" fill="#1B2420" '
+                        f'fill-opacity=".8">{txt}</text>')
+    # A key, because a colour scale nobody can read is decoration.
+    ky = T + cell_h * k + 26
+    for i, (z, lab) in enumerate([(-zmax, "below average"), (0, "average"), (zmax, "above average")]):
+        bx = L + i * 150
+        body.append(f'<rect x="{bx}" y="{ky}" width="20" height="13" rx="2" fill="{colour(z)}" '
+                    f'stroke="currentColor" stroke-opacity=".2"/>'
+                    f'<text x="{bx + 26}" y="{ky + 11}" font-size="11" fill="currentColor" '
+                    f'fill-opacity=".7">{lab}</text>')
+
+    what = "how likely each answer is" if kind == "probability" else "the average answer"
+    return {"id": "heatmap", "title": "Every group against every question",
+            "svg": _svg(W, H, "".join(body), "Heatmap of each group's score on every item"),
+            "caption": (f"The full grid: {what} for each group on all {n} question"
+                        f"{'' if n == 1 else 's'}, with nothing left out. Colour shows how far "
+                        "that group sits from the average <em>for that question</em>, so a strong "
+                        "colour means the group is genuinely unusual there. <strong>Read it by "
+                        "scanning for the strongest colours</strong> &mdash; those cells are what "
+                        "distinguishes a group. A row of pale cells is a group with no distinctive "
+                        "profile, which is worth knowing before it becomes a persona.")}
 
 
 def build_charts(seg, method, names=None):
@@ -1653,8 +1815,10 @@ def build_charts(seg, method, names=None):
     _try("who belongs", lambda: chart_silhouette(X, labels, names))
     _try("how many groups", lambda: chart_k_choice(seg.diagnostics, int(seg.recommended_k)))
     if centroids is not None:
-        _try("what differs", lambda: chart_profiles(
-            centroids, names, kind="probability" if method == "lca" else "means"))
+        kind = "probability" if method == "lca" else "means"
+        _try("what differs", lambda: chart_profiles(centroids, names, kind=kind))
+        _try("group shapes", lambda: chart_radar(centroids, names, kind=kind))
+        _try("full grid", lambda: chart_heatmap(centroids, names, kind=kind))
     return out
 
 
@@ -3342,7 +3506,7 @@ function reportCard(title,html){return '<details class="card"><summary><span cla
 /* Charts. The point of showing them is that a reader can disagree with the write-up: a wrong
    conclusion (mine, Claude's, or the statistics') is visible in the segment map in a second.
    Tabbed rather than stacked so the evidence is one glance, not two metres of scrolling. */
-var CHART_TAB={map:'Segment map',fit:'Who belongs',k:'How many groups',profiles:'What differs'};
+var CHART_TAB={map:'Segment map',fit:'Who belongs',k:'How many groups',profiles:'What differs',radar:'Group shapes',heatmap:'Full grid'};
 function chartsCard(d){
  if(!d.charts||!d.charts.length)return '';
  var tabs='',panes='';

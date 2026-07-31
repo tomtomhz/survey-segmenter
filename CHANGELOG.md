@@ -3,6 +3,49 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [Unreleased]
+
+### MaxDiff scoring (Hierarchical Bayes)
+
+- Drop a tidy best-worst export (`respondent_id | set | item | choice`) in and it is detected,
+  scored, and segmented on individual-level utilities — the input a MaxDiff instrument actually
+  calls for, and the gap that previously blocked the Stockholm-Cluster survey.
+- Estimation is Hierarchical Bayes in pure numpy: a sequential best-then-worst multinomial logit
+  with `b_i ~ MVN(mu, Sigma)`, sampled by Gibbs plus a vectorised Metropolis-Hastings step.
+- Measured against known utilities on simulated data, HB recovers *individual* utilities markedly
+  better than counting (0.76 → 0.92 correlation at strong separation, 0.67 → 0.84 at moderate).
+  Its effect on the segmentation itself is small but consistent. Neither method rescues genuinely
+  weak structure — see `HANDOVER.md`, which reports the full sweep including where HB does not
+  help. No real MaxDiff responses have been through it yet.
+
+### Charts
+
+- Two more views, six in total. **Compare groups** overlays each segment as a radar outline, so
+  the shape of a segment can be read at a glance rather than reconstructed from bars. **Full
+  grid** is a heatmap of every question against every segment, diverging around each question's
+  own mean.
+- The full grid exists because the bar chart stops at nine questions to stay legible — on a
+  fifteen-item block that hid a third of the study behind a download link. The bars now say
+  where the rest went, and the answer is one tab away.
+
+### Fixed
+
+- **The confidence rating could still read "Moderate" on noise.** The amber band was reachable on
+  bootstrap Jaccard alone; split-half replication now gates it too.
+- **A broken chart withheld the others.** They were built as one eagerly-evaluated tuple, so a
+  single NaN centroid discarded all of them, segment map included. Each is now isolated.
+- **The tool could recommend a number of groups it could not support** — either too small to
+  target or more groups than there were distinct answer patterns. Unviable k values are now
+  filtered before the vote rather than warned about after it.
+- **Hopkins read high on structureless data.** Duplicate answer patterns inflate it (0.78 on pure
+  noise with two Likert questions); it is now caveated in place rather than silently trusted.
+- **A privacy assertion had stopped testing anything** — a substring check became a list-membership
+  check when the payload became a list, and passed regardless. Fixed and confirmed to fail
+  against a planted identifier.
+- **A session evicted from memory 404'd** instead of rehydrating from disk.
+- **The Claude layer had no degradation path.** It now steps down through three request shapes,
+  because not every account has the fallbacks beta and not every SDK knows the parameter.
+
 ## [1.0.0] — 2026-07-30
 
 First release put under version control. Everything below was built and verified before this

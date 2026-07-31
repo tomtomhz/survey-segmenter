@@ -1391,12 +1391,13 @@ def _noise_survey(n=150, seed=11):
                          **{f"q{j}": rng.integers(1, 6, n) for j in range(1, 6)}})
 
 
-def test_every_run_produces_the_four_charts_as_valid_standalone_svg():
+def test_every_run_produces_the_full_chart_set_as_valid_standalone_svg():
     """The charts are the user's own check on the result, so they are not optional decoration:
     a run that produces a report must produce the pictures of that report too."""
     r = sk.run_analysis(_three_group_survey().to_csv(index=False).encode(),
                         cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
-    assert [c["id"] for c in r["charts"]] == ["map", "fit", "k", "profiles"]
+    assert [c["id"] for c in r["charts"]] == ["map", "fit", "k", "profiles",
+                                              "radar", "heatmap"]
     for c in r["charts"]:
         assert c["svg"].startswith("<svg") and c["svg"].endswith("</svg>")
         assert c["svg"].count("<svg") == c["svg"].count("</svg>") == 1
@@ -1405,7 +1406,7 @@ def test_every_run_produces_the_four_charts_as_valid_standalone_svg():
         assert "currentColor" in c["svg"]
     # And they reach the page the user actually looks at.
     doc = sk.charts_html(r["charts"])
-    assert doc.count("<svg") == 4
+    assert doc.count("<svg") == len(r["charts"])
 
 
 def test_the_charts_say_out_loud_when_the_segments_are_not_real():
@@ -1481,7 +1482,8 @@ def test_categorical_surveys_are_charted_too():
                                                   run_consensus=False,
                                                   check_variable_selection=False))
     assert r["method"] == "lca"
-    assert [c["id"] for c in r["charts"]] == ["map", "fit", "k", "profiles"]
+    assert [c["id"] for c in r["charts"]] == ["map", "fit", "k", "profiles",
+                                              "radar", "heatmap"]
     prof = next(c for c in r["charts"] if c["id"] == "profiles")
     # Probabilities, not means — the caption must not tell the reader to read them as ratings.
     assert "How likely each answer is" in prof["caption"]
@@ -1608,12 +1610,15 @@ def test_one_broken_chart_does_not_take_the_others_down():
         labels = np.array([0] * 30 + [1] * 30)
         recommended_k = 2
         X = np.random.default_rng(0).normal(size=(60, 4))
-        centroids = pd.DataFrame({"q1": [1.0, 4.0], "q2": [4.0, 1.0]})
+        # Three questions, not two: the radar needs at least three spokes before it will draw,
+        # and this fixture has to exercise every chart for the isolation check to mean anything.
+        centroids = pd.DataFrame({"q1": [1.0, 4.0], "q2": [4.0, 1.0], "q3": [2.0, 3.0]})
         diagnostics = pd.DataFrame({"k": [2, 3], "silhouette": [0.5, 0.3],
                                     "stability_ARI": [0.9, 0.6],
                                     "prediction_strength": [0.85, 0.5]})
 
-    assert [c["id"] for c in sk.build_charts(_Seg(), "kmeans")] == ["map", "fit", "k", "profiles"]
+    assert [c["id"] for c in sk.build_charts(_Seg(), "kmeans")] == \
+        ["map", "fit", "k", "profiles", "radar", "heatmap"]
 
     original = sk.chart_segment_map
     sk.chart_segment_map = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
@@ -1621,7 +1626,7 @@ def test_one_broken_chart_does_not_take_the_others_down():
         survivors = [c["id"] for c in sk.build_charts(_Seg(), "kmeans")]
     finally:
         sk.chart_segment_map = original
-    assert survivors == ["fit", "k", "profiles"], survivors
+    assert survivors == ["fit", "k", "profiles", "radar", "heatmap"], survivors
 
 
 def test_charts_survive_degenerate_data():
@@ -1930,3 +1935,49 @@ def test_maxdiff_reader_drops_incomplete_sets_rather_than_inventing_choices():
     assert len(items) == 15 and len(respondents) == 30
     kept_for_r0 = int((d2[respondents.index("R0000")] >= 0).any(axis=1).sum())
     assert kept_for_r0 == 11, f"expected the damaged set to be dropped, kept {kept_for_r0}"
+
+
+def test_the_heatmap_shows_every_question_where_the_bars_cannot():
+    """The bar chart stops at nine questions to stay legible, which on a fifteen-item MaxDiff
+    block hides a third of the study. That trim is the heatmap's whole reason for existing, so
+    the grid must be complete — and the bars must say where the rest went."""
+    rng = np.random.default_rng(0)
+    centroids = pd.DataFrame(rng.normal(0, 1, (4, 15)),
+                             columns=[f"use_case_{i:02d}" for i in range(15)],
+                             index=[f"Segment {i}" for i in range(4)])
+
+    def shown(chart):
+        return sum(1 for i in range(15) if f"use case {i:02d}" in chart["svg"])
+
+    bars, heat = sk.chart_profiles(centroids), sk.chart_heatmap(centroids)
+    assert shown(bars) == 9, shown(bars)
+    assert shown(heat) == 15, f"the full grid hid {15 - shown(heat)} questions"
+    assert "Full grid" in bars["caption"], "the bars must point at where the rest are"
+
+
+def test_radar_and_heatmap_refuse_shapes_they_cannot_draw_honestly():
+    """A radar needs at least three spokes and two outlines to mean anything; below that it is a
+    decoration implying comparison where none exists. Returning None is the honest answer, and
+    build_charts drops the chart rather than showing an empty frame."""
+    c = pd.DataFrame({"a": [1.0, 4.0], "b": [4.0, 1.0], "c": [2.0, 3.0]},
+                     index=["Segment 0", "Segment 1"])
+    assert sk.chart_radar(c) is not None
+    assert sk.chart_radar(c[["a", "b"]]) is None          # two spokes is a line, not a shape
+    assert sk.chart_radar(c.iloc[:1]) is None             # one group has nothing to contrast with
+    assert sk.chart_heatmap(pd.DataFrame()) is None
+    # A single group still has a readable profile row, so the heatmap keeps working.
+    assert sk.chart_heatmap(c.iloc[:1]) is not None
+
+    for chart in (sk.chart_radar(c), sk.chart_heatmap(c)):
+        assert chart["svg"].startswith("<svg") and chart["svg"].endswith("</svg>")
+        # Titles are escaped by the UI, so an HTML entity here renders as literal "&mdash;".
+        assert "&" not in chart["title"], chart["title"]
+
+
+def test_every_chart_is_offered_on_a_normal_run():
+    """All six charts should appear together — each answers a different question, and a silently
+    missing one looks like the tool decided the reader did not need it."""
+    r = sk.run_analysis(_three_group_survey().to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+    assert [c["id"] for c in r["charts"]] == ["map", "fit", "k", "profiles", "radar", "heatmap"]
+    assert sk.charts_html(r["charts"]).count("<svg") == 6
