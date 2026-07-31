@@ -15,10 +15,10 @@ this says where it stands, what was decided and why, and what to do next.
 | CI | Python 3.9 / 3.11 / 3.12 + a clean-install job, green |
 | Tests | 109 Python (`pytest`) + 59 frontend (`cd frontend && npm test`) |
 | Shipped app | **v1.1.0 release**: macOS `.app` (72 MB) and Windows `.exe` (99 MB), both built and smoke-tested by the **Desktop app** workflow. Never in git history. |
-| Local path | `~/Desktop/bd-gtm-review-team 3/tools/survey-segmenter/` |
+| Local path | `~/dev/survey-segmenter` — **moved out of iCloud Drive**, see below |
 
 ```bash
-cd ~/Desktop/"bd-gtm-review-team 3"/tools/survey-segmenter
+cd ~/dev/survey-segmenter
 pytest                  # 112 tests, ~95s
 python3 run_app.py      # opens the web app
 python3 build_app.py    # rebuilds + signs + smoke-tests the .app
@@ -100,6 +100,16 @@ result: it is not an artefact of grading the model on its own homework. It still
 about accuracy on real people. Locked in by
 `test_hb_still_beats_counting_when_its_assumptions_are_wrong`.
 
+## Validated on real data
+
+Not a survey, but 17,000 real rows through the whole pipeline on 2026-07-31
+(California housing, `median_house_value` and four correlates):
+
+- 3 groups, confidence **high**, ~40s per run on an M-series Mac.
+- All six charts drawn, no chart errors, every SVG well-formed and theme-aware.
+- The standalone HTML report embeds all six charts and fetches nothing from the network — the
+  only URLs in it are XML namespace declarations.
+
 ## Known limitations (real, not hypothetical)
 
 - **HB has never seen real MaxDiff responses.** The misspecification sweep below is the
@@ -110,16 +120,15 @@ about accuracy on real people. Locked in by
 - **Hopkins is unreliable on short surveys** and is now caveated in place rather than corrected —
   duplicate answer patterns inflate it (0.78 on pure noise with 2 Likert questions).
 - **Sidebar hides below 820px.** Offered a toggle; never requested.
-- **This machine's checkout is inside iCloud Drive** (`~/Desktop` is synced by default). With
-  ~6,000 files in `node_modules`, every read goes through the sync layer: `npm test` took over
-  half an hour instead of one second, Vitest workers timed out before starting, and macOS left
-  `App 2.tsx` conflict copies behind. Nothing is wrong with the code — move the repository
-  somewhere unsynced (`~/dev/`) before doing frontend work.
+- **Do not put this checkout back inside iCloud Drive.** It lived under `~/Desktop`, which macOS
+  syncs by default, and with ~6,000 files in `node_modules` every read went through the sync
+  layer. `npm test` took 37 minutes instead of one second, Vitest workers timed out before they
+  could start, `npm run build` hung indefinitely, and macOS left `App 2.tsx` conflict copies in
+  the source tree. Nothing was ever wrong with the code. Now at `~/dev/survey-segmenter`:
+  59 frontend tests in 1.1s, build in 266ms.
 
 ## Next candidates, roughly by value
 
-1. **Move the repository out of iCloud Drive.** See the limitation above; it makes local
-   frontend work impractical, and CI is currently the only place the frontend suite runs quickly.
 3. **Let Claude see the charts** — it currently reads only the text digest.
 4. **Consolidate `segment-kmeans-tool.md`** in the assistant memory directory; it has grown to
    22 KB of appended paragraphs and is due a rewrite rather than another append.

@@ -164,7 +164,11 @@ class _Figure:
 
     def svg(self):
         buf = io.StringIO()
-        self.fig.savefig(buf, format="svg", bbox_inches="tight", pad_inches=0.15)
+        # No metadata block. matplotlib embeds an RDF/Dublin Core record naming itself and
+        # stamping the creation time — about 600 bytes per chart for nothing a reader wants, and
+        # a timestamp that makes otherwise identical output differ byte for byte.
+        self.fig.savefig(buf, format="svg", bbox_inches="tight", pad_inches=0.15,
+                         metadata={"Date": None, "Creator": None, "Format": None, "Type": None})
         out = buf.getvalue()
         # Drop matplotlib's XML preamble and DOCTYPE: this is embedded in an HTML document, not
         # served as a standalone file, and a stray <?xml ...?> mid-page is a parse error.
