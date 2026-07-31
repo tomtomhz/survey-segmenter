@@ -1458,7 +1458,9 @@ def classify_new(rule, df, id_col=None):
     sub = df[items].copy()
     for c in items:
         if not pd.api.types.is_numeric_dtype(sub[c]):
-            rec = _try_likert(sub[c])
+            # The rule already established this item is a rating scale; applying it must not
+            # depend on how many distinct answers this particular batch happens to contain.
+            rec = _apply_likert(sub[c])
             if rec is None:
                 raise ValueError(f"_UNSCORABLE_ITEM:{c}")
             sub[c] = rec
@@ -1999,9 +2001,36 @@ def _norm(v):
     return str(v).strip().lower()
 
 
+def _apply_likert(series):
+    """Recode a column already KNOWN to be Likert, however few distinct answers it contains.
+
+    Detection and application are different problems, and sharing one function conflated them.
+    `_try_likert` refuses a column with fewer than two distinct answers, which is right when
+    deciding whether something IS a rating scale — one repeated word is no evidence. It is wrong
+    when applying a scale that was already established: scoring a single new person means every
+    column has exactly one answer, so the typing tool refused every batch of one, and refused a
+    batch of twenty if any one question happened to get the same answer from everybody.
+
+    Safe because the scales do not disagree: no token appears in two of them with different
+    numbers, so a lone answer still resolves to exactly one value.
+    """
+    vals = {_norm(v) for v in series.dropna().unique()} - _MISSING_TOKENS
+    if not vals:
+        return None
+    for scale in _LIKERT_SCALES:
+        if vals <= set(scale):
+            return series.map(lambda v: np.nan if (pd.isna(v) or _norm(v) in _MISSING_TOKENS)
+                              else scale.get(_norm(v), np.nan))
+    return None
+
+
 def _try_likert(series):
     """If every non-missing answer maps under one known agree/disagree-style scale, return the
-    recoded 1-5 series; otherwise None. Missing tokens are tolerated and become NaN."""
+    recoded 1-5 series; otherwise None. Missing tokens are tolerated and become NaN.
+
+    Used for DETECTION, where two distinct answers is the minimum evidence that a column is a
+    rating scale at all. To apply a scale already known, use `_apply_likert`.
+    """
     vals = {_norm(v) for v in series.dropna().unique()} - _MISSING_TOKENS
     if len(vals) < 2:
         return None

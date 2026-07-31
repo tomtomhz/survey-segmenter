@@ -677,6 +677,97 @@ def test_the_built_interface_is_served_and_cannot_be_escaped():
     assert callable(sk.app) and callable(sk.serve)
 
 
+def test_scoring_a_single_new_person_works():
+    """"Score new people" exists to type a handful of new leads, and it refused every batch of one.
+
+    The rule already knows an item is a rating scale, but applying it went through the DETECTION
+    helper, which requires two distinct answers before it will call a column Likert. Scoring one
+    person means every column has exactly one answer, so it refused — and a batch of twenty
+    failed too if any single question happened to get the same answer from everybody, which on a
+    consensus question is normal. Both raised _UNSCORABLE_ITEM at the user.
+
+    Safe to relax when applying rather than detecting: no token appears in two of the built-in
+    scales with different numbers, so a lone answer resolves to exactly one value.
+    """
+    words = {1: "Strongly disagree", 2: "Disagree", 3: "Neutral", 4: "Agree", 5: "Strongly agree"}
+    rng = np.random.default_rng(0)
+    rows = [[f"P{i}", *[words[int(np.clip(round(b + rng.normal(0, .6)), 1, 5))]
+                        for b in ([5, 1, 5, 2] if i % 2 else [1, 5, 2, 4])]] for i in range(160)]
+    df = pd.DataFrame(rows, columns=["respondent_id", "q1", "q2", "q3", "q4"])
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=3, **FAST))
+    rule = json.loads(r["files"]["typing_rule.json"])
+
+    one_of_each = {
+        "A": {"q1": "Strongly agree", "q2": "Strongly disagree",
+              "q3": "Strongly agree", "q4": "Disagree"},
+        "B": {"q1": "Strongly disagree", "q2": "Strongly agree",
+              "q3": "Disagree", "q4": "Agree"},
+    }
+    # A single person, and the two opposed mind-sets must not land in the same segment.
+    scored = {name: sk.classify_new(rule, pd.DataFrame([{"id": name, **answers}]))
+              for name, answers in one_of_each.items()}
+    for name, out in scored.items():
+        assert len(out) == 1
+        assert out["confidence"].iloc[0] > 0.7, f"{name} scored with no confidence: {out}"
+    assert scored["A"]["segment"].iloc[0] != scored["B"]["segment"].iloc[0], (
+        "opposite answers were typed into the same segment")
+
+    # Two identical people, and a batch where one question got a single answer from everyone.
+    pair = pd.DataFrame([{"id": "a", **one_of_each["A"]}, {"id": "b", **one_of_each["A"]}])
+    assert len(sk.classify_new(rule, pair)) == 2
+    varied = pd.DataFrame([{"id": f"N{i}", "q1": words[1 + i % 5], "q2": words[5 - i % 5],
+                            "q3": words[1 + (i * 2) % 5], "q4": words[1 + (i * 3) % 5]}
+                           for i in range(20)])
+    assert len(sk.classify_new(rule, varied.assign(q2="Agree"))) == 20
+
+    # Numbers still work, and text that is genuinely not a rating scale is still refused rather
+    # than guessed at — the point was never to accept anything.
+    assert len(sk.classify_new(rule, pd.DataFrame(
+        [{"id": "X", "q1": 5, "q2": 1, "q3": 5, "q4": 2}]))) == 1
+    with pytest.raises(ValueError, match="_UNSCORABLE_ITEM"):
+        sk.classify_new(rule, pd.DataFrame(
+            [{"id": "X", "q1": "banana", "q2": "kiwi", "q3": "fig", "q4": "plum"}]))
+
+
+def test_typing_a_person_who_is_nothing_like_the_survey_says_so():
+    """Confidence is what stops a nonsense row being labelled as if it were a real customer.
+
+    The rule assigns a segment to whatever it is given — nearest centroid always has a winner.
+    What protects the CRM is that the number next to it collapses toward chance (1/k) when the
+    respondent is nowhere near any segment, so a filter on confidence catches them.
+    """
+    rng = np.random.default_rng(0)
+    rows = [[f"P{i}", *[int(np.clip(round(b + rng.normal(0, .6)), 1, 5))
+                        for b in ([5, 1, 5, 2] if i % 2 else [1, 5, 2, 4])]] for i in range(160)]
+    df = pd.DataFrame(rows, columns=["respondent_id", "q1", "q2", "q3", "q4"])
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=3, **FAST))
+    rule = json.loads(r["files"]["typing_rule.json"])
+    chance = 1.0 / len(rule["classes"])
+
+    real = sk.classify_new(rule, pd.DataFrame([{"id": "real", "q1": 5, "q2": 1, "q3": 5, "q4": 2}]))
+    assert real["confidence"].iloc[0] > 0.8
+
+    for label, row in [("answered nothing", {"q1": np.nan, "q2": np.nan,
+                                             "q3": np.nan, "q4": np.nan}),
+                       ("straightlined", {"q1": 3, "q2": 3, "q3": 3, "q4": 3}),
+                       ("off the scale entirely", {"q1": 900, "q2": -900,
+                                                   "q3": 900, "q4": -900})]:
+        out = sk.classify_new(rule, pd.DataFrame([{"id": "x", **row}]))
+        assert out["confidence"].iloc[0] < chance + 0.1, (
+            f"{label} was typed with {out['confidence'].iloc[0]:.2f} confidence, which reads as "
+            "a real customer")
+
+    # Order of columns and unrelated extra columns must not change who somebody is.
+    base = pd.DataFrame([{"id": "n", "q1": 5, "q2": 1, "q3": 5, "q4": 2}])
+    shuffled = base[["id", "q4", "q3", "q2", "q1"]].assign(favourite_colour="blue")
+    assert (sk.classify_new(rule, base)["segment"].iloc[0]
+            == sk.classify_new(rule, shuffled)["segment"].iloc[0])
+    with pytest.raises(ValueError, match="missing required item"):
+        sk.classify_new(rule, base.drop(columns=["q3"]))
+
+
 def test_saving_one_project_from_several_threads_at_once(tmp_path):
     """The store writes to disk from a threaded server, and one project is saved repeatedly —
     after the analysis, after every chat reply, after the groups are named. Two of those
