@@ -14,7 +14,7 @@ this says where it stands, what was decided and why, and what to do next.
 | Repo | `github.com/tomtomhz/survey-segmenter` — **private**, MIT, owner `tomtomhz` |
 | CI | Python 3.9 / 3.11 / 3.12 + a clean-install job, green |
 | Tests | 109 Python (`pytest`) + 59 frontend (`cd frontend && npm test`) |
-| Shipped app | macOS `.app` ~82 MB, built by the **Desktop app** workflow alongside a Windows `.exe`; never in git history |
+| Shipped app | **v1.1.0 release**: macOS `.app` (72 MB) and Windows `.exe` (99 MB), both built and smoke-tested by the **Desktop app** workflow. Never in git history. |
 | Local path | `~/Desktop/bd-gtm-review-team 3/tools/survey-segmenter/` |
 
 ```bash
