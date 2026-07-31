@@ -30,6 +30,19 @@ import matplotlib
 matplotlib.use("Agg")                      # no display; this runs inside a local web server
 import matplotlib.pyplot as plt            # noqa: E402  (backend must be set first)
 from matplotlib.colors import LinearSegmentedColormap    # noqa: E402
+from matplotlib.backends import backend_agg, backend_svg  # noqa: E402
+
+# Imported by name on purpose, and referenced below so nothing strips them.
+#
+# matplotlib loads the writer for an output format lazily, inside savefig. A bundler doing static
+# analysis therefore sees only the Agg backend selected above and leaves backend_svg out — and
+# the packaged app then analyses a survey perfectly and draws nothing at all, failing six times
+# with ModuleNotFoundError: No module named 'matplotlib.backends.backend_svg'. That is what the
+# first packaged build after moving to matplotlib actually did.
+#
+# A --hidden-import flag in build_app.py would fix that one build command. An import here fixes
+# it for every way this module is ever packaged.
+_REQUIRED_BACKENDS = (backend_agg, backend_svg)
 
 # Okabe-Ito, extended. Chosen for colour-vision deficiency rather than for looking pretty: these
 # stay distinguishable under the common forms, which matters when colour IS the group identity.
@@ -79,6 +92,10 @@ _STYLE = {
     "legend.frameon": False,
     "figure.autolayout": False,
 }
+
+
+# Populated by the most recent build_charts call; see the note there.
+last_errors = []
 
 
 def seg_colour(index):
@@ -590,11 +607,19 @@ def build_charts(seg, method, names=None):
     evaluated tuple, so one NaN centroid discarded all of them, the segment map included.
     """
     out = []
+    # Why a chart is missing, kept rather than only printed. The packaged app is built
+    # --windowed, which discards stdout entirely, so a print is invisible exactly where the
+    # failure is most likely — a dependency that did not survive being bundled. The first
+    # packaged build after moving to matplotlib produced no charts at all and said nothing
+    # about why. `last_errors` is read by build_app.py's smoke test and reported to the user.
+    last_errors.clear()
 
     def attempt(label, fn):
         try:
             chart = fn()
         except Exception as e:
+            reason = f"{label}: {type(e).__name__}: {e}"
+            last_errors.append(reason)
             print(f"NOTE: could not draw the '{label}' chart ({type(e).__name__}: {e}); "
                   "the rest of the report is unaffected.")
             return
@@ -616,6 +641,7 @@ def build_charts(seg, method, names=None):
             X, centroids = seg.X, seg.centroids
         labels = np.asarray(seg.labels)
     except Exception as e:          # the shared inputs failed; there is nothing to draw at all
+        last_errors.append(f"preparing the data: {type(e).__name__}: {e}")
         print(f"NOTE: could not prepare the charts ({type(e).__name__}: {e}); "
               "the report itself is unaffected.")
         return []

@@ -676,6 +676,27 @@ def test_the_built_interface_is_served_and_cannot_be_escaped():
     assert callable(sk.app) and callable(sk.serve)
 
 
+def test_the_svg_backend_is_an_explicit_dependency():
+    """The packaged app analysed a survey perfectly and drew nothing at all.
+
+    matplotlib resolves the writer for an output format lazily, inside savefig, so a bundler
+    doing static analysis saw only the Agg backend selected at import time and left backend_svg
+    out. Every chart then failed with ModuleNotFoundError, six times, in a build that otherwise
+    looked healthy. charts.py imports both backends by name so any packager keeps them.
+    """
+    import charts
+
+    assert charts._REQUIRED_BACKENDS, "the backends are no longer pinned"
+    names = {module.__name__ for module in charts._REQUIRED_BACKENDS}
+    assert "matplotlib.backends.backend_svg" in names
+    assert "matplotlib.backends.backend_agg" in names
+
+    # And the thing those backends exist for actually works end to end.
+    chart = charts.chart_segment_map(
+        np.random.default_rng(0).normal(size=(60, 4)), np.repeat([0, 1], 30))
+    assert chart["svg"].startswith("<svg") and chart["png_b64"]
+
+
 def test_output_is_utf8_so_windows_consoles_do_not_break_the_analysis():
     """The first Windows build failed every analysis with "something went wrong reading that
     file". The real cause was the confidence line printing a coloured circle to a console using
@@ -1905,11 +1926,22 @@ def test_hopkins_is_caveated_when_it_cannot_be_trusted():
 
 
 # ------------------------------------------------------------------ MaxDiff / Hierarchical Bayes
-def _simulate_maxdiff(n_resp=200, sep=1.4, n_items=15, set_size=5, n_sets=12, seed=1, n_seg=3):
+def _simulate_maxdiff(n_resp=200, sep=1.4, n_items=15, set_size=5, n_sets=12, seed=1, n_seg=3,
+                     scale_spread=0.0, non_attendance=0.0, worst_noise=0.0):
     """Simulate best-worst answers under the study's Block D design (15 items, 5 shown, 12 sets).
 
-    Choices are generated from the same sequential logit the estimator assumes, with `n_seg`
-    planted mind-sets, so recovery is a fair test of the sampler rather than of model fit.
+    By default, choices are generated from the same sequential logit the estimator assumes, with
+    `n_seg` planted mind-sets, so recovery is a fair test of the sampler rather than of model fit.
+
+    The three optional arguments break that assumption on purpose, in the ways real respondents
+    actually depart from it:
+
+    scale_spread     people differ in how consistently they choose; the model assumes one error
+                     scale for everyone. A careless respondent is closer to random.
+    non_attendance   the share of items a respondent ignores outright rather than weighing, so
+                     their utilities are not a draw from the population distribution at all.
+    worst_noise      "worst" decided partly on grounds the model does not represent; it assumes
+                     worst is a reversed logit over whatever is left after best.
     """
     rng = np.random.default_rng(seed)
     centres = np.zeros((n_seg, n_items))
@@ -1922,6 +1954,13 @@ def _simulate_maxdiff(n_resp=200, sep=1.4, n_items=15, set_size=5, n_sets=12, se
     true_b = centres[who] + rng.normal(0, 0.45, (n_resp, n_items))
     true_b -= true_b.mean(1, keepdims=True)
 
+    # Lognormal keeps consistency positive; a spread of 0 is exactly the assumed model.
+    scale = np.exp(rng.normal(0, scale_spread, n_resp)) if scale_spread else np.ones(n_resp)
+    attended = np.ones((n_resp, n_items), bool)
+    if non_attendance:
+        for i in range(n_resp):
+            attended[i] = rng.random(n_items) >= non_attendance
+
     design = np.zeros((n_resp, n_sets, set_size), int)
     best = np.zeros((n_resp, n_sets), int)
     worst = np.zeros((n_resp, n_sets), int)
@@ -1932,11 +1971,14 @@ def _simulate_maxdiff(n_resp=200, sep=1.4, n_items=15, set_size=5, n_sets=12, se
         for s in range(n_sets):
             if len(set(sets[s])) < set_size:
                 sets[s] = rng.choice(n_items, set_size, replace=False)
-            u = true_b[i, sets[s]]
+            shown = sets[s]
+            u = true_b[i, shown] * scale[i]
+            u = np.where(attended[i, shown], u, 0.0)      # an ignored item reads as neutral
             p = np.exp(u - u.max()); p /= p.sum()
             bb = rng.choice(set_size, p=p)
             rem = [j for j in range(set_size) if j != bb]
-            nu = -u[rem]; q = np.exp(nu - nu.max()); q /= q.sum()
+            nu = -u[rem] + (rng.normal(0, worst_noise, len(rem)) if worst_noise else 0.0)
+            q = np.exp(nu - nu.max()); q /= q.sum()
             best[i, s], worst[i, s] = bb, rem[rng.choice(len(rem), p=q)]
         design[i] = sets
     return design, best, worst, true_b, who
@@ -1977,6 +2019,63 @@ def test_hb_recovers_individual_utilities_it_was_never_shown():
     assert np.allclose(res.utilities.sum(axis=1), 0, atol=1e-8)
     # A chain that accepts nearly everything or nearly nothing has not explored the posterior.
     assert 0.10 < res.acceptance_rate < 0.70, res.acceptance_rate
+
+
+def test_hb_still_beats_counting_when_its_assumptions_are_wrong():
+    """The honest stress test, standing in for real respondents until there are some.
+
+    Every other HB test generates choices from the very model the estimator assumes, which is the
+    right way to test a sampler and a flattering way to test a method: of course it wins when the
+    world is exactly what it believes. Real people depart from it in three documented ways, so
+    the data here is generated with each of them switched on.
+
+    Swept at 200 respondents and 3000 draws, the advantage held in every scenario: +0.147 under
+    the model's own assumptions, +0.140 with careless respondents, +0.189 when three items in ten
+    are ignored, +0.157 when "worst" is decided on other grounds, and +0.151 with all three at
+    once (counting 0.548, HB 0.698). It was widest, not narrowest, under the worst violation.
+    That is the result worth having: the advantage is not an artefact of grading the model on its
+    own homework.
+
+    This test runs the least favourable case at 120 respondents and 1500 draws to stay quick,
+    where the same comparison gives counting 0.546 against HB 0.680 — a margin of +0.133, so the
+    +0.05 threshold below has real headroom rather than being fitted to the observed number.
+
+    It does NOT show HB is accurate on real data. Nothing here can. It shows the advantage does
+    not evaporate the moment the assumptions do.
+    """
+    def counting(design, best, worst, n_items):
+        """The industry default: times picked best minus times picked worst."""
+        out = np.zeros((len(design), n_items))
+        for i in range(len(design)):
+            for s in range(design.shape[1]):
+                out[i, design[i, s, best[i, s]]] += 1
+                out[i, design[i, s, worst[i, s]]] -= 1
+        return out
+
+    def recovery(estimated, truth):
+        rs = [np.corrcoef(estimated[i], truth[i])[0, 1] for i in range(len(truth))
+              if np.std(estimated[i]) > 1e-9 and np.std(truth[i]) > 1e-9]
+        return float(np.mean(rs))
+
+    # All three violations at once — the least favourable case for the estimator.
+    design, best, worst, true_b, _ = _simulate_maxdiff(
+        n_resp=120, seed=7, scale_spread=0.9, non_attendance=0.30, worst_noise=1.2)
+    n_items = int(design.max()) + 1
+
+    import maxdiff as md
+
+    hb = md.estimate_hb(design, best, worst,
+                              [f"item_{j}" for j in range(n_items)],
+                              [f"r{i}" for i in range(len(design))],
+                              n_draws=1500, n_burn=600, seed=3, progress=False).utilities
+    counted = counting(design, best, worst, n_items)
+
+    r_hb, r_count = recovery(np.asarray(hb), true_b), recovery(counted, true_b)
+    assert r_hb > r_count + 0.05, (
+        f"HB no longer justifies its cost under misspecification: "
+        f"counting {r_count:.3f} vs HB {r_hb:.3f}")
+    # And it has not collapsed to noise: it still describes individuals usefully.
+    assert r_hb > 0.55, f"individual recovery fell to {r_hb:.3f}"
 
 
 def test_hb_beats_counting_at_describing_an_individual():

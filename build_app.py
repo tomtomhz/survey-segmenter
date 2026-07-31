@@ -64,6 +64,9 @@ cmd = [sys.executable, "-m", "PyInstaller", "--name", "Survey Segmenter", "--win
        # matplotlib draws every chart. Its data directory carries the font it measures and
        # renders with, so without this the packaged app raises on the first chart it tries.
        "--collect-data", "matplotlib",
+       # Belt and braces alongside the explicit import in charts.py: matplotlib resolves output
+       # writers lazily, so a bundler sees only the backend selected at import time.
+       "--collect-submodules", "matplotlib.backends",
        # The interface itself. Without this the packaged app starts, serves its API, and shows
        # nothing at all — the failure looks like a broken server rather than a missing folder.
        "--add-data", f"webui{os.pathsep}webui",
@@ -141,13 +144,25 @@ def _smoke_test():
         try:
             result = json.loads(urllib.request.urlopen(req, timeout=600).read())
         except Exception as e:
-            # Never let the check itself abort the build before the app has been signed and
-            # zipped: an inconclusive smoke test is a warning, a failed one is an error.
-            print(f"\nWARNING: smoke test could not complete ({type(e).__name__}: {e}). "
-                  "The app was built, but verify it by hand before sharing it.")
-            return
-        if not result.get("ok") or not result.get("charts"):
-            print(f"\nBUILD IS BROKEN — the app ran but could not analyse a survey: {result}")
+            # An inconclusive smoke test used to be a warning. That let a Windows build go green
+            # while its own verification had timed out, and CI then uploaded the unverified
+            # artefact — which is the whole failure mode this check exists to prevent. If the app
+            # cannot analyse a survey within ten minutes, it is broken from a user's point of view.
+            print(f"\nBUILD IS BROKEN — the smoke test could not complete "
+                  f"({type(e).__name__}: {e}). The app was built but never proved it works.")
+            _discard_archive()
+        if not result.get("ok"):
+            print(f"\nBUILD IS BROKEN — the app ran but could not analyse a survey: "
+                  f"{result.get('error') or result}")
+            _discard_archive()
+        if not result.get("charts"):
+            # Separated from the failure above because it means something quite different: the
+            # statistics worked and only the drawing did not, which in a packaged build almost
+            # always means a charting dependency did not survive bundling.
+            why = result.get("chart_errors") or ["no reason reported"]
+            print("\nBUILD IS BROKEN — the analysis worked but no charts were drawn:")
+            for reason in why:
+                print(f"  - {reason}")
             _discard_archive()
         print(f"Smoke test passed: the built app found {result['k']} groups in "
               f"{result['n_people']} people and drew {len(result['charts'])} charts.")

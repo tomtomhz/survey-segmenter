@@ -131,7 +131,12 @@ def _use_utf8_for_output():
     """
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
+            # line_buffering is not optional here. reconfigure() rebuilds the text wrapper and
+            # resets buffering to the default, which for a redirected stream is block buffering —
+            # so it silently undoes PYTHONUNBUFFERED. That cost an hour: the packaged app was
+            # printing exactly why it could not draw a chart, into a buffer that was never
+            # flushed because the process was killed rather than exiting.
+            stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
         except Exception:
             pass                     # older Python, or a stream that is not reconfigurable
 
@@ -2427,6 +2432,10 @@ def run_analysis(data, cfg=None, force_items=None):
             "files": files, "n_people": int(len(seg.assignments)),
             "k": int(seg.recommended_k), "columns": roles,
             "charts": build_charts(seg, method),
+            # Why any chart is missing, so a packaged build that cannot draw says so instead of
+            # quietly showing nothing. Empty on a healthy run, and only ever carries exception
+            # text from the drawing layer — never anything from the respondent data.
+            "chart_errors": list(_charts.last_errors),
             "confidence": (m.group(1).lower() if m else "unknown")}
 
 
@@ -2901,6 +2910,7 @@ def serve(port=8000):
                     "downloads": sorted(r["files"]), "k": r["k"], "n_people": r["n_people"],
                     "columns": r.get("columns", {}),
                     "charts": _charts_for_browser(r.get("charts")),
+                    "chart_errors": r.get("chart_errors") or [],
                     "confidence": r.get("confidence", "unknown")}
 
         def _do_regroup(self):
