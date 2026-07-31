@@ -53,3 +53,23 @@ jobs:
           name: ${{ matrix.artefact }}
           path: ${{ matrix.path }}
           if-no-files-found: error
+
+      # Attach to the release when that is what triggered the run. The binary is ~82 MB of
+      # rebuildable artefact and does not belong in git history, so a release asset is how a
+      # non-technical user gets a version they can actually download and double-click.
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d "${{ matrix.path }}" ]; then
+            # Windows ships a folder; a release asset has to be a single file.
+            cd "$(dirname "${{ matrix.path }}")"
+            7z a -tzip "Survey-Segmenter-Windows.zip" "$(basename "${{ matrix.path }}")" >/dev/null
+            asset="$(pwd)/Survey-Segmenter-Windows.zip"
+          else
+            asset="${{ matrix.path }}"
+          fi
+          gh release upload "${{ github.event.release.tag_name }}" "$asset" --clobber

@@ -3,7 +3,7 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
-## [Unreleased]
+## [1.1.0] — 2026-07-31
 
 ### Charts are drawn by matplotlib
 
