@@ -2567,8 +2567,16 @@ def classify_columns(df, id_col=None):
         if _looks_demographic(name) and \
                 len([w for w in re.findall(_WORD_RE, name) if w not in _LABEL_STOP]) <= 3:
             plan["demographics"].append(c)
+            # Name the escape hatch in the note itself. The words that trigger this rule — age,
+            # income, region — are background traits in a SURVEY, where profiling segments by
+            # them is right and clustering on them is a beginner's mistake. On other data they
+            # can be the most informative column in the file: on a housing dataset, setting
+            # median_income aside cost the analysis its richest signal. The default stays, but a
+            # reader should not have to infer that it is overridable.
             plan["notes"].append(f"'{c}': set aside as a background trait (used to describe the "
-                                 "groups afterwards, not to form them)"); continue
+                                 "groups afterwards, not to form them). If it should shape the "
+                                 "groups instead, tick it under 'Group people on different "
+                                 "questions'"); continue
         # A row counter or a second identifier column is bookkeeping, not an answer. Clustering on
         # one silently injects a fake gradient, so set it aside before the numeric branch below.
         if _looks_like_index(s) or _looks_like_id(s, name):
