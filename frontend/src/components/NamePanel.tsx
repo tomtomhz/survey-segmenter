@@ -97,9 +97,9 @@ export function NamePanel({
             <span className="err-text">
               {state.message}{' '}
               {(state.errorKind === 'nokey' || state.errorKind === 'nosdk') && (
-                <span className="link" role="button" tabIndex={0} onClick={onNeedsKey}>
+                <button type="button" className="link" onClick={onNeedsKey}>
                   Open Settings
-                </span>
+                </button>
               )}
             </span>
           )}

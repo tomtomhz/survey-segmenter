@@ -676,6 +676,44 @@ def test_the_built_interface_is_served_and_cannot_be_escaped():
     assert callable(sk.app) and callable(sk.serve)
 
 
+def test_routes_match_exactly_so_the_app_owns_every_other_path():
+    """Routes were matched by prefix, which handed API responses to paths that merely started the
+    same way. `/projects-of-mine` was answered with the project list, and — worse — anything
+    beginning `/quit` shut the server down, so a single-page route named `/quit-guide` would have
+    closed the app. Exact matching, with everything else falling through to the interface."""
+    import threading
+    import time
+    import urllib.request
+
+    port = 8793
+    threading.Thread(target=lambda: sk.serve(port), daemon=True).start()
+    time.sleep(3)
+
+    def fetch(path):
+        r = urllib.request.urlopen(f"http://127.0.0.1:{port}{path}")
+        return r.status, r.headers.get("Content-Type", ""), r.headers.get("Cache-Control")
+
+    # Real routes still answer with JSON.
+    for route in ("/projects", "/settings"):
+        status, ctype, _ = fetch(route)
+        assert status == 200 and ctype.startswith("application/json"), route
+
+    # Anything else is the app, not an API call that happens to share a prefix.
+    for impostor in ("/projects-of-mine", "/project-notes", "/settings-help", "/quitting-time",
+                     "/downloads", "/some/deep/route"):
+        status, ctype, _ = fetch(impostor)
+        assert status == 200 and ctype.startswith("text/html"), impostor
+
+    # The server is still running: /quitting-time must not have shut it down.
+    assert fetch("/projects")[0] == 200
+
+    # And the HTML shell is never cached, however it was reached. It names which asset hashes are
+    # current, so a stale copy loads a bundle that no longer exists — a blank page that survives
+    # a reload. Keying this on the path missed query strings and every fallback route.
+    for path in ("/", "/index.html", "/?utm_source=news", "/some/deep/route"):
+        assert fetch(path)[2] == "no-store", path
+
+
 def test_a_missing_interface_says_how_to_build_it():
     """webui/ is committed, so this is only reachable in a checkout where it was deleted. It must
     name the command that fixes it — a blank page would look like the whole tool is broken, when

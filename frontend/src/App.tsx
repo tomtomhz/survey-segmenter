@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api/client'
 import { isFailure, type Analysis, type ProjectSummary } from './api/types'
+import { AppFailure, Boundary } from './components/Boundary'
 import { Composer } from './components/Composer'
 import { Header } from './components/Header'
 import { SettingsModal } from './components/SettingsModal'
@@ -25,7 +26,8 @@ const GREETING: Message = {
 }
 
 const AI_NUDGE =
-  'Add your Anthropic API key in <span class="link js-settings">Settings</span> to have Claude '
+  'Add your Anthropic API key in <button type="button" class="link js-settings">Settings'
+  + '</button> to have Claude '
   + 'interpret these results and answer questions about them. The statistics above are complete '
   + 'either way.'
 
@@ -34,12 +36,35 @@ export function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // `busy` is state, so it does not update until the next render — two files dropped in the same
+  // tick both pass an `if (busy)` check and start two analyses whose messages then interleave.
+  // A ref changes immediately, so it is the guard; the state is only what the interface renders.
+  const running = useRef(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [regroupError, setRegroupError] = useState<string | null>(null)
 
   const append = useCallback((message: Message) => {
     setMessages((current) => [...current, message])
   }, [])
+
+  /** Mark the app busy or free. One place, so the ref and the rendered state cannot drift. */
+  const setWorking = useCallback((working: boolean) => {
+    running.current = working
+    setBusy(working)
+  }, [])
+
+  // Last line of defence, restored from the previous interface: whatever goes wrong — an error
+  // thrown outside a promise, a rejection nobody handled — never leave the composer disabled
+  // with no way back. A stuck spinner is the one failure a non-technical user cannot work around.
+  useEffect(() => {
+    const release = () => setWorking(false)
+    window.addEventListener('unhandledrejection', release)
+    window.addEventListener('error', release)
+    return () => {
+      window.removeEventListener('unhandledrejection', release)
+      window.removeEventListener('error', release)
+    }
+  }, [setWorking])
 
   const refreshProjects = useCallback(async () => {
     const reply = await api.projects()
@@ -70,9 +95,9 @@ export function App() {
         kind: 'thinking',
         label: initial ? 'Claude is reading your results…' : 'Claude is thinking…',
       })
-      setBusy(true)
+      setWorking(true)
       const reply = await api.chat(sid, question ?? '', initial)
-      setBusy(false)
+      setWorking(false)
       if (isFailure(reply)) {
         const offerSettings = reply.kind === 'nokey' || reply.kind === 'nosdk' || reply.kind === 'auth'
         setMessages((current) =>
@@ -80,9 +105,13 @@ export function App() {
             id: placeholder,
             kind: 'note',
             tone: 'error',
+            // Escaped: _explain_run_error quotes the raw exception, and an exception can carry
+            // text straight out of the uploaded file — a column heading is attacker-controlled
+            // the moment someone analyses a spreadsheet a third party sent them.
             html: offerSettings
-              ? `${reply.error} <span class="link js-settings">Open Settings</span>`
-              : reply.error,
+              ? `${escapeHtml(reply.error)} `
+                + '<button type="button" class="link js-settings">Open Settings</button>'
+              : escapeHtml(reply.error),
           }),
         )
         return
@@ -95,7 +124,7 @@ export function App() {
       })
       void refreshProjects()
     },
-    [append, refreshProjects, sessionId],
+    [append, refreshProjects, sessionId, setWorking],
   )
 
   /** Show a finished analysis, and start the interpretation if a key is configured. */
@@ -118,7 +147,7 @@ export function App() {
 
   const analyse = useCallback(
     async (file: File) => {
-      if (busy) return
+      if (running.current) return
       const problem = fileProblem(file)
       append({ id: messageId(), kind: 'you', text: `Analyse my survey: ${file.name || 'file'}` })
       if (problem) {
@@ -134,9 +163,9 @@ export function App() {
         kind: 'thinking',
         label: 'Crunching the numbers — clustering and validating. This can take up to a minute…',
       })
-      setBusy(true)
+      setWorking(true)
       const reply = await api.analyze(file)
-      setBusy(false)
+      setWorking(false)
       if (isFailure(reply)) {
         setMessages((current) =>
           replace(current, placeholder, {
@@ -147,16 +176,16 @@ export function App() {
       }
       if (present(reply, placeholder)) void ask(null, true, reply.session_id)
     },
-    [append, ask, busy, present],
+    [append, ask, present, setWorking],
   )
 
   const regroup = useCallback(
     async (items: string[]) => {
       if (!sessionId || busy) return
       setRegroupError(null)
-      setBusy(true)
+      setWorking(true)
       const reply = await api.regroup(sessionId, items)
-      setBusy(false)
+      setWorking(false)
       if (isFailure(reply)) {
         setRegroupError(reply.error)
         return
@@ -164,15 +193,15 @@ export function App() {
       append({ id: messageId(), kind: 'you', text: `Group people on: ${items.join(', ')}` })
       if (present(reply)) void ask(null, true, reply.session_id)
     },
-    [append, ask, busy, present, sessionId],
+    [append, ask, busy, present, sessionId, setWorking],
   )
 
   const openProject = useCallback(
     async (id: string) => {
       if (busy) return
-      setBusy(true)
+      setWorking(true)
       const reply = await api.openProject(id)
-      setBusy(false)
+      setWorking(false)
       if (isFailure(reply)) {
         void refreshProjects()
         return
@@ -197,7 +226,7 @@ export function App() {
       setMessages(replayed.length > 0 ? replayed : [GREETING])
       void refreshProjects()
     },
-    [busy, refreshProjects],
+    [busy, refreshProjects, setWorking],
   )
 
   const deleteProject = useCallback(
@@ -238,7 +267,7 @@ export function App() {
   )
 
   return (
-    <>
+    <Boundary fallback={(error) => <AppFailure error={error} />}>
       <Header onNew={startNew} onSettings={() => setSettingsOpen(true)} />
       <div className="body">
         <Sidebar
@@ -252,7 +281,7 @@ export function App() {
           <Thread
             messages={messages}
             busy={busy}
-            setBusy={setBusy}
+            setBusy={setWorking}
             regroupError={regroupError}
             onRegroup={(items) => void regroup(items)}
             onNeedsKey={() => setSettingsOpen(true)}
@@ -274,7 +303,7 @@ export function App() {
           if (configured && sessionId) void ask(null, true)
         }}
       />
-    </>
+    </Boundary>
   )
 }
 

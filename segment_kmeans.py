@@ -3333,22 +3333,34 @@ def serve(port=8000):
             except Exception:
                 return {}
 
+        def _route(self):
+            """The path this request is for, with any query string removed.
+
+            Routes are matched exactly. Prefix matching (`path.startswith("/project")`) was wrong
+            in two ways that both reached users: `/projects-of-mine` was answered with the project
+            list, and `/project` only avoided swallowing `/projects` because of the order the
+            branches happened to be written in — one reordering away from a silent break.
+            """
+            from urllib.parse import urlparse
+            return urlparse(self.path).path
+
         def do_GET(self):
-            if self.path.startswith("/quit"):
+            route = self._route()
+            if route == "/quit":
                 self._bytes(_shutdown_page())
                 threading.Thread(target=httpd.shutdown, daemon=True).start()
                 return
-            if self.path.startswith("/settings"):
+            if route == "/settings":
                 self._json(_ai.status() if _ai else {"sdk_installed": False, "configured": False,
                                                      "source": None, "env_key": False, "model": None})
                 return
-            if self.path.startswith("/download"):
+            if route == "/download":
                 self._do_download()
                 return
-            if self.path.startswith("/projects"):
+            if route == "/projects":
                 self._json({"ok": True, "projects": store.list()})
                 return
-            if self.path.startswith("/project"):
+            if route == "/project":
                 from urllib.parse import parse_qs, urlparse
                 pid = (parse_qs(urlparse(self.path).query).get("id") or [""])[0]
                 saved = store.load(pid)
@@ -3386,9 +3398,14 @@ def serve(port=8000):
                 self._bytes(_missing_ui_page(), code=503)
                 return
             body, ctype = asset
-            # Hashed filenames are content-addressed, so they can be cached hard; index.html names
-            # which hashes are current and must never be, or a rebuilt app serves the old bundle.
-            cache = ("no-store" if self.path in ("/", "/index.html")
+            # Hashed filenames are content-addressed, so they can be cached hard; the HTML shell
+            # names which hashes are current and must never be, or a rebuilt app keeps loading the
+            # old bundle and the user sees a blank page they cannot fix by reloading.
+            #
+            # Decided on the served content type, not the requested path. Keying it on the path
+            # meant `/?utm_source=x` and every single-page fallback route missed the exact-match
+            # test and cached the shell for a year — the precise failure the no-store is for.
+            cache = ("no-store" if ctype.startswith("text/html")
                      else "public, max-age=31536000, immutable")
             self.send_response(200)
             self.send_header("Content-Type", ctype)
@@ -3418,23 +3435,24 @@ def serve(port=8000):
             self.wfile.write(body)
 
         def do_POST(self):
+            route = self._route()
             try:
-                if self.path.startswith("/analyze"):
+                if route == "/analyze":
                     self._do_analyze()
-                elif self.path.startswith("/score"):
+                elif route == "/score":
                     self._do_score()
-                elif self.path.startswith("/regroup"):
+                elif route == "/regroup":
                     self._do_regroup()
-                elif self.path.startswith("/name"):
+                elif route == "/name":
                     self._do_name()
-                elif self.path.startswith("/delete_project"):
+                elif route == "/delete_project":
                     body = self._read_json()
                     store.delete(body.get("session_id", ""))
                     sessions.pop(body.get("session_id", ""), None)
                     self._json({"ok": True, "projects": store.list()})
-                elif self.path.startswith("/chat"):
+                elif route == "/chat":
                     self._do_chat()
-                elif self.path.startswith("/settings"):
+                elif route == "/settings":
                     self._do_settings()
                 else:
                     self._json({"ok": False, "error": "Unknown request."}, 404)

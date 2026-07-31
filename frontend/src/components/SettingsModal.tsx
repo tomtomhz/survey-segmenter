@@ -32,6 +32,17 @@ export function SettingsModal({
     void api.settings().then(setStatus)
   }, [open])
 
+  // Escape closes it. Every other dialog on the machine does, so one that does not feels broken
+  // — and the only other way out was finding the Close button or hitting the backdrop exactly.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
   if (!open) return null
 
   async function save() {
@@ -54,7 +65,11 @@ export function SettingsModal({
 
   const message = describe(status)
   // An environment key cannot be changed from here, and a missing SDK cannot be fixed from here.
-  const locked = message.tone === 'warn' && message.locksInput
+  //
+  // This used to also require tone === 'warn', which quietly excluded the one case that most
+  // needs locking: ANTHROPIC_API_KEY is reported as 'ok' because it works, but it also *wins*
+  // over anything saved here — so the form was accepting keys it would then ignore.
+  const locked = message.locksInput
 
   return (
     <div
@@ -63,8 +78,8 @@ export function SettingsModal({
         if (event.target === event.currentTarget) onClose()
       }}
     >
-      <div className="modal">
-        <h2>AI interpretation</h2>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <h2 id="settings-title">AI interpretation</h2>
         <p>
           Survey Segmenter can send your <b>results</b> — the group sizes, profiles and confidence,
           never anyone’s individual answers — to Claude to interpret them and answer your
@@ -84,14 +99,13 @@ export function SettingsModal({
         />
         <p>
           Get one at{' '}
-          <span
+          <button
+            type="button"
             className="link"
-            role="button"
-            tabIndex={0}
             onClick={() => window.open('https://console.anthropic.com/', '_blank')}
           >
             console.anthropic.com
-          </span>
+          </button>
           . It is stored only on this computer.
         </p>
         <div className="row">

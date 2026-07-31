@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { ProjectSummary } from '../api/types'
 import { relativeTime } from '../lib/labels'
 
@@ -15,6 +16,11 @@ export function Sidebar({
   onDelete: (id: string) => void
   onNew: () => void
 }) {
+  // Deleting a project removes the analysis and the original upload from disk, with no undo.
+  // A single unlabelled × next to every row is one slip away from destroying an afternoon's work,
+  // so the × arms the row and a second, explicit click carries it out.
+  const [armed, setArmed] = useState<string | null>(null)
+
   return (
     <aside className="side">
       <div className="head">
@@ -29,30 +35,58 @@ export function Sidebar({
             Your analysed surveys will be saved here, so you can come back to them.
           </div>
         ) : (
-          projects.map((project) => (
-            <div className="projrow" key={project.id}>
-              <button
-                type="button"
-                className={`proj${project.id === activeId ? ' active' : ''}`}
-                onClick={() => onOpen(project.id)}
-              >
-                <div className="t">{project.title || 'Untitled survey'}</div>
-                <div className="m">
-                  <span className={`dot ${project.confidence ?? 'unknown'}`} />
-                  {summarise(project)}
-                </div>
-                <div className="m">{relativeTime(project.updated)}</div>
-              </button>
-              <button
-                type="button"
-                className="xbtn"
-                title="Delete this project"
-                onClick={() => onDelete(project.id)}
-              >
-                ×
-              </button>
-            </div>
-          ))
+          projects.map((project) => {
+            const name = project.title || 'Untitled survey'
+            return (
+              <div className="projrow" key={project.id}>
+                <button
+                  type="button"
+                  className={`proj${project.id === activeId ? ' active' : ''}`}
+                  onClick={() => onOpen(project.id)}
+                >
+                  <div className="t">{name}</div>
+                  <div className="m">
+                    <span className={`dot ${project.confidence ?? 'unknown'}`} />
+                    {summarise(project)}
+                  </div>
+                  <div className="m">{relativeTime(project.updated)}</div>
+                </button>
+                {armed === project.id ? (
+                  <div className="confirm">
+                    <button
+                      type="button"
+                      className="xbtn danger"
+                      aria-label={`Confirm deleting ${name}`}
+                      onClick={() => {
+                        setArmed(null)
+                        onDelete(project.id)
+                      }}
+                    >
+                      Delete
+                    </button>
+                    <button
+                      type="button"
+                      className="xbtn"
+                      aria-label="Keep this project"
+                      onClick={() => setArmed(null)}
+                    >
+                      Keep
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="xbtn"
+                    aria-label={`Delete ${name}`}
+                    title="Delete this project"
+                    onClick={() => setArmed(project.id)}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            )
+          })
         )}
       </div>
     </aside>

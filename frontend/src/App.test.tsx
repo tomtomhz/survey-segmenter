@@ -167,7 +167,9 @@ describe('projects', () => {
     const user = person()
     render(<App />)
 
-    await user.click(await screen.findByRole('button', { name: /community_survey.csv/ }))
+    // Anchored: the delete button is now properly labelled "Delete community_survey.csv", so an
+    // unanchored match finds both.
+    await user.click(await screen.findByRole('button', { name: /^community_survey\.csv/ }))
 
     // The report must come before the answers that discuss it.
     const thread = document.querySelector('.wrap') as HTMLElement

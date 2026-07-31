@@ -86,7 +86,7 @@ header .sp{flex:1}
  cursor:pointer;text-align:left;display:flex;align-items:center;gap:8px;transition:.15s}
 .newbtn:hover{border-color:var(--accent);border-style:solid;color:var(--accent);
  background:var(--accent-soft)}
-.projrow{display:flex;align-items:flex-start;gap:2px}
+.projrow{display:flex;align-items:flex-start;gap:2px;flex-wrap:wrap}
 .projrow .xbtn{opacity:0;margin-top:9px;transition:opacity .12s}
 .projrow:hover .xbtn,.projrow:focus-within .xbtn{opacity:1}
 .proj{border:1px solid transparent;background:transparent;border-radius:var(--r-sm);padding:9px 11px;
@@ -104,6 +104,15 @@ header .sp{flex:1}
 .xbtn{border:none;background:transparent;color:var(--muted);cursor:pointer;font-size:.95rem;
  padding:2px 6px;border-radius:5px;line-height:1}
 .xbtn:hover{color:var(--risk);background:var(--risk-bg)}
+/* The armed state of a delete. Both choices are always visible, so the destructive one is never
+   the only thing under the cursor. */
+/* Its own line rather than beside the title: squeezed into the row it stole enough width to
+   wrap "3 groups · 2 people" onto two lines, which made the list jump as you armed a delete. */
+.confirm{display:flex;gap:4px;flex-basis:100%;justify-content:flex-end;margin:4px 0 2px}
+.confirm .xbtn{font-size:.72rem;padding:3px 7px;border:1px solid var(--line-strong);opacity:1}
+.confirm .xbtn.danger{color:var(--risk);border-color:var(--risk)}
+.confirm .xbtn.danger:hover{background:var(--risk);color:var(--card)}
+.projrow:has(.confirm) .xbtn{opacity:1}
 
 /* thread ------------------------------------------------------------------------------------- */
 .thread{flex:1;overflow-y:auto;scroll-behavior:smooth;min-width:0}
@@ -147,7 +156,10 @@ header .sp{flex:1}
  color:var(--ink-soft);font-size:.93rem;box-shadow:var(--shadow-sm)}
 .note b{color:var(--ink)}
 .note.err{border-color:var(--risk);background:var(--risk-bg);color:var(--ink)}
-.link{color:var(--accent);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+/* Also used on real <button> elements. Anything that acts like a button is one — a styled span
+   with role="button" can be focused but not activated from the keyboard, which is a trap. */
+.link{color:var(--accent);cursor:pointer;text-decoration:underline;text-underline-offset:2px;
+ background:none;border:none;padding:0;font:inherit;font-size:inherit}
 .card{border:1px solid var(--line);border-radius:var(--r-md);background:var(--card);overflow:hidden;
  box-shadow:var(--shadow-sm)}
 .card>summary{cursor:pointer;padding:13px 16px;font-weight:600;font-size:.95rem;list-style:none;
