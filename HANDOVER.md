@@ -3,7 +3,7 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-07-31 · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ 109 Python + 59 frontend tests, CI green
+**Last updated:** 2026-07-31 · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ 112 Python + 59 frontend tests, CI green
 
 ---
 
@@ -14,12 +14,12 @@ this says where it stands, what was decided and why, and what to do next.
 | Repo | `github.com/tomtomhz/survey-segmenter` — **private**, MIT, owner `tomtomhz` |
 | CI | Python 3.9 / 3.11 / 3.12 + a clean-install job, green |
 | Tests | 109 Python (`pytest`) + 59 frontend (`cd frontend && npm test`) |
-| Shipped app | macOS `.app`, ~76 MB, attached to the **v1.0.0 Release** — never in git history |
+| Shipped app | macOS `.app` ~82 MB, built by the **Desktop app** workflow alongside a Windows `.exe`; never in git history |
 | Local path | `~/Desktop/bd-gtm-review-team 3/tools/survey-segmenter/` |
 
 ```bash
 cd ~/Desktop/"bd-gtm-review-team 3"/tools/survey-segmenter
-pytest                  # 108 tests, ~80s
+pytest                  # 112 tests, ~95s
 python3 run_app.py      # opens the web app
 python3 build_app.py    # rebuilds + signs + smoke-tests the .app
 ./finish-setup.sh       # re-runs the GitHub publish flow
@@ -40,11 +40,15 @@ expect it in *response handling*, not request construction.
   committed — unusual for build output, and deliberate: a clone must run without Node, and the
   packaged `.app` must have no build step. CI rebuilds it and fails on drift, so it cannot go
   stale. `npm run dev` proxies to the Python app on 8000 for hot reload.
-- **Charts are hand-built SVG, not matplotlib.** Keeps the packaged app ~76 MB, keeps the
-  PyInstaller build reliable, and the charts survive print/PDF and the standalone HTML report.
-  Six views: segment map, per-person fit, quality across k, what differs, compare groups (radar),
-  full grid (heatmap). The bar chart trims to nine questions for legibility — the full grid is
-  the uncensored version, and the bars link to it.
+- **Charts are matplotlib, not hand-built SVG.** This REVERSES the original decision, at the
+  owner's instruction. The old engine was 684 lines of Python f-strings concatenating SVG path
+  data, tick positions and text anchors by hand; every chart re-derived its own axes and scaling.
+  The packaged app grew from ~76 MB to ~82 MB, which is the price. What was kept: charts still
+  emit vector SVG, and all chrome is drawn in one sentinel colour swapped for `currentColor` on
+  the way out, so a single file is legible on both the light and dark grounds. What was gained:
+  a PNG of every chart, which is what lets Claude see them.
+  **scikit-learn computes, matplotlib draws** — nothing in `charts.py` decides anything about
+  the segmentation.
 - **Only an aggregate digest goes to Claude — never a respondent row.** Enforced by
   `test_the_ai_digest_contains_no_individual_respondent_data` against 400 respondents. This is the
   load-bearing privacy guarantee; see `PRIVACY.md`.
@@ -79,11 +83,27 @@ consistent, and neither method rescues genuinely weak structure. Do not claim HB
 segmentation — claim it gives defensible individual scores. The simulation also generates choices
 from the same model HB assumes, which flatters it; real data will differ.
 
+**Stress-tested against that flattery** (200 respondents, 3000 draws). Data generated with three
+documented departures from the model — respondents differing in choice consistency, respondents
+ignoring items outright, and "worst" decided on grounds the model does not represent:
+
+| Data generated with | Counting | HB | Advantage |
+|---|---|---|---|
+| The model's own assumptions | 0.755 | 0.902 | +0.147 |
+| Careless respondents (scale varies) | 0.725 | 0.865 | +0.140 |
+| 30% of items ignored per person | 0.582 | 0.771 | **+0.189** |
+| Worst chosen on other grounds | 0.722 | 0.880 | +0.157 |
+| All three at once | 0.548 | 0.698 | +0.151 |
+
+The advantage never collapses, and is *widest* under the worst violation. That is the useful
+result: it is not an artefact of grading the model on its own homework. It still says nothing
+about accuracy on real people. Locked in by
+`test_hb_still_beats_counting_when_its_assumptions_are_wrong`.
+
 ## Known limitations (real, not hypothetical)
 
-- **HB is validated on simulated data only.** No real MaxDiff responses have gone through it.
-- **Windows build doesn't exist.** `build_app.py` is cross-platform but must run *on* Windows to
-  produce the `.exe`. Needs a Windows machine or a CI runner.
+- **HB has never seen real MaxDiff responses.** The misspecification sweep below is the
+  strongest evidence obtainable without them; it is not a substitute for them.
 - **The segment-size floor is a search-time guard, not a hard bound.** It filters the search fit;
   the final fit uses more restarts and can land slightly under. The report's "below 5% of the
   sample" note is the backstop.
@@ -100,7 +120,6 @@ from the same model HB assumes, which flatters it; real data will differ.
 
 1. **Move the repository out of iCloud Drive.** See the limitation above; it makes local
    frontend work impractical, and CI is currently the only place the frontend suite runs quickly.
-2. **Windows build** — the only platform gap. Blocked on a Windows runner.
 3. **Let Claude see the charts** — it currently reads only the text digest.
 4. **Consolidate `segment-kmeans-tool.md`** in the assistant memory directory; it has grown to
    22 KB of appended paragraphs and is due a rewrite rather than another append.

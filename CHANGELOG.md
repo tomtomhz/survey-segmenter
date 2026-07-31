@@ -5,6 +5,35 @@ the version is set in `pyproject.toml` and stamped into every report footer.
 
 ## [Unreleased]
 
+### Charts are drawn by matplotlib
+
+- The six charts are rendered with matplotlib instead of 684 lines of Python f-strings
+  concatenating SVG path data by hand. **scikit-learn computes, matplotlib draws** — the
+  computation never moved; `KMeans`, `GaussianMixture` and the silhouette statistics were always
+  doing the maths. The packaged app grows from about 76 MB to 82 MB.
+- The segment map now shades the decision regions behind the dots, so the failure it exists to
+  expose — one dense cloud sliced into pie wedges — is unmistakable rather than inferred.
+- Charts still emit vector SVG that adapts to the light and dark grounds, and now also render to
+  PNG, which is what lets Claude see them.
+
+### Claude reads the charts
+
+- The segment map, the profile bars and the full grid go to Claude as images alongside the text
+  digest, so its interpretation is based on the same picture the reader is looking at.
+- The privacy test widened with the payload: it now builds the real request and checks the PNG
+  bytes as well as the text, since an image could carry a label and a PNG can carry metadata.
+
+### Desktop builds
+
+- Windows and macOS apps are built and smoke-tested by a CI workflow. The Windows gap was never
+  a missing machine — GitHub has had the runners all along.
+- The first Windows build found a bug that would have broken the app for every Windows user: the
+  confidence line prints a coloured circle, the legacy console encoding cannot encode it, and the
+  resulting error surfaced as "something went wrong reading that file" on every analysis. The
+  same fault would have hit any Swedish column name.
+- The first packaged macOS build drew no charts at all: matplotlib resolves output writers lazily,
+  so the SVG backend was never bundled.
+
 ### The interface is now a real application
 
 - **Rebuilt in React 19 + TypeScript**, built with Vite, in `frontend/`. It replaces 640 lines of
