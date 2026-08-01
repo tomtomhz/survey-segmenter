@@ -2855,7 +2855,7 @@ def _mixed_survey(n=300, seed=0, brand_signal=True, n_brands=1):
         picks = [names[rng.choice(3, p=(np.where(np.arange(3) == (g + j) % 3, 0.70, 0.15)
                                         if brand_signal else np.full(3, 1 / 3)))]
                  for g in truth]
-        df[f"favourite brand" if n_brands == 1 else f"brand{j+1}"] = picks
+        df["favourite brand" if n_brands == 1 else f"brand{j+1}"] = picks
     return df, truth
 
 

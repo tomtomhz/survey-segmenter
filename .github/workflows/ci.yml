@@ -36,7 +36,7 @@ jobs:
           pip install ".[ai,excel,dev]"
 
       - name: Lint
-        run: pyflakes segment_kmeans.py ai_interpret.py maxdiff.py run_app.py build_app.py tests/
+        run: pyflakes segment_kmeans.py webapp.py charts.py kprototypes.py ai_interpret.py maxdiff.py run_app.py build_app.py tests/
 
       - name: Test
         run: pytest -q

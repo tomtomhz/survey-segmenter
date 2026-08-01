@@ -7,6 +7,7 @@ import os
 
 import segment_kmeans
 import webapp              # the web application itself
+import kprototypes         # the mixed-question engine, reached through charts.py lazily
 import ai_interpret        # the optional Claude chat layer
 
 # Imported here by name, not only reached through segment_kmeans, because a bundler follows
@@ -15,7 +16,7 @@ import ai_interpret        # the optional Claude chat layer
 # failure that shipped once already when matplotlib's SVG backend was left out.
 
 if __name__ == "__main__":
-    _ = (ai_interpret, webapp)      # referenced so linters and bundlers keep them
+    _ = (ai_interpret, webapp, kprototypes)   # referenced so linters and bundlers keep them
     _port = os.environ.get("SEG_PORT")
     if _port:
         segment_kmeans.serve(int(_port))
