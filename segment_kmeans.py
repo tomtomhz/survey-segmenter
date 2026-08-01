@@ -957,7 +957,7 @@ def _fraction_phrase(share):
 
 
 def executive_summary(n_resp, names, shares, wants, min_jaccard, repro, unit="group",
-                      k_agreement=None):
+                      k_agreement=None, cross_method=None):
     """The plain-language box at the top of every report: how many groups, who they are, how much
     to trust it (a green/amber/red confidence light built from the stability numbers), and what to
     do next. Written for someone who will never read the word 'eta-squared'.
@@ -974,14 +974,27 @@ def executive_summary(n_resp, names, shares, wants, min_jaccard, repro, unit="gr
     reproduce while split-half replication said 0.06. Split-half is the measure that actually
     answers "would a fresh sample find these same groups", so it now gates the amber band too."""
     k_contested = k_agreement is not None and k_agreement < 0.6
-    if min_jaccard >= 0.75 and repro >= 0.6 and not k_contested:
+    # Reproducibility asks "would a fresh sample give the same answer" — and a WRONG answer can be
+    # perfectly reproducible. MacKay gives the mechanism in *Information Theory, Inference, and
+    # Learning Algorithms* §20.1: k-means "has no way of representing the size or shape of a
+    # cluster", so where one group is broad and another narrow it misassigns the broad group's
+    # members to the narrow one, and does it the same way every time.
+    #
+    # Measured on exactly that data (240 broad, 60 narrow): split-half replication 1.000 while the
+    # partition agreed with a Gaussian mixture at only 0.43 and with Ward at 0.47 — about half the
+    # memberships in dispute — and the report said High.
+    methods_disagree = cross_method is not None and cross_method < 0.6
+    if min_jaccard >= 0.75 and repro >= 0.6 and not k_contested and not methods_disagree:
         light, label, meaning = "🟢", "High", ("the groups are clear and they reproduce reliably "
                                                "when the analysis is repeated.")
     elif min_jaccard >= 0.6 and repro >= 0.4:
         light, label, meaning = "🟡", "Moderate", ("the groups mostly hold up, but " + (
             "the methods disagree on how many groups there really are, so the exact number is "
-            "uncertain." if k_contested else "their edges are fuzzy, so treat them as a strong "
-            "hypothesis."))
+            "uncertain." if k_contested else
+            "other clustering methods put a sizeable share of people in different groups, so who "
+            "belongs where is less settled than the group definitions are — the signature of one "
+            "broad group and one narrow one, which k-means divides badly." if methods_disagree else
+            "their edges are fuzzy, so treat them as a strong hypothesis."))
     elif min_jaccard >= 0.6:
         # Individually stable-looking segments that do not survive a split of the sample. This is
         # what a segmentation of noise looks like from the inside, so say so plainly.
@@ -1106,7 +1119,14 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
     _shares = [float(sizes.loc[k, "share"]) for k in _keys]
     L = ["# Segmentation report\n",
          executive_summary(int(sizes["n"].sum()), _names, _shares, _wants,
-                           min(jaccard.values()), split_half, unit="group", k_agreement=k_agreement),
+                           min(jaccard.values()), split_half, unit="group", k_agreement=k_agreement,
+                           # The weaker of the two independent paradigms: a mixture model, which
+                           # unlike k-means can represent a cluster's breadth, and Ward, which
+                           # builds bottom-up rather than around centroids. If both put people
+                           # somewhere else, the memberships are not settled.
+                           cross_method=min(
+                               [v for v in ((mb_agreement or {}).get("agreement_ARI"), ward_ari)
+                                if isinstance(v, (int, float))], default=None)),
          f"Respondents clustered with **{method_name}** on **{cfg.scaling}**-scaled utilities; "
          f"final fit used {cfg.n_init_final} restarts. Search range: k = "
          f"{cfg.k_min} to {cfg.k_max}.\n",

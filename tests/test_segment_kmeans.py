@@ -683,6 +683,53 @@ def _likert(x):
     return np.clip(np.round(x), 1, 5).astype(int)
 
 
+def test_a_stable_but_wrong_partition_does_not_get_high_confidence():
+    """A wrong answer can be perfectly reproducible, and reproducibility was the whole verdict.
+
+    MacKay, *Information Theory, Inference, and Learning Algorithms* §20.1: k-means "has no way of
+    representing the size or shape of a cluster". Where one group is broad and another narrow, it
+    assigns members of the broad group to the narrow one — and does it the same way every time,
+    so every stability measure looks perfect.
+
+    Measured on his exact case (240 broad, 60 narrow): split-half replication 1.000, agreement
+    with a Gaussian mixture 0.43 and with Ward 0.47 — about half the memberships in dispute — and
+    the report said **High**. The tool already computed both cross-method numbers and printed
+    them in a table; they simply did not reach the verdict.
+
+    Note for whoever reads the earlier benchmark: the "never confidently wrong" property was
+    verified on recovering the NUMBER of groups, not on who ended up in them. This is the case
+    that distinguishes those, and it was failing.
+    """
+    rng = np.random.default_rng(0)
+    broad = rng.normal([2.2, 2.2, 3, 3, 3], 1.05, (240, 5))
+    narrow = rng.normal([4.4, 4.4, 3, 3, 3], 0.28, (60, 5))
+    truth = np.r_[np.zeros(240), np.ones(60)]
+    X = np.clip(np.round(np.vstack([broad, narrow])), 1, 5).astype(int)
+    df = pd.DataFrame(X, columns=[f"q{i+1}" for i in range(5)])
+    df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=6, **FAST))
+
+    from sklearn.metrics import adjusted_rand_score
+    assigned = pd.read_csv(io.StringIO(r["files"]["segment_assignments.csv"]))
+    recovered = adjusted_rand_score(truth, assigned["segment"])
+    assert recovered < 0.8, (
+        f"the planted failure did not occur (ARI {recovered:.2f}); this test is not testing "
+        "anything and the data needs to be made harder")
+    assert r["confidence"] != "high", (
+        f"memberships recovered at only ARI {recovered:.2f} and the report still said High")
+
+    # And it must not cry wolf: genuine, well-separated segments keep their high confidence.
+    centres = np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1]], float)
+    who = rng.integers(0, 3, 400)
+    real = np.clip(np.round(centres[who] + rng.normal(0, 0.5, (400, 5))), 1, 5).astype(int)
+    df = pd.DataFrame(real, columns=[f"q{i+1}" for i in range(5)])
+    df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=6, **FAST))
+    assert r["confidence"] == "high" and r["k"] == 3
+
+
 def test_every_respondent_carries_how_well_they_fit():
     """k-means has no way to answer "none of these" — everybody gets a segment.
 
