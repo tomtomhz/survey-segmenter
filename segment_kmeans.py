@@ -115,6 +115,8 @@ from sklearn.metrics import (silhouette_score, silhouette_samples,
                              adjusted_rand_score)
 from sklearn.neighbors import NearestNeighbors
 
+import kprototypes
+
 
 def _use_utf8_for_output():
     """Make console output UTF-8 everywhere, which on Windows it is not by default.
@@ -188,9 +190,24 @@ except Exception:       # pragma: no cover - defensive: the tool must run withou
 class SegmentationConfig:
     k_min: int = 2
     k_max: int = 8
-    # "kmeans" (heuristic) or "gmm" (model-based / finite-mixture / latent-class, Wedel & Kamakura)
+    # "kmeans" (heuristic), "gmm" (model-based / finite-mixture / latent-class, Wedel & Kamakura),
+    # or "kproto" (Gower k-prototypes for surveys mixing rating and pick-any questions,
+    # Szepannek et al. 2024 — see kprototypes.py)
     method: str = "kmeans"
     gmm_covariance: str = "full"    # "full" | "tied" | "diag" | "spherical" (gmm method only)
+    # Set only on the kproto path: the per-variable Gower constants, fitted once on the whole
+    # sample. Carried here rather than passed around because every resampling routine already
+    # threads cfg through, and the spec must be identical on every resample for the stability
+    # numbers to mean anything.
+    gower_spec: object = None
+    # {column name: "numeric" | "ordinal" | "nominal"} on the kproto path. Keyed by name rather
+    # than position because load_and_prepare drops columns nobody varied on, which would shift
+    # every kind after the dropped one if these were a plain list.
+    var_kinds: dict | None = None
+    # {column name: {code: original answer}} so the report can print "Nespresso" where the model
+    # holds a 2. Pick-any answers have to be coded to travel through a float matrix; without this
+    # the profiles would show the codes.
+    level_labels: dict | None = None
     # "range" (Milligan-Cooper, recommended), "standardize" (z-score), "robust" (median/IQR,
     # outlier-resistant), "none", "ipsative" (row-centred, segments on preference shape)
     scaling: str = "range"
@@ -325,20 +342,35 @@ def load_and_prepare(path, cfg: SegmentationConfig, id_col: str | None,
         print(f"WARNING: {n_inf} non-finite (inf) value(s) found; treating them as missing.")
         X = X.replace([np.inf, -np.inf], np.nan)
 
+    kinds = dict(cfg.var_kinds or {})
     if X.isna().any().any():
         if cfg.impute == "drop":
             keep = ~X.isna().any(axis=1)
             X, ids = X.loc[keep], ids[keep.to_numpy()]
             print(f"Dropped {(~keep).sum()} rows with missing values.")
         else:
-            X = X.fillna(X.mean())
-            print("Imputed missing cells with the item mean.")
+            # The mean of a set of brand codes is not a brand. Pick-any answers get the most
+            # common answer instead, which is at least one somebody gave.
+            fill = {c: (X[c].mode().iloc[0] if kinds.get(c) == kprototypes.NOMINAL
+                                               and not X[c].mode().empty else X[c].mean())
+                    for c in X.columns}
+            X = X.fillna(fill)
+            print("Imputed missing cells with the item mean (most common answer for "
+                  "pick-any questions)." if kinds else "Imputed missing cells with the item mean.")
 
     nonconst = X.std(axis=0) > 1e-12
     if not nonconst.all():
         print(f"Dropping constant item(s): {list(X.columns[~nonconst])}")
         X = X.loc[:, nonconst]
     X_raw = X.reset_index(drop=True)
+    if getattr(cfg, "method", "kmeans") == "kproto":
+        # No scaling step: Gower normalises each variable by its own range as part of the
+        # distance, so scaling here would be applied twice.
+        col_kinds = [kinds.get(c, kprototypes.ORDINAL) for c in X_raw.columns]
+        spec = kprototypes.fit_spec(X_raw.to_numpy(float), col_kinds)
+        cfg.gower_spec = spec
+        scale_params = {"scaling": "gower", "items": list(X_raw.columns), "kinds": col_kinds}
+        return kprototypes.encode(X_raw.to_numpy(float), spec), X_raw, ids, scale_params
     Xs, scale_params = _scale_fit(X_raw.to_numpy(float), cfg.scaling)
     scale_params["items"] = list(X_raw.columns)
     return Xs, X_raw, ids, scale_params
@@ -368,6 +400,11 @@ def _fit(X, k, cfg, n_init, seed):
     """Method-aware base learner. Everything downstream (stability, prediction strength,
     split-half, per-cluster Jaccard, the final fit) goes through this, so choosing the model
     (k-means vs. Gaussian mixture) changes the whole pipeline consistently, not just a label."""
+    if getattr(cfg, "method", "kmeans") == "kproto":
+        # Fewer restarts than k-means gets: each one costs a full Gower pass, and the seeding is
+        # k-means++ so the restarts agree with each other far more often than random starts would.
+        return kprototypes.KPrototypes(k, cfg.gower_spec, n_init=max(1, n_init // 4),
+                                       random_state=int(seed)).fit(X)
     if getattr(cfg, "method", "kmeans") == "gmm":
         # Try the requested covariance; on a degenerate/singular subsample fall back to simpler
         # covariances, and only then to k-means, so resampling never crashes the run.
@@ -382,7 +419,66 @@ def _fit(X, k, cfg, n_init, seed):
     return KMeans(n_clusters=k, n_init=n_init, random_state=int(seed)).fit(X)
 
 
-def _pooled_within_ss(X, labels):
+def _is_gower(cfg):
+    return getattr(cfg, "method", "kmeans") == "kproto" and getattr(cfg, "gower_spec", None)
+
+
+def _config_for_manifest(cfg):
+    """The config as plain JSON. The Gower spec is measured from the data rather than chosen by
+    anyone, and it holds numpy arrays, so it goes in as its own serialisable form — the manifest
+    stays a complete record of the run instead of becoming un-writable."""
+    blob = asdict(cfg)
+    spec = blob.get("gower_spec")
+    blob["gower_spec"] = spec.to_json() if hasattr(spec, "to_json") else None
+    return blob
+
+
+def _geometry(X, cfg):
+    """Coordinates and metric for anything that measures distance, so one call site serves both
+    paradigms. On the numeric path this is the scaled data under Euclidean distance; on the mixed
+    path it is the Manhattan embedding of Gower's distance (see kprototypes.gower_embedding),
+    which lets the silhouette, the cluster-tendency test and the segment map keep using the same
+    library routines instead of growing hand-written Gower twins."""
+    if _is_gower(cfg):
+        return kprototypes.gower_embedding(np.asarray(X, float), cfg.gower_spec), "manhattan"
+    return np.asarray(X, float), "euclidean"
+
+
+def _silhouette(X, labels, cfg):
+    coords, metric = _geometry(X, cfg)
+    return float(silhouette_score(coords, labels, metric=metric))
+
+
+def _internal_indices(X, labels, cfg):
+    """Silhouette, Calinski-Harabasz and Davies-Bouldin, the three separation indices.
+
+    The silhouette is a ratio of distances and so is exact under Gower. The other two are built
+    from sums of squares and exist only in a Euclidean space; on the mixed-type path they are
+    therefore read on the Gower embedding under Euclidean distance rather than Gower's own. That
+    is a real, well-defined reading of a real coordinate space, but it is not Gower's, and the
+    report says so — these two sit in the middle tier of the panel, below prediction strength and
+    replication, so the panel does not turn on them."""
+    coords, metric = _geometry(X, cfg)
+    return {"silhouette": float(silhouette_score(coords, labels, metric=metric)),
+            "calinski_harabasz": float(calinski_harabasz_score(coords, labels)),
+            "davies_bouldin": float(davies_bouldin_score(coords, labels))}
+
+
+def _pooled_within_ss(X, labels, cfg=None):
+    """Within-cluster dispersion, in whichever units the method's own objective uses.
+
+    Squared distance to the cluster mean for k-means. On the mixed-type path, Gower distance to
+    the cluster prototype, because that is what k-prototypes minimises — mixing an L1 objective
+    with an L2 dispersion would make the gap statistic score a quantity nothing is optimising."""
+    if _is_gower(cfg):
+        spec = cfg.gower_spec
+        total = 0.0
+        for c in np.unique(labels):
+            pts = X[labels == c]
+            if len(pts) > 1:
+                proto = kprototypes._update(pts, spec)
+                total += float(kprototypes.gower_distances(pts, proto[None, :], spec).sum())
+        return total
     total = 0.0
     for c in np.unique(labels):
         pts = X[labels == c]
@@ -394,15 +490,33 @@ def _pooled_within_ss(X, labels):
 # =====================================================================================
 # k-selection diagnostics
 # =====================================================================================
-def gap_statistic(X, k_range, B, rng, n_init):
+def gap_statistic(X, k_range, B, rng, n_init, cfg=None):
     """Tibshirani-Walther-Hastie (2001), reference method (b): uniform over the bounding box
     of the data rotated to its principal components, then rotated back — the recommended,
-    shape-aware reference distribution. Recommended k: smallest with gap(k) >= gap(k+1)-se(k+1)."""
+    shape-aware reference distribution. Recommended k: smallest with gap(k) >= gap(k+1)-se(k+1).
+
+    Method (b) needs principal components, so it is only available where the data are all
+    measurements. The mixed-type path falls back to the paper's method (a), each variable drawn
+    independently over its own observed support — less powerful against elongated structure, but
+    the only one of the two that produces answer combinations a respondent could actually give."""
+    rows = []
+    if _is_gower(cfg):
+        spec = cfg.gower_spec
+        for k in k_range:
+            logWk = np.log(_pooled_within_ss(
+                X, _fit(X, k, cfg, n_init, rng.integers(1e9)).labels_, cfg) + 1e-12)
+            refs = np.empty(B)
+            for b in range(B):
+                ref = kprototypes.reference_sample(X, spec, len(X), rng)
+                refs[b] = np.log(_pooled_within_ss(
+                    ref, _fit(ref, k, cfg, 1, rng.integers(1e9)).labels_, cfg) + 1e-12)
+            rows.append({"k": k, "gap": refs.mean() - logWk,
+                         "gap_se": refs.std() * np.sqrt(1.0 + 1.0 / B)})
+        return pd.DataFrame(rows)
     Xc = X - X.mean(0)
     _, _, Vt = np.linalg.svd(Xc, full_matrices=False)
     Xp = Xc @ Vt.T
     lo, hi = Xp.min(0), Xp.max(0)
-    rows = []
     for k in k_range:
         logWk = np.log(_pooled_within_ss(X, _km(X, k, n_init, rng.integers(1e9)).labels_) + 1e-12)
         refs = np.empty(B)
@@ -415,7 +529,7 @@ def gap_statistic(X, k_range, B, rng, n_init):
     return pd.DataFrame(rows)
 
 
-def supports_single_cluster(X, B, rng, n_init):
+def supports_single_cluster(X, B, rng, n_init, cfg=None):
     """Does the gap statistic say this data is ONE group — that is, no segmentation at all?
 
     The gap statistic is the only criterion in the panel that can answer this. Hastie, Tibshirani
@@ -438,7 +552,7 @@ def supports_single_cluster(X, B, rng, n_init):
     because a diagnostic that fails should never take the analysis down with it.
     """
     try:
-        rows = gap_statistic(X, range(1, 3), B, rng, n_init)
+        rows = gap_statistic(X, range(1, 3), B, rng, n_init, cfg)
         g = {int(r["k"]): (float(r["gap"]), float(r["gap_se"])) for _, r in rows.iterrows()}
         # Tibshirani's own rule, applied at the first step: choose k=1 unless k=2 is better by
         # more than the standard error of the reference distribution.
@@ -567,18 +681,30 @@ def consensus_partition(X, k, cfg, rng):
     return labels, C
 
 
-def hopkins_statistic(X, rng, m_frac=0.10):
+def hopkins_statistic(X, rng, m_frac=0.10, cfg=None):
     """Cluster-TENDENCY pre-check (Lawson & Jurs 1990; Banerjee & Dave 2004): should you even
     cluster these data? Compare nearest-neighbour distances of real points to those of uniform
     random points over the data's bounding box. H = sum(u) / (sum(u) + sum(w)), where u are
     random-point-to-data distances and w are data-point-to-data distances. Reading: H ~ 0.5 =
     random (no cluster tendency); H > 0.75 = strong tendency to cluster; H < 0.5 = regularly
-    spaced. Sampling a small fraction (default 10%) keeps the test valid."""
+    spaced. Sampling a small fraction (default 10%) keeps the test valid.
+
+    On the mixed-type path the same test runs under Gower's distance, and the uniform bounding box
+    is replaced by a column-by-column reference: a bounding box would otherwise place the null
+    points on brand codes nobody could have chosen (see kprototypes.reference_sample)."""
     n, d = X.shape
     m = max(5, int(m_frac * n))
-    nbrs = NearestNeighbors(n_neighbors=2).fit(X)
+    if _is_gower(cfg):
+        spec = cfg.gower_spec
+        U = kprototypes.gower_embedding(
+            kprototypes.reference_sample(X, spec, m, rng), spec)
+        X = kprototypes.gower_embedding(np.asarray(X, float), spec)
+        metric = "manhattan"
+    else:
+        U = rng.uniform(X.min(0), X.max(0), size=(m, d))
+        metric = "euclidean"
+    nbrs = NearestNeighbors(n_neighbors=2, metric=metric).fit(X)
     w = nbrs.kneighbors(X[rng.choice(n, m, replace=False)], n_neighbors=2)[0][:, 1]  # skip self
-    U = rng.uniform(X.min(0), X.max(0), size=(m, d))
     u = nbrs.kneighbors(U, n_neighbors=1)[0][:, 0]
     su, sw = u.sum(), w.sum()
     return float(su / (su + sw)) if (su + sw) > 0 else 0.5
@@ -597,7 +723,16 @@ def model_based_agreement(X, k, base_labels, cfg, rng):
     comparison is against a Gaussian mixture; when it is a Gaussian mixture, against k-means. High
     agreement is extra evidence the structure is real (two different paradigms see the same
     segments); low agreement warns the partition is method-dependent. Always also returns the
-    mixture's assignment confidence (mean top posterior) and normalized entropy (0 = crisp, 1 = fuzzy)."""
+    mixture's assignment confidence (mean top posterior) and normalized entropy (0 = crisp, 1 = fuzzy).
+
+    Not available on the mixed-type path: a Gaussian mixture assumes every variable is a
+    continuous measurement, and fitting one to brand codes would produce a number that looks like
+    corroboration while meaning nothing. That path keeps the hierarchical cross-check, which is
+    well defined under Gower, and the report says which one is missing rather than quietly
+    reporting fewer checks."""
+    if _is_gower(cfg):
+        return {"agreement_ARI": np.nan, "other_method": "n/a", "covariance": "n/a",
+                "mean_max_posterior": np.nan, "normalized_entropy": np.nan}
     best = None
     for cov in ("full", "tied", "diag", "spherical"):
         try:
@@ -625,36 +760,84 @@ def model_based_agreement(X, k, base_labels, cfg, rng):
             "mean_max_posterior": float(post.max(1).mean()), "normalized_entropy": float(ent)}
 
 
-def ward_agreement(X, labels, k):
+def ward_agreement(X, labels, k, cfg=None):
     """Third cross-check: does Ward agglomerative clustering (structurally different from k-means
     and the mixture: it merges bottom-up, not around centroids) recover the same partition? Three
     different methods agreeing is strong evidence the structure is real, not an artefact of one
-    algorithm. Skipped for very large n (the linkage is O(n^2))."""
+    algorithm. Skipped for very large n (the linkage is O(n^2)).
+
+    Ward's criterion is a sum of squares, so it is only defined in a Euclidean space. On the
+    mixed-type path the bottom-up cross-check therefore uses average linkage on Gower's distance
+    instead — still hierarchical, still a genuinely different paradigm from prototypes, and the
+    standard partner to Gower in the literature."""
     if len(X) > 3000:
         return float("nan")
     try:
-        wl = fcluster(linkage(X, method="ward"), t=k, criterion="maxclust")
-        return float(adjusted_rand_score(labels, wl))
+        if _is_gower(cfg):
+            Z = kprototypes.gower_embedding(np.asarray(X, float), cfg.gower_spec)
+            other = fcluster(linkage(Z, method="average", metric="cityblock"),
+                             t=k, criterion="maxclust")
+        else:
+            other = fcluster(linkage(X, method="ward"), t=k, criterion="maxclust")
+        return float(adjusted_rand_score(labels, other))
     except Exception:
         return float("nan")
 
 
-def variable_importance(X_raw, labels):
+def _cramers_v(codes, labels):
+    """Association between a pick-any answer and segment membership, on a 0-1 scale.
+
+    The counterpart to eta-squared for a variable that has no arithmetic. Eta-squared on brand
+    codes would be a real number computed from nothing: renumbering the brands changes it, so it
+    measures the coding rather than the data. Cramér's V is invariant to how the levels are
+    numbered, which is the only honest property to want here. Bias-corrected (Bergsma 2013), since
+    a plain V drifts upward with the number of levels and a brand question can have many.
+    """
+    table = pd.crosstab(codes, labels).to_numpy(float)
+    n = table.sum()
+    if n <= 0 or min(table.shape) < 2:
+        return 0.0
+    expected = np.outer(table.sum(1), table.sum(0)) / n
+    chi2 = float((((table - expected) ** 2) / np.where(expected > 0, expected, 1)).sum())
+    r, k = table.shape
+    phi2 = max(0.0, chi2 / n - (r - 1) * (k - 1) / (n - 1))
+    r_c = r - (r - 1) ** 2 / (n - 1)
+    k_c = k - (k - 1) ** 2 / (n - 1)
+    denom = min(r_c - 1, k_c - 1)
+    return float(np.sqrt(phi2 / denom)) if denom > 0 else 0.0
+
+
+def variable_importance(X_raw, labels, cfg=None):
     """Which items actually drive the segmentation, and which are noise? Reports eta-squared per
     item (between-segment sum of squares / total sum of squares) — the share of an item's
     variance explained by segment membership. Items with near-zero eta-squared add noise and,
     per Dolnicar's variable-selection work, can mask real structure; consider dropping them and
-    re-running."""
+    re-running.
+
+    A pick-any question is scored by Cramér's V instead, because eta-squared on its codes would
+    depend on the arbitrary order they were assigned. Both land on 0-1 with the same reading, so
+    they share a column and the bands below apply to both."""
     items = list(X_raw.columns)
+    kinds = dict(getattr(cfg, "var_kinds", None) or {})
     rows = []
     for it in items:
         y = X_raw[it].to_numpy(float)
+        if kinds.get(it) == kprototypes.NOMINAL:
+            # SQUARED, and the squaring is the whole point. Eta-squared is a share of variance;
+            # Cramer's V is correlation-like, so the two are one square apart and the bands below
+            # do not transfer between them. Measured on matched pure noise: a random pick-any
+            # column scores V = 0.06, which already clears the 0.05 "near-noise" floor, so a
+            # useless question could never be flagged as one. V-squared reads 0.00 on the same
+            # data, against eta-squared's 0.00 for a random rating — the same scale at last.
+            rows.append({"item": it, "eta_squared": round(_cramers_v(y, labels) ** 2, 3),
+                         "measure": "Cramer's V^2"})
+            continue
         grand = y.mean()
         ss_tot = ((y - grand) ** 2).sum()
         ss_between = sum(len(y[labels == c]) * (y[labels == c].mean() - grand) ** 2
                          for c in np.unique(labels))
         eta2 = ss_between / ss_tot if ss_tot > 0 else 0.0
-        rows.append({"item": it, "eta_squared": round(eta2, 3)})
+        rows.append({"item": it, "eta_squared": round(eta2, 3), "measure": "eta-squared"})
     df = pd.DataFrame(rows).sort_values("eta_squared", ascending=False).reset_index(drop=True)
     df["role"] = np.where(df["eta_squared"] >= 0.15, "drives segmentation",
                  np.where(df["eta_squared"] >= 0.05, "contributes", "near-noise (consider dropping)"))
@@ -668,17 +851,30 @@ def variable_selection_check(X_raw, labels, cfg, k, full_metrics):
     a silent drop: dropping variables can also manufacture spurious structure, so the analyst
     decides. The 'all items' side reuses the shipped solution's own metrics, so only the reduced
     solution is recomputed."""
-    vi = variable_importance(X_raw, labels)
+    vi = variable_importance(X_raw, labels, cfg)
     noise = vi.loc[vi["role"].str.startswith("near-noise"), "item"].tolist()
     signal = [c for c in X_raw.columns if c not in noise]
     if not noise or len(signal) < 2:
         return {"applicable": False, "dropped": noise, "n_signal": len(signal)}
-    Xs, _ = _scale_fit(X_raw[signal].to_numpy(float), cfg.scaling)
+    if _is_gower(cfg):
+        # The spec describes the columns it was fitted on, so a subset needs its own — and the
+        # config handed to every downstream call has to carry that one, or the distance would be
+        # computed against variables that are no longer there. This check matters most on this
+        # path: measured, three noise pick-any columns alongside six real ratings cost 0.25 ARI,
+        # which is exactly the harm it exists to surface.
+        arr = X_raw[signal].to_numpy(float)
+        spec = kprototypes.fit_spec(arr, [cfg.var_kinds.get(c, kprototypes.ORDINAL)
+                                          for c in signal])
+        cfg = replace(cfg, gower_spec=spec,
+                      var_kinds={c: v for c, v in (cfg.var_kinds or {}).items() if c in signal})
+        Xs = kprototypes.encode(arr, spec)
+    else:
+        Xs, _ = _scale_fit(X_raw[signal].to_numpy(float), cfg.scaling)
     lab = fit_final(Xs, k, cfg)[0].labels_
     jac = list(clusterboot_jaccard(Xs, lab, k, cfg).values())
     reduced = {"split_half": split_half_replication(Xs, k, cfg),
                "mean_jaccard": float(np.mean(jac)), "min_jaccard": float(np.min(jac)),
-               "silhouette": float(silhouette_score(Xs, lab))}
+               "silhouette": _silhouette(Xs, lab, cfg)}
     cleaner = (reduced["min_jaccard"] >= full_metrics["min_jaccard"] - 1e-9 and
                reduced["split_half"] >= full_metrics["split_half"] - 1e-9)
     return {"applicable": True, "dropped": noise, "n_signal": len(signal),
@@ -712,22 +908,25 @@ def selection_diagnostics(X, cfg):
     base = []
     for k in k_range:
         lab = _fit(X, k, cfg, cfg.n_init_search, cfg.random_state).labels_
-        base.append({"k": k, "inertia": _pooled_within_ss(X, lab),
-                     "silhouette": silhouette_score(X, lab),
-                     "calinski_harabasz": calinski_harabasz_score(X, lab),
-                     "davies_bouldin": davies_bouldin_score(X, lab),
+        base.append({"k": k, "inertia": _pooled_within_ss(X, lab, cfg),
+                     **_internal_indices(X, lab, cfg),
                      # Share of respondents in the SMALLEST segment. A statistically tidy
                      # solution made of two-person segments cannot be marketed to, so this is
                      # what makes cfg.min_segment_frac enforceable rather than decorative.
                      "min_segment_share": float(np.bincount(lab, minlength=k).min() / len(lab))})
     diag = pd.DataFrame(base)
     diag = diag.merge(gap_statistic(X, k_range, cfg.gap_B,
-                                    np.random.default_rng(cfg.random_state + 1), cfg.n_init_search), on="k")
+                                    np.random.default_rng(cfg.random_state + 1),
+                                    cfg.n_init_search, cfg), on="k")
     diag = diag.merge(replication_stability(X, k_range, cfg.stability_B, cfg.stability_frac,
                                             np.random.default_rng(cfg.random_state + 2), cfg), on="k")
     diag = diag.merge(prediction_strength(X, k_range, cfg.ps_splits,
                                           np.random.default_rng(cfg.random_state + 3), cfg), on="k")
-    if cfg.fit_gmm_bic or cfg.method == "gmm":
+    # Not on the mixed-type path. A Gaussian mixture assumes every column is a measurement, so
+    # its BIC on codes standing for brands is a real number computed from a false premise — and
+    # left in, it votes: on a mixed file whose true answer was 3 it argued for 8. The report says
+    # this check is unavailable here, and it has to actually be unavailable.
+    if (cfg.fit_gmm_bic or cfg.method == "gmm") and not _is_gower(cfg):
         diag = diag.merge(gmm_bic_icl(X, k_range, np.random.default_rng(cfg.random_state + 4),
                                       cfg.gmm_covariance), on="k")
     if cfg.run_consensus:
@@ -882,26 +1081,65 @@ def jaccard_reading(j):
 # =====================================================================================
 # Interpretation
 # =====================================================================================
+def _picks_line(codes, labels, c, level_labels):
+    """What this segment answers to a pick-any question, against what everybody answers.
+
+    "Values 0.6 below average" is not a statement about a brand — it is arithmetic on the order
+    the brands happened to be listed in. The honest version of the same sentence names the answer
+    the segment actually gives and how much more often than the sample as a whole it gives it."""
+    mine = codes[labels == c]
+    if not len(mine):
+        return None
+    values, counts = np.unique(mine, return_counts=True)
+    top = values[counts.argmax()]
+    share = counts.max() / len(mine)
+    overall = float((codes == top).mean())
+    name = (level_labels or {}).get(float(top), str(top))
+    return f"{name} ({share:.0%} of them, vs {overall:.0%} overall)"
+
+
 def interpret(X_raw, labels, cfg):
     items = list(X_raw.columns)
+    kinds = dict(getattr(cfg, "var_kinds", None) or {})
+    all_labels = getattr(cfg, "level_labels", None) or {}
+    nominal = [it for it in items if kinds.get(it) == kprototypes.NOMINAL]
+    rated = [it for it in items if it not in nominal]
     seg = pd.Series(labels, name="segment")
     centroids = X_raw.groupby(seg).mean()
     centroids.index = [f"Segment {c}" for c in centroids.index]
-    grand = X_raw.mean()
+    # A pick-any column has no meaningful mean, so the profile table carries the segment's most
+    # common answer by name instead of the average of its codes.
+    for it in nominal:
+        codes = X_raw[it].to_numpy(float)
+        centroids[it] = [(_picks_line(codes, labels, c, all_labels.get(it)) or "").split(" (")[0]
+                         for c in np.unique(labels)]
+    grand = X_raw[rated].mean()
     defining = {}
     for c in np.unique(labels):
-        diff = (X_raw[labels == c].mean() - grand).sort_values(ascending=False)
+        diff = (X_raw[labels == c][rated].mean() - grand).sort_values(ascending=False)
         # With few items, head(top_items) and tail(top_items) would overlap and print the same
         # items as both "values most" and "values least"; cap each side to a non-overlapping half.
         half = max(1, min(cfg.top_items, len(diff) // 2))
+        picks = [f"{it}: {line}" for it in nominal
+                 if (line := _picks_line(X_raw[it].to_numpy(float), labels, c,
+                                         all_labels.get(it)))]
         defining[f"Segment {c}"] = {
             "most_above_average": [f"{it} ({diff[it]:+.1f})" for it in diff.head(half).index],
             "most_below_average": [f"{it} ({diff[it]:+.1f})" for it in diff.tail(half).index],
+            "picks": picks,
             "auto_name": " + ".join(_short_label(t) for t in diff.head(2).index)}
     groups = [X_raw[labels == c] for c in np.unique(labels)]
     fvals = {}
     for it in items:
         try:
+            if it in nominal:
+                # An F test compares means, which a pick-any question does not have. Chi-square on
+                # the answer-by-segment table asks the same question — does this split people? —
+                # without pretending the codes are quantities.
+                chi2, p, _, _ = stats.chi2_contingency(
+                    pd.crosstab(X_raw[it], pd.Series(labels)).to_numpy())
+                fvals[it] = (float(chi2), float(p))
+                continue
             f, p = stats.f_oneway(*[g[it].to_numpy() for g in groups]); fvals[it] = (f, p)
         except Exception:
             fvals[it] = (np.nan, np.nan)
@@ -1094,7 +1332,7 @@ def _hopkins_caveat(distinct_share, n_items):
             "dataset. Judge this run on the replication and per-segment stability figures "
             "below, which are not affected.\n")
 
-def stability_across_solutions(X, k_range, chosen_k, labels, n_init, rng):
+def stability_across_solutions(X, k_range, chosen_k, labels, n_init, rng, cfg=None):
     """Would each segment still be there if a different number had been chosen?
 
     Dolnicar & Leisch, *Using segment level stability to select target segments in data-driven
@@ -1129,7 +1367,7 @@ def stability_across_solutions(X, k_range, chosen_k, labels, n_init, rng):
     scores = {c: [] for c in chosen}
     for k in neighbours:
         try:
-            other = _km(X, k, n_init, rng.integers(1e9)).labels_
+            other = _fit(X, k, cfg, n_init, rng.integers(1e9)).labels_
         except Exception:
             continue
         for c, members in chosen.items():
@@ -1267,8 +1505,12 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
                 k_agreement=None, ward_ari=None, distinct_share=None,
                 single_cluster=False, gap_one=None, gap_two=None, neighbours=None,
                 median_shadow=None, persistence=None):
-    method_name = ("a Gaussian mixture / latent-class model (" + cfg.gmm_covariance +
-                   " covariance)" if getattr(cfg, "method", "kmeans") == "gmm" else "k-means")
+    _method = getattr(cfg, "method", "kmeans")
+    method_name = {"gmm": "a Gaussian mixture / latent-class model ("
+                          + cfg.gmm_covariance + " covariance)",
+                   "kproto": "Gower k-prototypes (Szepannek et al. 2024), which uses the rating "
+                             "and the pick-any questions together",
+                   }.get(_method, "k-means")
     # Said first and said plainly. The gap statistic is the only criterion here that can return
     # "one group" — silhouette and the rest are undefined at k=1 — and Hastie, Tibshirani and
     # Friedman note it is the scenario where most competing methods fail. If it says there is
@@ -1292,12 +1534,35 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
                            # unlike k-means can represent a cluster's breadth, and Ward, which
                            # builds bottom-up rather than around centroids. If both put people
                            # somewhere else, the memberships are not settled.
+                           # NaN has to be filtered, not just type-checked: it is a float, and
+                           # min() returns whichever NaN it meets first, so a single unavailable
+                           # check would silently throw away the one that did run.
                            cross_method=min(
                                [v for v in ((mb_agreement or {}).get("agreement_ARI"), ward_ari)
-                                if isinstance(v, (int, float))], default=None)),
-         f"Respondents clustered with **{method_name}** on **{cfg.scaling}**-scaled utilities; "
-         f"final fit used {cfg.n_init_final} restarts. Search range: k = "
-         f"{cfg.k_min} to {cfg.k_max}.\n",
+                                if isinstance(v, (int, float)) and not np.isnan(v)],
+                               default=None)),
+         (f"Respondents clustered with **{method_name}**; final fit used "
+          f"{cfg.n_init_final} restarts. Search range: k = {cfg.k_min} to {cfg.k_max}.\n"
+          if _method == "kproto" else
+          f"Respondents clustered with **{method_name}** on **{cfg.scaling}**-scaled utilities; "
+          f"final fit used {cfg.n_init_final} restarts. Search range: k = "
+          f"{cfg.k_min} to {cfg.k_max}.\n"),
+         # Say plainly which checks this path cannot run. Reporting four corroborating numbers
+         # where the numeric path reports five, without mentioning the fifth, would quietly
+         # overstate how much agreement there is behind the answer.
+         ("\n> **What is different about a mixed-question segmentation.** Every question is scored "
+          "on Gower's distance: a rating by how far apart the two answers are on the scale, a "
+          "pick-any question by whether the two people chose the same thing. Ratings are read as "
+          "ordered answers rather than as numbers, so the distance between \"agree\" and "
+          "\"strongly agree\" reflects how many people actually sit between them.\n>\n"
+          "> Two things in the panel below work differently as a result. The Gaussian-mixture "
+          "cross-check is **not run** — a mixture assumes every answer is a measurement, and "
+          "fitting one to brand codes would produce a number that looks like corroboration and "
+          "is not — so the bottom-up cross-check is average linkage on Gower's distance instead. "
+          "And Calinski-Harabasz and Davies-Bouldin are sums of squares, so they are read on the "
+          "coordinates behind Gower's distance rather than on Gower itself; the silhouette, "
+          "prediction strength, replication and per-segment stability are all exact.\n"
+          if _method == "kproto" else None),
          "## Is there anything to segment? (cluster tendency)\n",
          (lambda kg: f"**This is a {kg[0]} segmentation** — {kg[1]}\n\n"
                      "The three kinds, as market segmentation research distinguishes them "
@@ -1389,12 +1654,22 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
     for seg, d in defining.items():
         L.append(f"**{seg}** — suggested name: *{d['auto_name']}*")
         L.append(f"  - Values most: {', '.join(d['most_above_average'])}")
-        L.append(f"  - Values least: {', '.join(d['most_below_average'])}\n")
-    L += ["## What differentiates the segments (one-way ANOVA F; high = splits them most)\n",
+        L.append(f"  - Values least: {', '.join(d['most_below_average'])}")
+        for pick in d.get("picks", []):
+            L.append(f"  - Mostly picks {pick}")
+        L.append("")
+    _mixed = any(d.get("picks") for d in defining.values())
+    L += [("## What differentiates the segments (one-way ANOVA F, or chi-square for the "
+           "pick-any questions; high = splits them most)\n" if _mixed else
+           "## What differentiates the segments (one-way ANOVA F; high = splits them most)\n"),
           _md(differentiating.head(10).round(2)),
           "\n## Which items drive the segmentation (variable importance)\n",
-          "Eta-squared is the share of each item's variance explained by segment membership. "
-          "Near-zero items add noise and can mask real structure (Dolnicar's variable-selection "
+          ("Eta-squared is the share of each item's variance explained by segment membership. For "
+           "the pick-any questions it is Cramer's V squared, which puts the same idea on the same "
+           "scale without depending on the order the answers happened to be listed in. "
+           if _mixed else
+           "Eta-squared is the share of each item's variance explained by segment membership. ")
+          + "Near-zero items add noise and can mask real structure (Dolnicar's variable-selection "
           "point) — consider dropping the near-noise items and re-running.\n",
           _md(var_importance),
           _varsel_section(varsel, rec_k),
@@ -1403,8 +1678,12 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
           "\n---\n**Methodology.** Number of segments chosen by a weighted panel (prediction "
           "strength and replication stability first, then separation indices, then the gap "
           "statistic) rather than a single elbow; per-segment validity judged by bootstrap "
-          "Jaccard stability (Hennig 2007). Range standardization follows Milligan & Cooper "
-          "(1988). A reminder from Dolnicar & Leisch: data-driven segments are usually "
+          "Jaccard stability (Hennig 2007). "
+          + ("Distance and prototypes follow Szepannek, Aschenbruck & Wilhelm (2024); ordinal "
+             "answers use Podani's metric rank transformation (1999). "
+             if _method == "kproto" else
+             "Range standardization follows Milligan & Cooper (1988). ")
+          + "A reminder from Dolnicar & Leisch: data-driven segments are usually "
           "*constructed* by the method, not discovered — so trust the stability columns, and "
           "rename the auto-suggested mind-set names to something a non-analyst would recognise "
           "before shipping. Demographics were not used to form the segments; profile them "
@@ -1595,8 +1874,12 @@ def write_html_report(markdown_text, path, title="Segmentation report"):
 # =====================================================================================
 # Typing tool: assign NEW respondents to segments, and measure how reliably that can be done
 # =====================================================================================
-def segment_centres(X, labels):
-    """Mean position of each segment, in whatever space the clustering happened in.
+def segment_centres(X, labels, cfg=None):
+    """The centre of each segment, in whatever space the clustering happened in.
+
+    The mean on the numeric path, because that is what k-means puts at the centre. On the
+    mixed-type path it is the k-prototypes prototype instead — median, mode and nearest-rank level
+    by variable type — because a mean of brand codes is not an answer anybody gave.
 
     An empty segment keeps a row of NaN rather than being dropped, so row i is always segment i
     and nothing downstream has to renumber.
@@ -1604,11 +1887,18 @@ def segment_centres(X, labels):
     X = np.asarray(X, float)
     labels = np.asarray(labels)
     k = int(labels.max()) + 1 if len(labels) else 0
-    return np.array([X[labels == c].mean(0) if (labels == c).any()
-                     else np.full(X.shape[1], np.nan) for c in range(k)])
+    gower = _is_gower(cfg)
+    out = []
+    for c in range(k):
+        pts = X[labels == c]
+        if not len(pts):
+            out.append(np.full(X.shape[1], np.nan))
+        else:
+            out.append(kprototypes._update(pts, cfg.gower_spec) if gower else pts.mean(0))
+    return np.array(out)
 
 
-def shadow_values(X, centroids):
+def shadow_values(X, centroids, cfg=None):
     """Leisch's shadow value for every respondent, plus who their two nearest segments are.
 
         s(x) = 2 d(x, closest) / [ d(x, closest) + d(x, second closest) ]
@@ -1632,7 +1922,13 @@ def shadow_values(X, centroids):
     C = np.asarray(centroids, float)
     if C.ndim != 2 or len(C) < 2:
         return np.zeros(len(X)), np.zeros(len(X), int), np.zeros(len(X), int)
-    d = np.sqrt(((X[:, None, :] - C[None, :, :]) ** 2).sum(2))     # (n, k)
+    # Whichever distance the segmentation itself minimises: a shadow value compares a
+    # respondent's two nearest centres, so it is only meaningful under the metric that decided
+    # which centre was nearest in the first place.
+    if _is_gower(cfg):
+        d = kprototypes.gower_distances(X, C, cfg.gower_spec)
+    else:
+        d = np.sqrt(((X[:, None, :] - C[None, :, :]) ** 2).sum(2))     # (n, k)
     order = np.argsort(d, axis=1)
     closest, second = order[:, 0], order[:, 1]
     rows = np.arange(len(X))
@@ -1667,7 +1963,7 @@ def segment_neighbours(shadow, closest, second, k):
     return sorted(out, key=lambda r: -r[2])
 
 
-def _per_respondent_fit(X, labels, centroids=None):
+def _per_respondent_fit(X, labels, centroids=None, cfg=None):
     """How well each respondent sits in the segment they were given: 1 = squarely inside, 0 =
     stranded between two. This is 1 - the shadow value, flipped so that higher reads as better
     in the exported file, which is what a non-analyst expects of a column called `fit`.
@@ -1680,7 +1976,7 @@ def _per_respondent_fit(X, labels, centroids=None):
     if len(np.unique(labels)) < 2:
         return np.full(len(labels), np.nan)
     if centroids is not None:
-        shadow, _, _ = shadow_values(X, centroids)
+        shadow, _, _ = shadow_values(X, centroids, cfg)
         return np.round(1.0 - shadow, 3)
     try:
         from sklearn.metrics import silhouette_samples
@@ -1727,10 +2023,29 @@ def typing_tool(arr_raw, labels, cfg):
     counts = np.array([(labels == c).sum() for c in classes])
     min_class = int(counts.min())
 
-    def _centroids(Xs, y):
+    # On the mixed-type path the rule is the same idea in a different metric: prototypes instead
+    # of centroids, Gower instead of Euclidean, and the Gower spec standing in for the scaling
+    # parameters. It has to be the distance the segmentation itself used, or the exported rule
+    # would put new people somewhere the analysis never would.
+    gower = _is_gower(cfg)
+
+    def _fit_space(arr):
+        if gower:
+            spec = kprototypes.fit_spec(arr, list(cfg.gower_spec.kinds))
+            return kprototypes.encode(arr, spec), spec
+        return _scale_fit(arr, cfg.scaling)
+
+    def _apply_space(arr, params):
+        return kprototypes.encode(arr, params) if gower else _scale_apply(arr, params)
+
+    def _centroids(Xs, y, params):
+        if gower:
+            return np.vstack([kprototypes._update(Xs[y == c], params) for c in classes])
         return np.vstack([Xs[y == c].mean(0) for c in classes])
 
-    def _assign(Xte, cents):
+    def _assign(Xte, cents, params):
+        if gower:
+            return classes[kprototypes.gower_distances(Xte, cents, params).argmin(1)]
         d = ((Xte[:, None, :] - cents[None, :, :]) ** 2).sum(2)
         return classes[d.argmin(1)]
 
@@ -1741,8 +2056,8 @@ def typing_tool(arr_raw, labels, cfg):
         skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=cfg.random_state)
         correct = np.zeros(k); total = np.zeros(k); n_ok = 0
         for tr, te in skf.split(arr_raw, labels):
-            Xtr, p = _scale_fit(arr_raw[tr], cfg.scaling)      # refit scaling on the train fold only
-            pred = _assign(_scale_apply(arr_raw[te], p), _centroids(Xtr, labels[tr]))
+            Xtr, p = _fit_space(arr_raw[tr])       # refit the space on the train fold only
+            pred = _assign(_apply_space(arr_raw[te], p), _centroids(Xtr, labels[tr], p), p)
             n_ok += int((pred == labels[te]).sum())
             for i, c in enumerate(classes):
                 m = labels[te] == c
@@ -1751,12 +2066,13 @@ def typing_tool(arr_raw, labels, cfg):
         recalls = {int(c): (float(correct[i] / total[i]) if total[i] else float("nan"))
                    for i, c in enumerate(classes)}
 
-    Xs_full, params = _scale_fit(arr_raw, cfg.scaling)         # the exported rule, fit on all data
+    Xs_full, params = _fit_space(arr_raw)                      # the exported rule, fit on all data
     return {"cv_accuracy": cv_acc,
             "baseline_majority": float(counts.max() / n),      # "always guess the biggest segment"
             "per_segment_recall": recalls,
-            "scaled_centroids": _centroids(Xs_full, labels),
-            "scale_params": params,
+            "scaled_centroids": _centroids(Xs_full, labels, params),
+            "scale_params": ({"scaling": "gower", "gower_spec": params.to_json()}
+                             if gower else params),
             "classes": [int(c) for c in classes]}
 
 
@@ -1783,6 +2099,8 @@ def _training_centre(params):
     batch of 500 — which defeats the point of a fixed typing rule. Row-local scalings (ipsative,
     none) fit no centre, so they have nothing to offer here and return None."""
     s = params.get("scaling")
+    if s == "gower":
+        return kprototypes.GowerSpec.from_json(params["gower_spec"]).centre
     if s == "standardize":
         return np.asarray(params["mean"], float)
     if s == "robust":
@@ -1804,8 +2122,17 @@ def classify_new(rule, df, id_col=None):
     # New responses arrive exactly as the survey exported them, so any item the original run
     # recoded from words ("Strongly agree") to 1-5 is still text here. Recode it the same way
     # before scoring, or the rule cannot be applied to a real fresh export at all.
+    kinds = rule.get("var_kinds") or {}
+    level_labels = rule.get("level_labels") or {}
     sub = df[items].copy()
     for c in items:
+        if kinds.get(c) == kprototypes.NOMINAL:
+            # A pick-any answer arrives as the word the respondent chose. Map it back to the code
+            # the study used; anything the study never saw becomes UNSEEN, which sits a full
+            # mismatch from every known answer rather than being quietly treated as one of them.
+            back = {name: float(code) for code, name in level_labels.get(c, {}).items()}
+            sub[c] = sub[c].astype(str).map(back).fillna(kprototypes.UNSEEN).astype(float)
+            continue
         if not pd.api.types.is_numeric_dtype(sub[c]):
             # The rule already established this item is a rating scale; applying it must not
             # depend on how many distinct answers this particular batch happens to contain.
@@ -1814,16 +2141,25 @@ def classify_new(rule, df, id_col=None):
                 raise ValueError(f"_UNSCORABLE_ITEM:{c}")
             sub[c] = rec
     arr = sub.to_numpy(float)
-    arr = np.where(np.isinf(arr), np.nan, arr)
+    # UNSEEN is -inf by construction and must survive; only genuine infinities are missing data.
+    nominal_at = [i for i, c in enumerate(items) if kinds.get(c) == kprototypes.NOMINAL]
+    bad = np.isinf(arr)
+    bad[:, nominal_at] = False
+    arr = np.where(bad, np.nan, arr)
     if np.isnan(arr).any():
         centre = _training_centre(rule["scale_params"])
         if centre is None:                   # row-local scaling — no fitted centre exists to use
             seen = (~np.isnan(arr)).sum(0)   # column means without nanmean's empty-slice warning
             centre = np.where(seen > 0, np.nansum(arr, 0) / np.maximum(seen, 1), 0.0)
         arr = np.where(np.isnan(arr), centre, arr)
-    Xs = _scale_apply(arr, rule["scale_params"])
-    cents = np.asarray(rule["scaled_centroids"], float); classes = np.asarray(rule["classes"])
-    d = np.sqrt(((Xs[:, None, :] - cents[None, :, :]) ** 2).sum(2))
+    classes = np.asarray(rule["classes"])
+    cents = np.asarray(rule["scaled_centroids"], float)
+    if rule["scale_params"].get("scaling") == "gower":
+        spec = kprototypes.GowerSpec.from_json(rule["scale_params"]["gower_spec"])
+        d = kprototypes.gower_distances(kprototypes.encode(arr, spec), cents, spec)
+    else:
+        d = np.sqrt(((_scale_apply(arr, rule["scale_params"])[:, None, :]
+                      - cents[None, :, :]) ** 2).sum(2))
     inv = 1.0 / (d + 1e-9)
     out = pd.DataFrame({"segment": classes[d.argmin(1)],
                         "confidence": (inv.max(1) / inv.sum(1)).round(3)})
@@ -2585,6 +2921,35 @@ def classify_columns(df, id_col=None):
     return plan
 
 
+#: A pick-any question with a level per respondent is not a set of choices, it is an identifier
+#: or a free-text box. Coding it would hand k-prototypes a variable that separates everybody from
+#: everybody, which fits beautifully and means nothing. Same ceiling the latent-class path uses.
+def _max_levels(n_rows):
+    return max(12, int(0.25 * n_rows))
+
+
+def _code_nominals(clean, cat_cols, items, plan, df):
+    """Turn each pick-any column into integer codes, remembering what the codes mean.
+
+    Gower travels through a float matrix like everything else in the pipeline, so the answers have
+    to become numbers. The mapping is kept so the report can say "Nespresso" rather than "2" —
+    a profile table full of codes would be worse than not having the column at all.
+    """
+    kinds, labels = plan.setdefault("kinds", {}), plan.setdefault("level_labels", {})
+    for c in items:
+        if c not in cat_cols:
+            kinds[c] = kprototypes.ORDINAL
+            continue
+        values = df[c].astype(str).fillna("")
+        nun = int(values.nunique())
+        if nun > _max_levels(len(df)):
+            raise ValueError(f"_TOO_MANY_LEVELS:{c}:{nun}")
+        codes, uniques = pd.factorize(values, sort=True)
+        clean[c] = codes.astype(float)
+        kinds[c] = kprototypes.NOMINAL
+        labels[c] = {float(i): str(v) for i, v in enumerate(uniques)}
+
+
 def auto_prepare(df, id_col=None, force_items=None):
     """Turn an arbitrary survey export into (clean_df, method, id_col, item_cols, plan). Clusters on
     the rating questions with k-means when there are at least two of them (the richer signal), and
@@ -2642,8 +3007,17 @@ def auto_prepare(df, id_col=None, force_items=None):
                     col = rec
             clean[c] = col
             numeric += int(pd.api.types.is_numeric_dtype(clean[c]))
-        # All-numeric picks are continuous utilities (k-means); a mixed or text pick is categorical.
-        method = "kmeans" if numeric == len(chosen) else "lca"
+        # All-numeric picks are continuous utilities (k-means). A pick with ratings AND pick-any
+        # answers goes to Gower k-prototypes, which can use both at once; only an all-categorical
+        # pick falls through to latent class.
+        text_cols = [c for c in chosen if not pd.api.types.is_numeric_dtype(clean[c])]
+        if numeric == len(chosen):
+            method = "kmeans"
+        elif numeric >= 2 and text_cols:
+            method = "kproto"
+            _code_nominals(clean, text_cols, chosen, plan, df)
+        else:
+            method = "lca"
         if method == "lca":
             for c in chosen:
                 # Guard against a nonsense model: a column with hundreds of distinct values is a
@@ -2660,13 +3034,23 @@ def auto_prepare(df, id_col=None, force_items=None):
     clean = pd.DataFrame(index=df.index)
     if plan["id"] is not None:
         clean[plan["id"]] = df[plan["id"]]
-    if len(cont) >= 2:
+    if len(cont) >= 2 and cat:
+        # Both kinds of question, so use both. Until this existed the multiple-choice columns were
+        # set aside with an apology, which threw away answers the respondent took the trouble to
+        # give — and on a study where the brand question is the interesting one, threw away the
+        # finding. Gower k-prototypes (Szepannek et al. 2024) puts them on one footing.
+        method, items = "kproto", cont + cat
+        for c in cont:
+            clean[c] = plan["recoded"].get(c, df[c])
+        _code_nominals(clean, cat, items, plan, df)
+        plan["notes"].append(
+            f"Used both kinds of question together: {len(cont)} rating question(s) and "
+            f"{len(cat)} multiple-choice question(s), grouped with Gower k-prototypes. Ratings "
+            "are read as ordered answers rather than as numbers.")
+    elif len(cont) >= 2:
         method, items = "kmeans", cont
         for c in items:
             clean[c] = plan["recoded"].get(c, df[c])
-        if cat:
-            plan["notes"].append(f"Set aside {len(cat)} multiple-choice column(s) and grouped people "
-                                 "by the rating questions (the richer signal).")
     elif len(cat) >= 2:
         method, items = "lca", cat
         for c in items:
@@ -2678,7 +3062,9 @@ def auto_prepare(df, id_col=None, force_items=None):
 
 def _detection_summary(plan, method, n_items, n_resp):
     how = {"kmeans": "grouping people by their rating answers (k-means)",
-           "lca": "grouping people by their multiple-choice answers (Latent Class Analysis)"}[method]
+           "lca": "grouping people by their multiple-choice answers (Latent Class Analysis)",
+           "kproto": "grouping people by their rating AND multiple-choice answers together "
+                     "(Gower k-prototypes)"}[method]
     lines = ["Here is what I found in your file (override anything with flags such as --id-col or --method):"]
     lines += ["  - " + note for note in plan["notes"]]
     lines.append(f"\nGrouping {n_resp} people on {n_items} question(s) by {how}.\n")
@@ -2759,7 +3145,8 @@ def run_auto(path, args, parser):
                              else "results")
     demo_df = df[[id_col] + plan["demographics"]] if (plan["demographics"] and id_col) else None
     weights = df[plan["weight"]].to_numpy() if plan["weight"] else None
-    cfg = SegmentationConfig(method=method, random_state=args.seed)
+    cfg = SegmentationConfig(method=method, random_state=args.seed,
+                             var_kinds=plan.get("kinds"), level_labels=plan.get("level_labels"))
     try:
         if method == "lca":
             LatentClassSegmenter(cfg).run(clean, id_col=id_col, item_cols=items, outdir=outdir,
@@ -2798,7 +3185,9 @@ def run_analysis(data, cfg=None, force_items=None):
             f"below are built on those utilities. Counting how often each item was picked best "
             f"minus worst would have been too coarse to describe a single person.")
     clean, method, id_col, items, plan = auto_prepare(df, force_items=force_items)
-    base = replace(cfg, method=method) if cfg is not None else SegmentationConfig(method=method)
+    _opts = {"method": method, "var_kinds": plan.get("kinds"),
+             "level_labels": plan.get("level_labels")}
+    base = replace(cfg, **_opts) if cfg is not None else SegmentationConfig(**_opts)
     demo_df = df[[id_col] + plan["demographics"]] if (plan["demographics"] and id_col) else None
     weights = df[plan["weight"]].to_numpy() if plan["weight"] else None
     if method == "lca":
@@ -2960,14 +3349,18 @@ class Segmenter:
             cfg = replace(cfg, run_consensus=False)
         self.cfg = cfg   # use the validated/clamped config for the rest of the run
 
+        # Gower normalises each question inside the distance itself, so there is no scaling step
+        # to name on that path — printing one would describe something that did not happen.
+        _how = ("method: kproto, Gower distance" if _is_gower(cfg)
+                else f"method: {cfg.method}, scaling: {cfg.scaling}")
         print(f"Segmenting {X.shape[0]} respondents on {X.shape[1]} items "
-              f"(method: {cfg.method}, scaling: {cfg.scaling}). Running the diagnostic panel...\n")
+              f"({_how}). Running the diagnostic panel...\n")
 
-        self.hopkins = hopkins_statistic(X, np.random.default_rng(cfg.random_state + 7))
+        self.hopkins = hopkins_statistic(X, np.random.default_rng(cfg.random_state + 7), cfg=cfg)
         # The one test in the panel that can return "this is a single group". See
         # supports_single_cluster for why the k>=2 search would otherwise never ask.
         self.single_cluster, self.gap_one, self.gap_two = supports_single_cluster(
-            X, cfg.gap_B, np.random.default_rng(cfg.random_state + 8), cfg.n_init_search)
+            X, cfg.gap_B, np.random.default_rng(cfg.random_state + 8), cfg.n_init_search, cfg)
         print(f"Cluster-tendency (Hopkins) = {self.hopkins:.2f} — {hopkins_reading(self.hopkins)}.\n")
 
         self.diagnostics = selection_diagnostics(X, cfg)
@@ -2990,12 +3383,12 @@ class Segmenter:
                 self.labels = cons_labels
                 print("Adopted the consensus ensemble partition as the final segmentation.\n")
         self.split_half = split_half_replication(X, self.recommended_k, cfg)
-        sil_overall = silhouette_score(X, self.labels)
+        sil_overall = _silhouette(X, self.labels, cfg)
         self.jaccard = clusterboot_jaccard(X, self.labels, self.recommended_k, cfg)
         self.mb_agreement = model_based_agreement(X, self.recommended_k, self.labels, cfg,
                                                   np.random.default_rng(cfg.random_state + 8))
-        self.ward_ari = ward_agreement(X, self.labels, self.recommended_k)
-        self.var_importance = variable_importance(X_raw, self.labels)
+        self.ward_ari = ward_agreement(X, self.labels, self.recommended_k, cfg)
+        self.var_importance = variable_importance(X_raw, self.labels, cfg)
         # Typing tool: the exportable rule for classifying new respondents, plus a leakage-free
         # cross-validated estimate of how reliably the segments can be reproduced out-of-sample.
         self.typing = typing_tool(X_raw.to_numpy(float), self.labels, cfg)
@@ -3047,13 +3440,13 @@ class Segmenter:
         # Does each segment survive being asked for a different number of groups?
         self.persistence = stability_across_solutions(
             X, range(cfg.k_min, cfg.k_max + 1), int(self.recommended_k), self.labels,
-            cfg.n_init_search, np.random.default_rng(cfg.random_state + 9))
-        _cents = segment_centres(X, self.labels)
-        self.shadow, _closest, _second = shadow_values(X, _cents)
+            cfg.n_init_search, np.random.default_rng(cfg.random_state + 9), cfg)
+        _cents = segment_centres(X, self.labels, cfg)
+        self.shadow, _closest, _second = shadow_values(X, _cents, cfg)
         self.neighbours = segment_neighbours(self.shadow, _closest, _second,
                                              int(self.recommended_k))
         self.assignments = pd.DataFrame({"id": ids, "segment": self.labels,
-                                         "fit": _per_respondent_fit(X, self.labels, _cents)})
+                                         "fit": _per_respondent_fit(X, self.labels, _cents, cfg)})
         # Keep the clustered matrix so the charts can show the reader the actual point cloud.
         # A confidence word is a claim; a picture of the data is evidence they can check.
         self.X, self.item_names = X, list(X_raw.columns)
@@ -3094,6 +3487,12 @@ class Segmenter:
                 "tool_version": __version__,
                 "method": self.cfg.method, "scaling": self.cfg.scaling,
                 "items": list(self.centroids.columns),
+                # What each pick-any code stands for, so a fresh export that still says
+                # "Nespresso" can be scored at all. Without it the rule would hold prototypes in
+                # codes it could not translate back to answers.
+                "level_labels": {c: {str(code): name for code, name in levels.items()}
+                                 for c, levels in (self.cfg.level_labels or {}).items()},
+                "var_kinds": dict(self.cfg.var_kinds or {}),
                 "classes": self.typing["classes"],
                 "scale_params": self.typing["scale_params"],
                 "scaled_centroids": self.typing["scaled_centroids"].tolist(),
@@ -3121,7 +3520,7 @@ class Segmenter:
         manifest = {
             "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "tool_version": __version__,
-            "config": asdict(self.cfg),
+            "config": _config_for_manifest(self.cfg),
             "n_respondents": int(len(self.labels)),
             "n_items": int(X.shape[1]),
             "recommended_k": int(self.recommended_k),
@@ -3156,10 +3555,11 @@ def _cli():
     p.add_argument("--kmax", type=int, default=8)
     p.add_argument("--scaling", choices=["range", "standardize", "robust", "none", "ipsative"],
                    default="range")
-    p.add_argument("--method", choices=["auto", "kmeans", "gmm", "lca"], default="auto",
+    p.add_argument("--method", choices=["auto", "kmeans", "gmm", "lca", "kproto"], default="auto",
                    help="auto (default: inspect the file and choose for you), kmeans (heuristic), "
-                        "gmm (Gaussian mixture, continuous), or lca (Latent Class Analysis, for "
-                        "CATEGORICAL / multiple-choice items)")
+                        "gmm (Gaussian mixture, continuous), lca (Latent Class Analysis, for "
+                        "CATEGORICAL / multiple-choice items), or kproto (Gower k-prototypes, for "
+                        "a questionnaire holding BOTH rating scales and pick-any questions)")
     p.add_argument("--gmm-covariance", choices=["full", "tied", "diag", "spherical"], default="full")
     p.add_argument("--force-k", type=int, default=None)
     p.add_argument("--no-gmm", action="store_true", help="skip the Gaussian-mixture BIC/ICL cross-check")
@@ -3219,6 +3619,22 @@ def _cli():
     if a.method == "lca":            # categorical path: Latent Class Analysis, not k-means
         LatentClassSegmenter(cfg).run(a.csv, id_col=a.id_col, item_cols=a.items,
                                       force_k=a.force_k, outdir=a.outdir)
+        return
+    if a.method == "kproto":
+        # Asked for explicitly rather than detected, so read the column types off the file the
+        # same way the detector would: text answers are choices, numbers are ordered ratings.
+        frame = _read_table(a.csv)
+        chosen = a.items or [c for c in frame.columns if c != a.id_col]
+        text = [c for c in chosen if not pd.api.types.is_numeric_dtype(frame[c])]
+        if len(chosen) - len(text) < 2:
+            p.error("--method kproto needs at least two rating columns alongside the pick-any "
+                    "ones; for an all-categorical file use --method lca.")
+        prepared = frame[([a.id_col] if a.id_col in frame.columns else []) + chosen].copy()
+        plan = {}
+        _code_nominals(prepared, text, chosen, plan, frame)
+        cfg = replace(cfg, var_kinds=plan.get("kinds"), level_labels=plan.get("level_labels"))
+        Segmenter(cfg).run(prepared, id_col=a.id_col, item_cols=chosen, force_k=a.force_k,
+                           outdir=a.outdir, demographics=a.demographics)
         return
     Segmenter(cfg).run(a.csv, id_col=a.id_col, item_cols=a.items, force_k=a.force_k,
                        outdir=a.outdir, demographics=a.demographics)

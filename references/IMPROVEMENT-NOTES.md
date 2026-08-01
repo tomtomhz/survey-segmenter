@@ -2,7 +2,25 @@
 
 **2026-08-01.** A session spent reading rather than coding: the twelve books in
 `~/Desktop/K-Means Clustering Books/` (the clustering chapters, not cover to cover), plus
-open-access literature online. Nothing below is implemented. It is here to be argued with first.
+open-access literature online.
+
+> **Status, later the same day: all six are implemented.** What each one actually cost, and where
+> the write-up below turned out to be wrong once it met data:
+>
+> 1. **Shadow values** — as described. Every respondent now gets a `fit`, at any sample size.
+> 2. **Segment neighbours** — as described. Thresholds were guessed at 0.90/0.75 and recalibrated
+>    empirically to 0.80/0.55.
+> 3. **Segment-level stability** — implemented, but **not scored by Jaccard as this note assumed.**
+>    Going from k to k-1 must merge two segments, so Jaccard collapses whether or not the
+>    structure is real: measured, it could not separate three genuine segments (0.44-0.78) from
+>    pure noise (0.55-0.69) at all. Containment — what share of a segment's members stay together
+>    — is unharmed by merging and separates them cleanly (0.78-1.00 against 0.47).
+> 4. **The three kinds of segmentation** — as described.
+> 5. **Gorge plot** — as described, as a seventh chart.
+> 6. **Mixed-type k-prototypes** — implemented in `kprototypes.py`; the Podani choice below is the
+>    one thing this note got materially wrong, see the correction under item 6.
+>
+> The full measured picture is in `STATE-OF-THE-ART.md`.
 
 Sources are named inline. Where something is **measured**, it was run on this machine and can be
 reproduced. Where it is **quoted**, the source is given so it can be checked.
@@ -110,6 +128,22 @@ same numbers plotted differently.
 **Source:** Szepannek et al., *Clustering large mixed-type data with ordinal variables*, Advances
 in Data Analysis and Classification (2024) — a k-prototypes variant using Gower's distance, with
 proven convergence and explicit handling of ordinal variables.
+
+> **Correction, after implementing it.** "Explicit handling of ordinal variables" above hid a
+> choice this note did not know it was making. Podani (1999) extended Gower to ordinal data in
+> **two** forms, and the widely cited one — the tie-corrected non-metric version, his eq. 2b — is
+> the wrong one for survey data. It subtracts the within-tie spread from every gap, so with five
+> levels and hundreds of respondents adjacent answers collapse to nearly zero distance while the
+> extremes stay a full 1 apart: for three equally-used levels, d(1,3) = 1.00 against
+> d(1,2) + d(2,3) = 0.065. That breaks the triangle inequality badly enough that "closest
+> prototype" stops meaning anything. The metric version (eq. 3, plain midranks over the rank
+> range) is what `clustMixType` uses and what is implemented.
+>
+> The counterweight below also survived contact with data, in a more reassuring way than expected:
+> measured on ratings alone, treating them as ordinal rather than as numbers costs about 0.02 ARI
+> — inside run-to-run noise, and on data generated as continuous-then-rounded, which favours the
+> numeric reading by construction. So the ordinal treatment is close to free, and the real cost of
+> the mixed path is the ordinary one of including questions that separate nobody.
 
 Today a survey with both rating scales and pick-any questions must go down the k-means path or the
 latent-class path; it cannot use both kinds of answer in one model. This is still the largest real

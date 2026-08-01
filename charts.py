@@ -325,7 +325,7 @@ def chart_segment_map(X, labels, names=None, max_points=1200, seed=0):
                        caption)
 
 
-def chart_silhouette(X, labels, names=None, max_rows=900):
+def chart_silhouette(X, labels, names=None, max_rows=900, metric="euclidean"):
     """How well each individual person fits the group they were put in.
 
     The conventional silhouette plot: one bar per respondent, sorted within group. A negative bar
@@ -342,7 +342,7 @@ def chart_silhouette(X, labels, names=None, max_rows=900):
     if len(rows) > max_rows:
         rows = np.sort(np.random.default_rng(0).choice(len(X), max_rows, replace=False))
     try:
-        sv = silhouette_samples(X[rows], labels[rows])
+        sv = silhouette_samples(X[rows], labels[rows], metric=metric)
     except Exception:
         return None
     mean = float(np.mean(sv))
@@ -699,6 +699,7 @@ def build_charts(seg, method, names=None, errors=None):
         if chart:
             out.append(chart)
 
+    metric = "euclidean"
     try:
         if method == "lca":
             # Categorical answers are not points in a space until they are coded as one.
@@ -710,6 +711,19 @@ def build_charts(seg, method, names=None, errors=None):
             pf = seg.profiles_frame()
             pf = pf.assign(col=pf["item"].astype(str) + " = " + pf["level"].astype(str))
             centroids = pf.pivot(index="class", columns="col", values="probability")
+        elif method == "kproto":
+            # Codes standing for brands are not coordinates. The Gower embedding is (see
+            # kprototypes.gower_embedding), and on it plain Manhattan distance reproduces the
+            # distance the segmentation was actually built on — so the map projects a real space
+            # and the per-person bars measure what put each person where they are.
+            import kprototypes
+            X = kprototypes.gower_embedding(np.asarray(seg.X, float), seg.cfg.gower_spec)
+            metric = "manhattan"
+            # A pick-any column holds its segment's most common ANSWER, which is text; the
+            # profile, radar and grid charts plot quantities, so they show the rating questions.
+            centroids = seg.centroids.select_dtypes(include=[np.number])
+            if centroids.empty:
+                centroids = None
         else:
             X, centroids = seg.X, seg.centroids
         labels = np.asarray(seg.labels)
@@ -721,7 +735,7 @@ def build_charts(seg, method, names=None, errors=None):
 
     kind = "shares" if method == "lca" else "means"
     attempt("segment map", lambda: chart_segment_map(X, labels, names))
-    attempt("per-person fit", lambda: chart_silhouette(X, labels, names))
+    attempt("per-person fit", lambda: chart_silhouette(X, labels, names, metric=metric))
     attempt("choice of k", lambda: chart_k_choice(seg.diagnostics, int(seg.recommended_k)))
     if centroids is not None:
         attempt("group profiles", lambda: chart_profiles(centroids, names, kind=kind))

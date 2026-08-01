@@ -117,19 +117,31 @@ python3 segment_kmeans.py utilities.csv --id-col respondent_id --kmin 2 --kmax 8
 python3 segment_kmeans.py utilities.csv --id-col respondent_id --method gmm --outdir results_gmm
 ```
 
-**Three modelling paradigms, matched to your data.** `--method kmeans` (default) is the fast
+**Four modelling paradigms, matched to your data.** `--method kmeans` (default) is the fast
 heuristic for continuous utilities; `--method gmm` runs a Gaussian-mixture / latent-class model
 (Wedel & Kamakura) that allows elliptical, unequal-size, overlapping segments, gives soft
 assignment probabilities, and selects the number of components by BIC and ICL. Both of these treat
 the inputs as **continuous**. For **categorical** inputs (agree/disagree, pick-any, multiple
 choice) use `--method lca`, a true **Latent Class Analysis** — a finite mixture of categorical
 distributions under local independence (Lazarsfeld-Goodman; Wedel & Kamakura), fit by EM, selected
-by BIC and ICL, and validated by the same stability-first machinery. Use the model family that
-matches your measurement: k-means/gmm for numeric utilities, lca for categorical answers.
+by BIC and ICL, and validated by the same stability-first machinery.
+
+For the common case of a questionnaire holding **both** — some 1-5 scales and some "pick one"
+questions — `--method kproto` runs **Gower k-prototypes** (Szepannek, Aschenbruck & Wilhelm,
+*ADAC* 2024), which uses every question at once instead of setting half of them aside. Ratings are
+read as ordered answers rather than as numbers, pick-any answers by whether two people chose the
+same thing, and each question scores 0-1 in its own natural way, so no exchange rate between them
+has to be invented. See `kprototypes.py` for why its prototypes are medians and modes rather than
+means, and `references/STATE-OF-THE-ART.md` for what it recovers and which checks it cannot run.
+
+The auto-detected path — just point it at a CSV, or use the app — picks between the four for you.
 
 ```bash
 # Latent Class Analysis for CATEGORICAL survey items:
 python3 segment_kmeans.py answers.csv --id-col respondent_id --method lca --outdir results_lca
+
+# Ratings AND pick-any questions in one model:
+python3 segment_kmeans.py survey.csv --id-col respondent_id --method kproto --outdir results_mixed
 ```
 
 For the continuous methods, the entire pipeline — stability, prediction strength, per-segment

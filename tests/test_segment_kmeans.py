@@ -24,6 +24,7 @@ import pytest
 # rather than relying on the working directory pytest happened to be invoked from.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import segment_kmeans as sk
+import kprototypes as kp
 import webapp
 from sklearn.metrics import adjusted_rand_score
 from sklearn.cluster import KMeans
@@ -2836,3 +2837,215 @@ def test_every_chart_is_offered_on_a_normal_run():
     assert [c["id"] for c in r["charts"]] == ["map", "fit", "k", "profiles", "radar", "heatmap",
                                               "gorge"]
     assert sk.charts_html(r["charts"]).count("<svg") == 7
+
+
+# =====================================================================================
+# Mixed-type surveys: ratings and pick-any questions in one model (kprototypes.py)
+# =====================================================================================
+def _mixed_survey(n=300, seed=0, brand_signal=True, n_brands=1):
+    """A questionnaire of the shape most real ones have: some 1-5 scales, some "pick one"."""
+    rng = np.random.default_rng(seed)
+    truth = rng.integers(0, 3, n)
+    centres = np.array([[5, 1, 5, 1], [1, 5, 1, 5], [3, 3, 5, 5]], float)
+    df = pd.DataFrame(_likert(centres[truth] + rng.normal(0, 0.7, (n, 4))),
+                      columns=[f"q{i+1}" for i in range(4)])
+    df.insert(0, "respondent_id", [f"P{i}" for i in range(n)])
+    names = np.array(["Nespresso", "Lavazza", "Illy"])
+    for j in range(n_brands):
+        picks = [names[rng.choice(3, p=(np.where(np.arange(3) == (g + j) % 3, 0.70, 0.15)
+                                        if brand_signal else np.full(3, 1 / 3)))]
+                 for g in truth]
+        df[f"favourite brand" if n_brands == 1 else f"brand{j+1}"] = picks
+    return df, truth
+
+
+def test_gower_is_exactly_a_manhattan_distance_in_disguise():
+    """The identity the whole mixed-type path is built on.
+
+    Divide each rating by its range and replace each pick-any answer with half a one-hot
+    indicator, and Manhattan distance on those coordinates reproduces Gower's distance exactly.
+    That is what lets the silhouette, the cluster-tendency test, the hierarchical cross-check and
+    the segment map run through the same library functions as the numeric path with nothing but a
+    `metric="manhattan"` argument, instead of a second family of hand-written Gower versions.
+
+    If this ever stops holding, those four stop measuring what they claim to, silently — hence
+    testing the identity itself rather than any one of its consumers.
+    """
+    from scipy.spatial.distance import cdist
+    rng = np.random.default_rng(0)
+    n = 200
+    X = np.column_stack([rng.integers(1, 6, n), rng.integers(1, 6, n), rng.normal(50, 10, n),
+                         rng.integers(0, 4, n), rng.integers(0, 3, n)]).astype(float)
+    kinds = [kp.ORDINAL, kp.ORDINAL, kp.NUMERIC, kp.NOMINAL, kp.NOMINAL]
+    spec = kp.fit_spec(X, kinds)
+    Xe = kp.encode(X, spec)
+
+    direct = kp.gower_distances(Xe, Xe, spec)
+    embedded = cdist(kp.gower_embedding(Xe, spec), kp.gower_embedding(Xe, spec),
+                     metric="cityblock") / spec.n_vars
+    assert np.abs(direct - embedded).max() < 1e-12
+    assert np.allclose(np.diag(direct), 0) and direct.max() <= 1.0
+    # A metric, unlike Podani's tie-corrected version — see the module docstring for why that one
+    # was rejected. "Nearest prototype" is only meaningful if the triangle inequality holds.
+    assert (direct[:, :, None] <= direct[:, None, :] + direct[None, :, :] + 1e-9).all()
+
+    # The embedding must take its one-hot columns from the spec, not from the array in front of
+    # it. A bootstrap resample or a reference sample can easily be missing a brand, and deriving
+    # the levels locally would shift every coordinate after it and compare two different spaces.
+    degenerate = Xe[:5].copy()
+    degenerate[:, 3] = degenerate[0, 3]
+    assert kp.gower_embedding(degenerate, spec).shape[1] == kp.gower_embedding(Xe, spec).shape[1]
+    assert np.abs(kp.gower_distances(degenerate, Xe, spec)
+                  - cdist(kp.gower_embedding(degenerate, spec), kp.gower_embedding(Xe, spec),
+                          metric="cityblock") / spec.n_vars).max() < 1e-12
+
+
+def test_kprototypes_updates_are_the_ones_that_make_it_converge():
+    """Median, mode and nearest-rank level — Szepannek et al. (2024), not a port of k-means.
+
+    Gower is an L1-type distance, so the value minimising the within-cluster total is the median,
+    not the mean; for a pick-any answer it is the mode; for an ordered answer it is the level
+    whose rank is closest to the cluster's median rank. Using means, which is what porting k-means
+    naively would do, is what breaks the convergence proof.
+    """
+    X = np.array([[1.0, 0.0], [1.0, 0.0], [1.0, 1.0], [100.0, 0.0]])
+    spec = kp.fit_spec(X, [kp.NUMERIC, kp.NOMINAL])
+    proto = kp._update(X, spec)
+    assert proto[0] == 1.0, "an outlier moved the prototype, so this is a mean not a median"
+    assert proto[1] == 0.0, "the pick-any prototype is not the most common answer"
+
+    # An ordered answer's prototype has to be a level somebody could have chosen.
+    ord_X = np.array([[1.0], [2.0], [2.0], [5.0]])
+    ord_spec = kp.fit_spec(ord_X, [kp.ORDINAL])
+    assert kp._update(kp.encode(ord_X, ord_spec), ord_spec)[0] in ord_spec.ord_levels[0]
+
+    # The objective must never rise. That is the property the update rules buy, and the only
+    # direct evidence that this is the 2024 algorithm rather than something that resembles it.
+    rng = np.random.default_rng(0)
+    data = np.column_stack([rng.integers(1, 6, 200), rng.integers(1, 6, 200),
+                            rng.integers(0, 3, 200)]).astype(float)
+    s = kp.fit_spec(data, [kp.ORDINAL, kp.ORDINAL, kp.NOMINAL])
+    Xe = kp.encode(data, s)
+    protos = kp._seed(Xe, 3, s, np.random.default_rng(1))
+    last = np.inf
+    for _ in range(15):
+        D = kp.gower_distances(Xe, protos, s)
+        labels = D.argmin(1)
+        total = float(D[np.arange(len(Xe)), labels].sum())
+        assert total <= last + 1e-9, f"objective rose from {last} to {total}"
+        last = total
+        protos = np.vstack([kp._update(Xe[labels == c], s) for c in range(3)])
+
+    model = kp.KPrototypes(3, s, n_init=3, random_state=0).fit(Xe)
+    assert set(np.unique(model.labels_)) == {0, 1, 2}, "a segment was allowed to empty"
+    assert np.array_equal(model.predict(Xe), model.labels_)
+
+
+def test_a_survey_with_ratings_and_pick_any_questions_uses_both():
+    """The capability gap this closes.
+
+    Before this, a questionnaire with both kinds of question had the multiple-choice columns set
+    aside with an apology, and was segmented on the ratings alone. On a study where the brand
+    question is the interesting one that threw away the finding.
+
+    Measured on this machine, three planted segments over four ratings and three brand questions:
+    k-prototypes recovers them at ARI 0.96, ratings-only k-means at 0.99 when the ratings carry
+    the signal, and 0.50 against 0.00 when only the brand questions do.
+    """
+    df, truth = _mixed_survey(brand_signal=True, n_brands=3)
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=5, **FAST))
+    assert r["method"] == "kproto"
+    assert r["k"] == 3 and r["confidence"] == "high"
+    assert not r["chart_errors"]
+    assigned = pd.read_csv(io.StringIO(r["files"]["segment_assignments.csv"]))
+    assert adjusted_rand_score(truth, assigned["segment"]) > 0.75
+    assert assigned["fit"].isna().sum() == 0 and assigned["fit"].between(0, 1).all()
+
+    d = r["digest"]
+    # The pick-any questions must be described as answers, not as arithmetic. "Values 0.6 below
+    # average" about a brand is a statement about the order the brands were listed in.
+    assert "Mostly picks" in d and "Nespresso" in d
+    assert re.search(r"favourite brand|brand1", d)
+    assert "Gower k-prototypes" in d
+    # The panel is smaller here and the report has to say so rather than quietly showing fewer
+    # corroborating numbers than the numeric path does.
+    assert "Gaussian-mixture cross-check is **not run**" in d
+    assert "Range standardization" not in d
+
+
+def test_pick_any_answers_are_scored_by_association_not_by_their_codes():
+    """Eta-squared on brand codes measures the coding, not the data.
+
+    Renumber the brands and it changes. Cramer's V does not, which is the only honest property to
+    want. It is reported SQUARED: V is correlation-like and eta-squared is variance-like, so they
+    sit one square apart. Measured on matched pure noise, a random pick-any column scores V = 0.06
+    — already over the 0.05 near-noise floor, so a useless question could never be flagged as one
+    — against V-squared = 0.00 and eta-squared = 0.00 for a random rating.
+    """
+    rng = np.random.default_rng(0)
+    labels = np.repeat([0, 1, 2], 100)
+    perfect = labels.astype(float)
+    assert sk._cramers_v(perfect, labels) == pytest.approx(1.0, abs=1e-9)
+    noise = rng.integers(0, 3, 300).astype(float)
+    assert sk._cramers_v(noise, labels) ** 2 < 0.05, "a random question would never be flagged"
+    # Invariant to how the levels are numbered, which is the entire reason for using it.
+    shuffled = np.select([perfect == 0, perfect == 1, perfect == 2], [2.0, 0.0, 1.0])
+    assert sk._cramers_v(shuffled, labels) == pytest.approx(sk._cramers_v(perfect, labels))
+    assert sk._cramers_v(np.zeros(300), labels) == 0.0     # one level: no association possible
+
+    # End to end: brand questions that separate nobody must reach the near-noise verdict, because
+    # that check is what protects this path from its own weakness. Measured: three useless brand
+    # columns beside four real ratings cost 0.25 ARI, and dropping them lifts the silhouette from
+    # 0.25 to 0.52.
+    df, _ = _mixed_survey(brand_signal=False, n_brands=3)
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=5,
+                                                  **{**FAST, "check_variable_selection": True}))
+    assert "Near-noise items" in r["digest"], "useless pick-any questions were not flagged"
+    for brand in ("brand1", "brand2", "brand3"):
+        assert brand in r["digest"].split("Near-noise items")[1][:200]
+    # And it must not claim to have found something. Measured: it settles on k=2 and says so.
+    assert r["confidence"] == "low"
+
+
+def test_new_people_can_be_scored_on_a_mixed_survey():
+    """The exported rule has to survive JSON and a brand nobody in the study ever named.
+
+    The typing rule is the operational payoff — you segment once and type everyone afterwards —
+    so it has to carry the Gower spec, the code-to-answer mapping, and a distance that matches the
+    one the segmentation used. A pickle would have been easier and would have tied the file to
+    this version of this class, which is the opposite of what an exported rule is for.
+    """
+    df, _ = _mixed_survey(brand_signal=True)
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=5, **FAST))
+    rule = json.loads(r["files"]["typing_rule.json"])
+    assert rule["method"] == "kproto"
+    assert rule["scale_params"]["scaling"] == "gower"
+    assert rule["level_labels"]["favourite brand"]        # codes mean nothing without these
+
+    original = pd.read_csv(io.StringIO(r["files"]["segment_assignments.csv"]))["segment"]
+    fresh = df.drop(columns=["respondent_id"]).head(25).copy()
+    scored = sk.classify_new(rule, fresh)
+    agree = (scored["segment"].to_numpy() == original.head(25).to_numpy()).mean()
+    assert agree >= 0.9, f"the exported rule disagrees with the analysis on {1 - agree:.0%} of rows"
+
+    # Somebody names a brand the study never saw. Refusing to score them would be worse than
+    # placing them; it must sit a full mismatch from every known answer rather than half of one,
+    # and the rest of their answers must still count.
+    newcomer = fresh.head(1).copy()
+    newcomer.loc[newcomer.index[0], "favourite brand"] = "A Brand Nobody Named"
+    out = sk.classify_new(rule, newcomer)
+    assert len(out) == 1 and out["segment"].iloc[0] in set(original)
+    assert 0 < out["confidence"].iloc[0] <= 1
+
+    # A skipped answer must fall back to the study's own typical answer, not to whoever else
+    # happens to be in the upload — otherwise the same person is typed differently in a batch of
+    # one than in a batch of five hundred.
+    gaps = fresh.head(1).copy()
+    gaps.loc[gaps.index[0], "q1"] = np.nan
+    alone = sk.classify_new(rule, gaps)
+    together = sk.classify_new(rule, pd.concat([gaps, fresh.tail(20)], ignore_index=True)).head(1)
+    assert alone["segment"].iloc[0] == together["segment"].iloc[0]
+    assert alone["confidence"].iloc[0] == together["confidence"].iloc[0]

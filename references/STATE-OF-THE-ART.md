@@ -18,9 +18,84 @@ says so.
 ## What the engine is
 
 scikit-learn computes, matplotlib draws. `KMeans` with k-means++ initialisation and many
-restarts, `GaussianMixture` as a second paradigm, and a hand-written EM latent class model for
-categorical answers. Nothing exotic, which is the point: this is a tool for deciding where to
-spend a marketing budget, not a place to try out a new algorithm.
+restarts, `GaussianMixture` as a second paradigm, a hand-written EM latent class model for
+categorical answers, and Gower k-prototypes for questionnaires that mix the two. Nothing exotic,
+which is the point: this is a tool for deciding where to spend a marketing budget, not a place to
+try out a new algorithm.
+
+Which one runs is detected, not configured: all ratings go to k-means, all pick-any questions to
+latent class, and a mix of both to k-prototypes.
+
+## Mixed questionnaires (added 2026-08-01)
+
+Most real questionnaires have both kinds of question. Until now the pick-any columns were set
+aside with an apology and the segmentation ran on the ratings alone — which on a study where the
+brand question is the interesting one threw away the finding.
+
+`kprototypes.py` implements Szepannek, Aschenbruck & Wilhelm, *Clustering large mixed-type data
+with ordinal variables* (ADAC 2024), matching `kproto(type = "gower")` in `clustMixType`:
+
+| | Distance | Prototype |
+|---|---|---|
+| Rating (ordinal) | range-normalised gap between **midranks** | level whose rank is nearest the cluster's median rank |
+| Measurement (numeric) | range-normalised absolute gap | median |
+| Pick-any (nominal) | 1 if different, 0 if the same | mode |
+
+Median and mode rather than means is the 2024 paper's point, not a detail: Gower is an L1-type
+distance, so those are the exact per-variable minimisers, and they are what make the algorithm
+provably terminate. Porting k-means naively — means everywhere — breaks that.
+
+**Ordinal answers use Podani's metric version (1999, eq. 3), not his tie-corrected non-metric one
+(eq. 2b).** The non-metric version is the more commonly cited, and it is wrong for survey data:
+it subtracts the within-tie spread from every gap, which with a handful of levels and hundreds of
+respondents collapses adjacent answers to nearly zero while leaving the extremes a full 1 apart.
+Worked through for three equally-used levels it gives d(1,3) = 1.00 against
+d(1,2) + d(2,3) = 0.065 — a triangle-inequality violation large enough that "closest prototype"
+stops meaning anything.
+
+### Measured
+
+Nine analyses, 400 respondents, four ratings plus two pick-any questions, true k = 3. Reproduce
+with `references/kbench.py`.
+
+| Which questions carry the signal | Found k | Confidence | ARI |
+|---|---|---|---|
+| Both kinds | **3, 3, 3** | high | 0.88-0.89 |
+| Ratings only (pick-any is noise) | 2, 2, 2 | moderate, low | 0.38-0.43 |
+| Pick-any only (ratings are noise) | 2, 3, 6 | low | 0.21-0.31 |
+
+**It never reported high confidence while wrong** — the same property the all-ratings path is held
+to, and the one that makes the tool usable at all.
+
+The accuracy cost when half the questions are useless is the ordinary cost of clustering on noise
+variables, not something particular to this method: measured separately, three useless pick-any
+columns beside six real ratings cost 0.25 ARI. The report's variable-selection check names them,
+and dropping them lifted the silhouette from 0.25 to 0.52 in that run.
+
+### What this path cannot do, and says so
+
+- **No Gaussian-mixture cross-check, and no GMM BIC vote in the k panel.** A mixture assumes every
+  answer is a measurement; fitting one to brand codes returns a number that reads as corroboration
+  and is not. Left in by accident during development it did real damage — on a mixed file whose
+  true answer was 3, the GMM BIC and ICL both argued for 8. The bottom-up cross-check becomes
+  average linkage on Gower's distance instead, so there is one independent paradigm rather than
+  two, and the report states this rather than quietly showing fewer numbers.
+- **Calinski-Harabasz and Davies-Bouldin are read on the embedding**, not on Gower itself, since
+  both are sums of squares. The silhouette, prediction strength, replication, per-segment Jaccard
+  and segment-level stability are all exact.
+- **The gap statistic falls back to the paper's reference method (a)** — each variable drawn
+  independently over its own support — because method (b) needs principal components, and no
+  rotated bounding box contains only answer combinations a respondent could have given.
+
+### The identity that makes it maintainable
+
+Divide each rating by its range and replace each pick-any answer with half a one-hot indicator,
+and plain Manhattan distance on those coordinates reproduces Gower's distance **exactly**
+(verified to 1e-16, and pinned by `test_gower_is_exactly_a_manhattan_distance_in_disguise`). So
+the silhouette, the cluster-tendency test, the hierarchical cross-check and the segment map all
+run through the same scikit-learn functions as the numeric path with nothing but
+`metric="manhattan"` — rather than a second family of hand-written Gower versions that would need
+their own tests and would drift.
 
 ## Choosing k, and refusing to
 
@@ -113,9 +188,10 @@ Ranked by what would change an answer, not by novelty. **None of these is implem
 not implementing them on unverified recollection** — the point of the library is to decide which
 are worth it.
 
-1. **Mixed numeric and categorical answers in one model.** Today numeric goes to k-means and
-   categorical to latent class; a survey with both must pick one. k-prototypes (Huang) is the
-   standard answer. This is the largest real gap.
+1. ~~**Mixed numeric and categorical answers in one model.**~~ **Done 2026-08-01** — see the
+   mixed-questionnaires section above. Gower k-prototypes (Szepannek et al. 2024) rather than
+   Huang's original, because Huang needs a `gamma` weight trading numeric distance against
+   categorical mismatches that nobody in the room can defend.
 2. **A second cluster-tendency test.** Hopkins is the tool's only one and it is unreliable enough
    to need a caveat. Hartigan's dip test on the pairwise-distance distribution is the usual
    companion.
