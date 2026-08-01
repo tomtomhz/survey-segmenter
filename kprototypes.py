@@ -356,6 +356,14 @@ def _fit_once(Xe, k, spec, rng, max_iter):
                 # An emptied cluster would silently reduce k. Restart it on the respondent least
                 # well served by the prototypes there are, which is where a group is most needed.
                 far = int(D[np.arange(len(Xe)), labels].argmax())
+                if D[far, labels[far]] <= 0:
+                    # Everyone already sits exactly on a prototype, so there is no unexplained
+                    # respondent to build a group around. Moving one anyway just hands them back
+                    # next iteration: the reseeding fights the assignment step, labels never
+                    # settle, and the loop runs to max_iter every time on any file with fewer
+                    # distinct answer patterns than groups asked for. Leave it empty instead —
+                    # the honest answer is that this many groups do not exist here.
+                    continue
                 protos[c] = Xe[far]
                 labels[far] = c
     D = gower_distances(Xe, protos, spec)

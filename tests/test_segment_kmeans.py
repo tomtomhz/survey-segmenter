@@ -3049,3 +3049,161 @@ def test_new_people_can_be_scored_on_a_mixed_survey():
     together = sk.classify_new(rule, pd.concat([gaps, fresh.tail(20)], ignore_index=True)).head(1)
     assert alone["segment"].iloc[0] == together["segment"].iloc[0]
     assert alone["confidence"].iloc[0] == together["confidence"].iloc[0]
+
+
+def test_the_web_app_handles_a_mixed_survey_end_to_end(monkeypatch):
+    """Upload, re-group on a hand-picked mix, then score newcomers — through the real server.
+
+    The mixed-question path added a new method, a new distance and a new typing rule. Everything
+    the team touches goes through these three endpoints, and none of them knew about kproto
+    before. A unit test on run_analysis would not have caught a rule that fails to serialise, or a
+    re-group whose hand-picked columns route somewhere new.
+    """
+    import socket
+    import threading
+    import time
+    import urllib.request
+    import json as _json
+
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: None)
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    threading.Thread(target=sk.serve, kwargs={"port": port}, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+
+    def post_json(path, obj):
+        req = urllib.request.Request(base + path, data=_json.dumps(obj).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        return _json.loads(urllib.request.urlopen(req, timeout=60).read().decode())
+
+    def post_file(path, name, blob, field="file"):
+        b = "----t"
+        body = (f'--{b}\r\nContent-Disposition: form-data; name="{field}"; filename="{name}"\r\n'
+                f'Content-Type: text/csv\r\n\r\n').encode() + blob + f"\r\n--{b}--\r\n".encode()
+        req = urllib.request.Request(base + path, data=body, method="POST",
+                                     headers={"Content-Type": f"multipart/form-data; boundary={b}"})
+        return _json.loads(urllib.request.urlopen(req, timeout=120).read().decode())
+
+    for _ in range(80):
+        try:
+            urllib.request.urlopen(base + "/", timeout=5).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+
+    df, _ = _mixed_survey(n=160, brand_signal=True)
+    blob = df.to_csv(index=False).encode()
+    try:
+        a = post_file("/analyze", "mixed.csv", blob)
+        assert a["ok"], a
+        # The brand question must be reported as grouped on, not set aside — the whole point.
+        assert a["columns"]["favourite brand"] == "used", a["columns"]
+        assert "typing_rule.json" in a["downloads"]
+        assert a["charts"], "a mixed survey produced no charts"
+
+        # Re-grouping on a hand-picked mix has to reach the mixed path too, not fall back.
+        picked = post_json("/regroup", {"session_id": a["session_id"],
+                                        "items": ["q1", "q2", "q3", "favourite brand"]})
+        assert picked["ok"], picked
+        assert picked["columns"]["favourite brand"] == "used"
+
+        # Scoring newcomers against a Gower rule: the endpoint picks the classifier off the saved
+        # rule, so a rule it does not recognise would silently be scored with the wrong distance.
+        fresh = df.drop(columns=["respondent_id"]).head(10)
+        scored = post_file(f"/score?session_id={picked['session_id']}", "new.csv",
+                           fresh.to_csv(index=False).encode())
+        assert scored["ok"], scored
+        assert scored["n"] == 10, scored
+    finally:
+        with contextlib.suppress(Exception):
+            urllib.request.urlopen(base + "/quit", timeout=5).read()
+
+
+def test_swedish_survey_keeps_its_ordering_and_uses_its_pick_any_answers():
+    """A single missing phrase fails the whole column, not just that cell.
+
+    `_try_likert` requires every answer to map, so one unrecognised wording sends the entire
+    survey down the categorical path and throws away the ordering it was measuring — the tool
+    stops knowing that "Instämmer helt" is more than "Instämmer delvis". Found by sweeping
+    realistic files: "Instämmer delvis inte" and "Håller delvis inte med" are the standard second
+    step on Swedish five-point scales and neither was listed. This matters because the original sponsor fields
+    Swedish surveys.
+    """
+    five = {
+        "instämmer, partly-not wording": ["Instämmer inte alls", "Instämmer delvis inte",
+                                          "Varken eller", "Instämmer delvis", "Instämmer helt"],
+        "instämmer, plain wording": ["Instämmer inte alls", "Instämmer inte", "Varken eller",
+                                     "Instämmer delvis", "Instämmer helt"],
+        "håller med": ["Håller inte alls med", "Håller delvis inte med", "Varken eller",
+                       "Håller delvis med", "Håller helt med"],
+        "nöjd, ganska wording": ["Mycket missnöjd", "Ganska missnöjd",
+                                 "Varken nöjd eller missnöjd", "Ganska nöjd", "Mycket nöjd"],
+        "aldrig / alltid": ["Aldrig", "Sällan", "Ibland", "Ofta", "Alltid"],
+        "English, unchanged": ["Strongly disagree", "Disagree", "Neutral", "Agree",
+                               "Strongly agree"],
+    }
+    for name, scale in five.items():
+        recoded = sk._try_likert(pd.Series(scale * 8))
+        assert recoded is not None, f"{name} was not recognised as a rating scale"
+        first = [float(recoded[pd.Series(scale * 8).eq(v).idxmax()]) for v in scale]
+        assert first == sorted(first), f"{name} lost its ordering"
+
+    # No token may mean two different numbers across the twelve scales, or which scale matches
+    # first would decide the answer.
+    seen = {}
+    for scale in sk._LIKERT_SCALES:
+        for token, value in scale.items():
+            assert seen.get(token, value) == value, f"'{token}' means two different numbers"
+            seen[token] = value
+
+    # End to end, in the shape a Swedish export actually arrives in: worded scales, a Swedish id
+    # column, and a Swedish brand question.
+    rng = np.random.default_rng(0)
+    n = 240
+    truth = rng.integers(0, 3, n)
+    centres = np.array([[5, 1, 5, 1], [1, 5, 1, 5], [3, 3, 5, 5]], float)
+    scale = five["instämmer, partly-not wording"]
+    ratings = _likert(centres[truth] + rng.normal(0, 0.6, (n, 4)))
+    df = pd.DataFrame({f"fråga {i+1}": [scale[v - 1] for v in ratings[:, i]] for i in range(4)})
+    df.insert(0, "svarsnummer", [f"P{i}" for i in range(n)])
+    df["favoritmärke"] = [["Löfbergs", "Zoégas", "Gevalia"][
+        rng.choice(3, p=np.where(np.arange(3) == g, 0.7, 0.15))] for g in truth]
+
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=5, **FAST))
+    assert r["method"] == "kproto", "a worded Swedish scale fell back to the categorical path"
+    assigned = pd.read_csv(io.StringIO(r["files"]["segment_assignments.csv"]))
+    assert adjusted_rand_score(truth, assigned["segment"]) > 0.75
+    assert any(b in r["digest"] for b in ("Löfbergs", "Zoégas", "Gevalia"))
+
+
+def test_asking_for_more_groups_than_the_answers_can_support_settles_immediately():
+    """The empty-cluster refill has to know when to give up.
+
+    Restarting an emptied cluster on the worst-served respondent is right when somebody is
+    genuinely unexplained. When every respondent already sits exactly on a prototype there is
+    nobody to build a group around, and moving one anyway just hands them back on the next pass:
+    the refill fights the assignment step, the labels never settle, and the loop runs to max_iter
+    on any file holding fewer distinct answer patterns than groups asked for. Measured before the
+    fix: 50 iterations for k = 3 and k = 5. After: 2.
+    """
+    X = np.array([[1.0, 0.0]] * 20 + [[5.0, 1.0]] * 20)      # exactly two distinct patterns
+    spec = kp.fit_spec(X, [kp.ORDINAL, kp.NOMINAL])
+    Xe = kp.encode(X, spec)
+    for k in (2, 3, 5):
+        model = kp.KPrototypes(k, spec, n_init=3, max_iter=50, random_state=0).fit(Xe)
+        assert model.n_iter_ <= 5, f"k={k} did not settle ({model.n_iter_} iterations)"
+        assert model.inertia_ == pytest.approx(0.0), "two exact patterns should cost nothing"
+        assert sorted(np.bincount(model.labels_, minlength=k))[-2:] == [20, 20]
+
+    # And the give-up branch must not fire on ordinary data, where the refill is doing real work.
+    rng = np.random.default_rng(0)
+    n = 400
+    truth = rng.integers(0, 3, n)
+    centres = np.array([[5, 1, 5, 1], [1, 5, 1, 5], [3, 3, 5, 5]], float)
+    data = np.hstack([_likert(centres[truth] + rng.normal(0, 0.7, (n, 4))),
+                      np.array([[rng.choice(3, p=np.where(np.arange(3) == g, 0.7, 0.15))]
+                                for g in truth], float)])
+    s = kp.fit_spec(data, [kp.ORDINAL] * 4 + [kp.NOMINAL])
+    model = kp.KPrototypes(3, s, n_init=8, random_state=0).fit(kp.encode(data, s))
+    assert adjusted_rand_score(truth, model.labels_) > 0.75
+    assert (np.bincount(model.labels_, minlength=3) > 0).all(), "a real segment was left empty"

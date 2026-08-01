@@ -2682,12 +2682,20 @@ _LIKERT_SCALES = [
      "very important": 5, "extremely important": 5},
     # Swedish scales. Without these a Nordic survey falls through to the categorical path and loses
     # the ordering (that "Instämmer helt" is more than "Instämmer"), which is real information.
-    {"instämmer inte alls": 1, "instämmer inte": 2, "varken eller": 3,
-     "varken instämmer eller inte": 3, "neutral": 3, "instämmer delvis": 4, "instämmer": 4,
-     "instämmer helt": 5, "instämmer helt och hållet": 5},
-    {"håller inte alls med": 1, "håller inte med": 2, "varken eller": 3, "neutral": 3,
-     "håller med": 4, "håller helt med": 5},
-    {"mycket missnöjd": 1, "missnöjd": 2, "varken eller": 3, "neutral": 3, "nöjd": 4,
+    # "delvis inte" ("partly not") is the standard wording for the second step on a five-point
+    # Swedish agreement scale, and it has to be listed: an unrecognised answer fails the whole
+    # column, not just that cell, so a single missing phrase sends the entire survey down the
+    # categorical path and throws away the ordering it was measuring.
+    {"instämmer inte alls": 1, "instämmer inte": 2, "instämmer delvis inte": 2,
+     "instämmer knappt": 2, "varken eller": 3, "varken instämmer eller inte": 3,
+     "varken eller/vet ej": 3, "neutral": 3, "vet ej": 3, "instämmer delvis": 4,
+     "instämmer": 4, "instämmer till stor del": 4, "instämmer helt": 5,
+     "instämmer helt och hållet": 5},
+    {"håller inte alls med": 1, "håller inte med": 2, "håller delvis inte med": 2,
+     "varken eller": 3, "neutral": 3, "håller delvis med": 4, "håller med": 4,
+     "håller helt med": 5, "håller helt och hållet med": 5},
+    {"mycket missnöjd": 1, "missnöjd": 2, "ganska missnöjd": 2, "varken eller": 3,
+     "varken nöjd eller missnöjd": 3, "neutral": 3, "ganska nöjd": 4, "nöjd": 4,
      "mycket nöjd": 5},
     {"aldrig": 1, "sällan": 2, "ibland": 3, "ofta": 4, "mycket ofta": 5, "alltid": 5},
     {"mycket osannolikt": 1, "osannolikt": 2, "neutral": 3, "sannolikt": 4, "mycket sannolikt": 5},
