@@ -13,11 +13,10 @@ files to act on. Everything runs on your own machine — see [PRIVACY.md](docs/P
 | **Non-technical users** | Download the app, double-click, drag your file in. [Setup guide](docs/USING-THE-APP.md). |
 | **Analysts** | `pip install ".[ai,excel]"` then `segment-kmeans --serve`. |
 | **What is new** | [CHANGELOG.md](CHANGELOG.md) |
-| **Picking this up** | [HANDOVER.md](docs/HANDOVER.md) — current state, decisions, known limits |
+| **Taking this over** | [ONBOARDING.md](docs/ONBOARDING.md) — scope, the reasoning behind each decision, measured vs asserted, and the mistakes already made here |
+| **Current state** | [HANDOVER.md](docs/HANDOVER.md) — engineering state of play, known limits |
 
 ---
-
-> **Taking this project over?** Start with [docs/ONBOARDING.md](docs/ONBOARDING.md) — scope, the reasoning behind the design decisions, what is measured versus asserted, and the mistakes already made here.
 
 ## Where everything is
 
@@ -31,7 +30,7 @@ files to act on. Everything runs on your own machine — see [PRIVACY.md](docs/P
 | `frontend/` | The interface: React + TypeScript, built with Vite |
 | `webui/` | The **compiled** interface that Python serves. Generated — see `webui/README.md` |
 | `tests/` | `pytest` from the repository root |
-| `docs/` | [Using the app](docs/USING-THE-APP.md) · [Handover](docs/HANDOVER.md) · [Privacy](docs/PRIVACY.md) |
+| `docs/` | [Onboarding](docs/ONBOARDING.md) · [Using the app](docs/USING-THE-APP.md) · [Handover](docs/HANDOVER.md) · [Privacy](docs/PRIVACY.md) |
 | `run_app.py` / `build_app.py` | Start the app · build and smoke-test the desktop app |
 
 ## The method
