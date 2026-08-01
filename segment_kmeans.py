@@ -1117,6 +1117,12 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
          "constructed by the method rather than discovered; above ~0.75 signals a real tendency "
          "to cluster. Read the rest of this report in that light.\n"
          + _hopkins_caveat(distinct_share, centroids.shape[1] if centroids is not None else 0),
+         "**Who fits, person by person.** `segment_assignments.csv` carries a `fit` column: how "
+         "well each respondent sits in the segment they were given (about 1 = squarely inside, "
+         "about 0 = on the boundary between two, below 0 = closer to a different segment). "
+         "k-means gives everybody a segment because it has no way to answer *none of these* — so "
+         "before spending money on a list, filter out the low scores rather than mailing people "
+         "who matched nothing in particular.\n",
          "## Choosing the number of segments\n", rationale, "\n",
          _md(diag.round(3)),
          "\n**How to read this table.** The two columns to trust most are **prediction_strength** "
@@ -1391,6 +1397,30 @@ def write_html_report(markdown_text, path, title="Segmentation report"):
 # =====================================================================================
 # Typing tool: assign NEW respondents to segments, and measure how reliably that can be done
 # =====================================================================================
+def _per_respondent_fit(X, labels):
+    """Each respondent's silhouette, rounded, or NaN when it cannot be defined.
+
+    Undefined for a single segment, and expensive on large samples (it is O(n^2) in distances),
+    so it is computed on a sample above a few thousand respondents and the rest are left blank
+    rather than guessed at. A blank is honest; a fabricated 0.5 is not.
+    """
+    labels = np.asarray(labels)
+    if len(np.unique(labels)) < 2:
+        return np.full(len(labels), np.nan)
+    try:
+        from sklearn.metrics import silhouette_samples
+        if len(X) <= 6000:
+            return np.round(silhouette_samples(X, labels), 3)
+        rng = np.random.default_rng(0)
+        take = np.sort(rng.choice(len(X), 6000, replace=False))
+        out = np.full(len(labels), np.nan)
+        out[take] = np.round(silhouette_samples(X[take], labels[take]), 3)
+        return out
+    except Exception as e:
+        print(f"NOTE: could not score how well each respondent fits ({type(e).__name__}: {e}).")
+        return np.full(len(labels), np.nan)
+
+
 def typing_tool(arr_raw, labels, cfg):
     """Build and cross-validate a 'typing tool' — the rule that assigns a NEW respondent to a
     segment from their item scores. This is the operational payoff of a segmentation (Mind
@@ -2705,7 +2735,21 @@ class Segmenter:
                 else:
                     print("NOTE: weights summed to zero; reporting unweighted sizes only.")
         self.centroids, self.sizes = centroids, sizes
-        self.assignments = pd.DataFrame({"id": ids, "segment": self.labels})
+        # Every respondent also carries how well they actually fit the segment they were put in.
+        #
+        # k-means assigns everybody to something — there is no "none of these". James, Witten,
+        # Hastie & Tibshirani make the consequence explicit in *An Introduction to Statistical
+        # Learning* §12.4.3: "K-means and hierarchical clustering force every observation into a
+        # cluster… the clusters found may be heavily distorted due to the presence of outliers
+        # that do not belong to any cluster." Without a per-person number this file hands a
+        # marketer a tidy segment for the respondent who matched nothing, and it goes to the CRM
+        # looking exactly like everyone else.
+        #
+        # The number is that respondent's silhouette: ~1 sits inside their own segment, ~0 sits on
+        # the boundary between two, below 0 means they are closer to a different segment than the
+        # one they were given. Filter on it before spending money on a list.
+        self.assignments = pd.DataFrame({"id": ids, "segment": self.labels,
+                                         "fit": _per_respondent_fit(X, self.labels)})
         # Keep the clustered matrix so the charts can show the reader the actual point cloud.
         # A confidence word is a claim; a picture of the data is evidence they can check.
         self.X, self.item_names = X, list(X_raw.columns)

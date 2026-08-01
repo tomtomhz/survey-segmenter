@@ -683,6 +683,41 @@ def _likert(x):
     return np.clip(np.round(x), 1, 5).astype(int)
 
 
+def test_every_respondent_carries_how_well_they_fit():
+    """k-means has no way to answer "none of these" — everybody gets a segment.
+
+    James, Witten, Hastie & Tibshirani, *An Introduction to Statistical Learning* §12.4.3:
+    "K-means and hierarchical clustering force every observation into a cluster… the clusters
+    found may be heavily distorted due to the presence of outliers that do not belong to any
+    cluster." The assignments file is what goes into a CRM, and with only id and segment the
+    respondent who matched nothing looks exactly like everyone else.
+
+    Each row now carries its silhouette, so a poor fit can be filtered before money is spent.
+    """
+    rng = np.random.default_rng(0)
+    centres = np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3]], float)
+    X = np.clip(np.round(centres[rng.integers(0, 2, 200)] + rng.normal(0, .5, (200, 5))), 1, 5)
+    # Four people who belong to neither mind-set.
+    X = np.vstack([X, np.array([[1, 1, 5, 5, 1], [5, 5, 1, 1, 5],
+                                [3, 1, 1, 5, 5], [1, 5, 5, 1, 1]], float)])
+    df = pd.DataFrame(X.astype(int), columns=[f"q{i+1}" for i in range(5)])
+    df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=5, **FAST))
+
+    assigned = pd.read_csv(io.StringIO(r["files"]["segment_assignments.csv"]))
+    assert list(assigned.columns) == ["id", "segment", "fit"]
+
+    ordinary = assigned.head(200)["fit"]
+    misfits = assigned.tail(4)["fit"]
+    assert ordinary.median() > 0.5, f"ordinary respondents scored {ordinary.median():.2f}"
+    assert misfits.max() < ordinary.median(), (
+        "the people who belong to no segment do not look any different from those who do")
+
+    # And the report tells the reader the column is there and what it is for.
+    assert "fit" in r["digest"] and "none of these" in r["digest"]
+
+
 def test_the_report_says_outright_when_there_is_only_one_group():
     """The gap statistic is the only criterion here that can answer "is this one group?".
 
