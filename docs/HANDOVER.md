@@ -13,13 +13,13 @@ this says where it stands, what was decided and why, and what to do next.
 |---|---|
 | Repo | `github.com/tomtomhz/survey-segmenter` — **private**, MIT, owner `tomtomhz` |
 | CI | Python 3.9 / 3.11 / 3.12 + a clean-install job, green |
-| Tests | 109 Python (`pytest`) + 59 frontend (`cd frontend && npm test`) |
-| Shipped app | **v1.1.0 release**: macOS `.app` (72 MB) and Windows `.exe` (99 MB), both built and smoke-tested by the **Desktop app** workflow. Never in git history. |
+| Tests | 136 Python (`pytest`) + 59 frontend (`cd frontend && npm test`) |
+| Shipped app | **v1.2.0 release**: macOS `.app` (82 MB) and Windows `.exe`, built and smoke-tested by the **Desktop app** workflow. Never in git history. The team's copy lives in `~/Desktop/Survey Segmenter (app for the team)/`. |
 | Local path | `~/dev/survey-segmenter` — **moved out of iCloud Drive**, see below |
 
 ```bash
 cd ~/dev/survey-segmenter
-pytest                  # 112 tests, ~95s
+pytest                  # 136 tests, ~140s
 python3 run_app.py      # opens the web app
 python3 build_app.py    # rebuilds + signs + smoke-tests the .app
 ```
@@ -111,6 +111,16 @@ Not a survey, but 17,000 real rows through the whole pipeline on 2026-07-31
 
 ## Known limitations (real, not hypothetical)
 
+- **A mixed questionnaire is only as good as its questions.** Gower k-prototypes uses every
+  question, which means a pick-any question that separates nobody now costs accuracy where it
+  used to be set aside. Measured: three useless brand columns beside six real ratings cost 0.25
+  ARI. Confidence drops to moderate or low rather than claiming a result, and the
+  variable-selection check names the offenders — but read that section before acting.
+- **The mixed path runs one cross-paradigm check, not two.** A Gaussian mixture assumes every
+  answer is a measurement, so it is disabled there (it argued for k=8 on a file whose answer was
+  3 while it was still wired in). Calinski-Harabasz and Davies-Bouldin are read on the Gower
+  embedding rather than on Gower itself. The report says both.
+
 - **HB has never seen real MaxDiff responses.** The misspecification sweep below is the
   strongest evidence obtainable without them; it is not a substitute for them.
 - **The segment-size floor is a search-time guard, not a hard bound.** It filters the search fit;
@@ -128,14 +138,23 @@ Not a survey, but 17,000 real rows through the whole pipeline on 2026-07-31
 
 ## Next candidates, roughly by value
 
-3. **Let Claude see the charts** — it currently reads only the text digest.
-4. **Consolidate `segment-kmeans-tool.md`** in the assistant memory directory; it has grown to
-   22 KB of appended paragraphs and is due a rewrite rather than another append.
+1. **A second cluster-tendency test.** Hopkins is the only one and it needs a caveat on short
+   surveys. Hartigan's dip test on the pairwise-distance distribution is the usual companion.
+2. **Variable weighting.** The tool reports which questions drive the segmentation and checks
+   whether dropping the noise ones changes the answer, but weights every question equally when
+   clustering. Sparse k-means (Witten & Tibshirani) learns the weights.
+3. **Resolving overlapping segments** — the measured weakness. Worth understanding before
+   attempting: merging may be the honest answer, and "improving" it risks trading away the
+   never-confidently-wrong property, which is worth more.
+4. **Consolidate `segment-kmeans-tool.md`** in the assistant memory directory; it has grown well
+   past 22 KB of appended paragraphs and is due a rewrite rather than another append.
 
 ## How the modules divide up
 
 `segment_kmeans.py` decides what a segmentation is and what it means. `charts.py` draws it.
-`webapp.py` delivers it. `maxdiff.py` scores best-worst data before any of that happens.
+`webapp.py` delivers it. `maxdiff.py` scores best-worst data before any of that happens, and
+`kprototypes.py` supplies the distance and the prototypes for questionnaires that mix rating
+scales with pick-any questions.
 
 The direction of the imports is the point: `webapp` imports the engine, and the engine never
 imports `webapp`. `serve()` and `app()` remain on `segment_kmeans` as thin forwarders so the
