@@ -683,6 +683,42 @@ def _likert(x):
     return np.clip(np.round(x), 1, 5).astype(int)
 
 
+def test_the_report_says_outright_when_there_is_only_one_group():
+    """The gap statistic is the only criterion here that can answer "is this one group?".
+
+    Hastie, Tibshirani & Friedman, *The Elements of Statistical Learning* §14.3.11: the gap
+    "works reasonably well when the data fall into a single cluster, and in that case will tend
+    to estimate the optimal number of clusters to be one. This is the scenario where most other
+    competing methods fail." Silhouette, Calinski-Harabasz and Davies-Bouldin are undefined at
+    k=1, the elbow has no kink, and prediction strength needs two partitions to compare.
+
+    The search starts at k=2 because profiles, charts and the typing rule all need at least two
+    groups — a reasonable choice that quietly threw away the one test for "there is nothing here".
+    Measured: pure noise gives gap(1)=0.86 against gap(2)=0.85 and selects one group; three real
+    segments give gap(1)=-0.36 and select three.
+    """
+    rng = np.random.default_rng(0)
+    noise = np.clip(np.round(rng.normal(3, 1.1, (400, 5))), 1, 5).astype(int)
+    df = pd.DataFrame(noise, columns=[f"q{i+1}" for i in range(5)])
+    df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=6, **FAST))
+    assert "one group, not several" in r["digest"], (
+        "structureless data was divided up without saying the division is imposed")
+    assert r["confidence"] == "low"
+
+    # And it must not cry wolf on data that genuinely has segments.
+    centres = np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1]], float)
+    who = rng.integers(0, 3, 400)
+    real = np.clip(np.round(centres[who] + rng.normal(0, 0.5, (400, 5))), 1, 5).astype(int)
+    df = pd.DataFrame(real, columns=[f"q{i+1}" for i in range(5)])
+    df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=6, **FAST))
+    assert "one group, not several" not in r["digest"], "warned about real structure"
+    assert r["k"] == 3
+
+
 def test_it_recovers_the_number_of_groups_across_realistic_conditions():
     """The tool's central claim, measured against data whose answer is known.
 

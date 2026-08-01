@@ -415,6 +415,39 @@ def gap_statistic(X, k_range, B, rng, n_init):
     return pd.DataFrame(rows)
 
 
+def supports_single_cluster(X, B, rng, n_init):
+    """Does the gap statistic say this data is ONE group — that is, no segmentation at all?
+
+    The gap statistic is the only criterion in the panel that can answer this. Hastie, Tibshirani
+    and Friedman put it plainly in *The Elements of Statistical Learning* (§14.3.11): the gap
+    "works reasonably well when the data fall into a single cluster, and in that case will tend to
+    estimate the optimal number of clusters to be one. **This is the scenario where most other
+    competing methods fail.**" Silhouette, Calinski-Harabasz and Davies-Bouldin are undefined at
+    k=1; the elbow has no kink to find; prediction strength compares two partitions and needs at
+    least two groups to compare.
+
+    The search starts at k=2 because everything downstream — profiles, charts, the typing rule —
+    needs at least two groups to describe. That is a reasonable engineering choice and it quietly
+    discarded the one test that detects "there is nothing here". This puts it back: k=1 is scored
+    against k=2 on its own, and the answer is reported rather than used to change k.
+
+    Measured on this machine: pure noise gives gap(1)=0.862 against gap(2)=0.850 and selects k=1;
+    data with three real segments gives gap(1)=-0.357 and selects k=3.
+
+    Returns (single_cluster, gap_one, gap_two) — or (False, nan, nan) if it could not be computed,
+    because a diagnostic that fails should never take the analysis down with it.
+    """
+    try:
+        rows = gap_statistic(X, range(1, 3), B, rng, n_init)
+        g = {int(r["k"]): (float(r["gap"]), float(r["gap_se"])) for _, r in rows.iterrows()}
+        # Tibshirani's own rule, applied at the first step: choose k=1 unless k=2 is better by
+        # more than the standard error of the reference distribution.
+        return (g[1][0] >= g[2][0] - g[2][1], g[1][0], g[2][0])
+    except Exception as e:
+        print(f"NOTE: could not test for a single cluster ({type(e).__name__}: {e}).")
+        return False, float("nan"), float("nan")
+
+
 def replication_stability(X, k_range, B, frac, rng, cfg):
     """Global stability (Dolnicar & Leisch): fit a reference clustering, then cluster B
     subsamples and measure the Adjusted Rand Index between reference and subsample labels on
@@ -1051,9 +1084,21 @@ def _hopkins_caveat(distinct_share, n_items):
 def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccard,
                 sizes, defining, differentiating, centroids, hopkins, mb_agreement,
                 var_importance, consensus_agreement, cfg, typing=None, varsel=None,
-                k_agreement=None, ward_ari=None, distinct_share=None):
+                k_agreement=None, ward_ari=None, distinct_share=None,
+                single_cluster=False, gap_one=None, gap_two=None):
     method_name = ("a Gaussian mixture / latent-class model (" + cfg.gmm_covariance +
                    " covariance)" if getattr(cfg, "method", "kmeans") == "gmm" else "k-means")
+    # Said first and said plainly. The gap statistic is the only criterion here that can return
+    # "one group" — silhouette and the rest are undefined at k=1 — and Hastie, Tibshirani and
+    # Friedman note it is the scenario where most competing methods fail. If it says there is
+    # nothing to divide, the reader should know before they read a division.
+    single_cluster_note = ("" if not single_cluster else
+        "> **The gap statistic says these respondents are one group, not several.** Compared "
+        f"against data with no structure at all, one group scores {gap_one:.2f} and two score "
+        f"{gap_two:.2f} — splitting does not earn its keep. Everything below still describes the "
+        "best split that could be made, because that is what was asked for, but it is a division "
+        "imposed on the data rather than one found in it. Treat the groups as a working "
+        "convenience and do not build a campaign on them.\n")
     _keys = list(defining.keys())
     _names = [defining[k]["auto_name"] for k in _keys]
     _wants = [", ".join(_short_label(w.split(" (")[0]) for w in defining[k]["most_above_average"][:2])
@@ -1066,6 +1111,7 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
          f"final fit used {cfg.n_init_final} restarts. Search range: k = "
          f"{cfg.k_min} to {cfg.k_max}.\n",
          "## Is there anything to segment? (cluster tendency)\n",
+         single_cluster_note,
          f"Hopkins statistic = **{hopkins:.2f}** — {hopkins_reading(hopkins)}. "
          "A value near 0.5 means the data are essentially random and any segments will be "
          "constructed by the method rather than discovered; above ~0.75 signals a real tendency "
@@ -2596,6 +2642,10 @@ class Segmenter:
               f"(method: {cfg.method}, scaling: {cfg.scaling}). Running the diagnostic panel...\n")
 
         self.hopkins = hopkins_statistic(X, np.random.default_rng(cfg.random_state + 7))
+        # The one test in the panel that can return "this is a single group". See
+        # supports_single_cluster for why the k>=2 search would otherwise never ask.
+        self.single_cluster, self.gap_one, self.gap_two = supports_single_cluster(
+            X, cfg.gap_B, np.random.default_rng(cfg.random_state + 8), cfg.n_init_search)
         print(f"Cluster-tendency (Hopkins) = {self.hopkins:.2f} — {hopkins_reading(self.hopkins)}.\n")
 
         self.diagnostics = selection_diagnostics(X, cfg)
@@ -2668,7 +2718,8 @@ class Segmenter:
                                             self.hopkins, self.mb_agreement, self.var_importance,
                                             self.consensus_agreement, cfg, self.typing, self.varsel,
                                             k_agree, self.ward_ari,
-                                            getattr(self, 'distinct_share', None))
+                                            getattr(self, 'distinct_share', None),
+                                            self.single_cluster, self.gap_one, self.gap_two)
         if demographics is not None and (not isinstance(demographics, pd.DataFrame) or not demographics.empty):
             self.report_markdown += "\n\n" + self._profile_external(demographics, id_col)
         if outdir:
