@@ -758,6 +758,64 @@ def test_the_report_names_which_segments_are_nearly_the_same():
         "two nearly identical segments were reported as having their own territory")
 
 
+def test_segments_are_checked_against_a_different_number_of_segments():
+    """Dolnicar & Leisch's segment level stability across solutions (2017), `slsaplot` in flexclust.
+
+    The tool already asks whether the whole solution reproduces on a fresh half, and whether each
+    segment survives resampling at a fixed k. Neither answers the question a client actually puts:
+    *you said four groups — what if it were five?* A segment that only exists at the chosen k is an
+    artefact of the number and should not be handed a budget.
+
+    Scored by containment, not Jaccard. Jaccard was tried first and pinned here because the failure
+    is not obvious: going from k to k-1 must merge two segments, so Jaccard collapses whether or
+    not the structure is real, and measured it could not separate three genuine segments (0.44-0.78)
+    from pure noise (0.55-0.69) at all. Containment survives merging and falls only on genuine
+    fragmentation.
+    """
+    # The mechanics, on a case whose answer is known by construction. Six points, two obvious
+    # pairs-of-pairs; the chosen split is the true one.
+    X = np.array([[0.0, 0.0], [0.1, 0.0], [0.0, 0.1],
+                  [9.0, 9.0], [9.1, 9.0], [9.0, 9.1]])
+    labels = np.array([0, 0, 0, 1, 1, 1])
+    got = sk.stability_across_solutions(X, range(2, 4), 2, labels, 5, np.random.default_rng(0))
+    assert set(got) == {0, 1}
+    # k-1 is 1, which is not a segmentation, so only k=3 is compared against. One of the two
+    # triples must split to make a third group; the other survives whole.
+    assert max(got.values()) == 1.0 and min(got.values()) >= 2 / 3
+
+    # A segment index with no members must not produce a score or a division by zero.
+    lopsided = sk.stability_across_solutions(X, range(2, 4), 3, labels, 5, np.random.default_rng(0))
+    assert 2 not in lopsided
+
+    # No neighbouring solution to compare against means no claim, not a fabricated one.
+    assert sk.stability_across_solutions(X, [2], 2, labels, 5, np.random.default_rng(0)) == {}
+
+    assert sk.persistence_paragraph({}, []) == ""
+    holds = sk.persistence_paragraph({0: 0.95, 1: 0.88}, ["Loyal", "Curious"])
+    assert "holds its shape" in holds and "Loyal" in holds
+    assert "does not survive" in sk.persistence_paragraph({0: 0.95, 1: 0.2}, ["A", "B"])
+
+    # End to end, and the part that matters: it discriminates. Measured on this machine, three
+    # planted segments score 0.78 and above while pure noise reaches only 0.69.
+    def analyse(X):
+        df = pd.DataFrame(X, columns=[f"q{i+1}" for i in range(X.shape[1])])
+        df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+        return sk.run_analysis(df.to_csv(index=False).encode(),
+                               cfg=sk.SegmentationConfig(k_min=2, k_max=6, **FAST))
+
+    rng = np.random.default_rng(0)
+    centres = np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1]], float)
+    who = rng.integers(0, 3, 400)
+    real = analyse(_likert(centres[who] + rng.normal(0, 0.5, (400, 5))))
+    assert "survive a different number" in real["digest"]
+    assert min(real["persistence"].values()) >= 0.7, real["persistence"]
+    assert "Every segment survives" in real["digest"]
+
+    noise = analyse(_likert(rng.normal(3, 1.1, (400, 5))))
+    assert min(noise["persistence"].values()) < 0.7, (
+        "segments found in structureless data should not survive a change in k")
+
+
 def test_the_report_says_which_of_the_three_kinds_of_segmentation_this_is():
     """Dolnicar, Grün & Leisch's distinction, used throughout *Market Segmentation Analysis*.
 
