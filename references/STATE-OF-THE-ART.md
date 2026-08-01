@@ -97,8 +97,13 @@ the first things to check when the remaining PDFs open.
 - **Silhouette read on Kaufman & Rousseeuw's conventional bands**, with the average — not the
   count of negative scores — deciding the verdict, because noise produces few negatives and
   near-zero averages.
-- **Hopkins is caveated rather than trusted.** It reads 0.78 on pure noise with two Likert
-  questions, because duplicate answer patterns inflate it. Measured on this machine.
+- **Hopkins is caveated rather than trusted, and the caveat is correctly scoped.** Measured
+  here: on a five-question survey it reads **0.56 on pure noise** (0.5 being random) and **0.95
+  on real structure** — it works. The failure is specific to very short surveys, where duplicate
+  answer patterns inflate it to 0.78 on noise, and that is exactly the case the code warns about.
+  Checked because it looked like a gap worth closing with a second tendency test; it is not.
+  The gap statistic and prediction strength both independently picked k=2 on that noise while the
+  confidence came out **low**, so three signals agreed and the tool refused.
 - **A typing rule with cross-validated accuracy**, reported as an operational property and
   explicitly not as evidence the segments are real — a partition of noise is still classifiable.
 
