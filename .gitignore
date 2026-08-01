@@ -37,3 +37,7 @@ results/
 frontend/node_modules/
 frontend/.vite/
 frontend/*.tsbuildinfo
+
+# The reference library itself: 604 MB of copyrighted books and papers that live outside the
+# repository. references/README.md indexes them and IS committed.
+references/*.pdf

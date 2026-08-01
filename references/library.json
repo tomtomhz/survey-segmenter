@@ -1,0 +1,709 @@
+[
+ {
+  "file": " An Improved Clustering Method Based on K-means.pdf",
+  "mb": 0.3,
+  "local": false,
+  "topic": "Other",
+  "year": ""
+ },
+ {
+  "file": "A Clustering Method Based on K-Means Algorithm .pdf",
+  "mb": 0.2,
+  "local": true,
+  "topic": "Other",
+  "year": ""
+ },
+ {
+  "file": "A K-means Clustering Algorithm Based on Enhanced Differential Evolution.pdf",
+  "mb": 0.3,
+  "local": true,
+  "topic": "Metaheuristics",
+  "year": ""
+ },
+ {
+  "file": "A Kernel \ud835\udc3e-means Clustering Algorithm Based on an Adaptive Mahalanobis Kernel.pdf",
+  "mb": 0.7,
+  "local": false,
+  "topic": "Kernel / spectral / subspace",
+  "year": ""
+ },
+ {
+  "file": "A Modified k-means Algorithm for Clustering Problem with Balancing Constraints .pdf",
+  "mb": 0.3,
+  "local": false,
+  "topic": "Constrained / balanced / robust",
+  "year": ""
+ },
+ {
+  "file": "A New Clustering Method Based on Weighted Kernel K-Means for Non-linear Data .pdf",
+  "mb": 0.7,
+  "local": true,
+  "topic": "Kernel / spectral / subspace",
+  "year": ""
+ },
+ {
+  "file": "A New Improved K-means Algorithm with Penalized Term.pdf",
+  "mb": 0.4,
+  "local": true,
+  "topic": "Constrained / balanced / robust",
+  "year": ""
+ },
+ {
+  "file": "A New Method of Selecting K-means Initial Cluster Centers Based on Hotspot Analysis .pdf",
+  "mb": 1.2,
+  "local": false,
+  "topic": "Initialisation of centres",
+  "year": ""
+ },
+ {
+  "file": "A Novel Approach for High Dimensional Data Clustering .pdf",
+  "mb": 0.3,
+  "local": false,
+  "topic": "Other",
+  "year": ""
+ },
+ {
+  "file": "A new algorithm for initial cluster centers in k-means algorithm.pdf",
+  "mb": 0.7,
+  "local": false,
+  "topic": "Initialisation of centres",
+  "year": ""
+ },
+ {
+  "file": "A-Biologically-Inspired-Sparse-Self-Representation-Approach-for-Projected-Fuzzy-Double-C.pdf",
+  "mb": 3.0,
+  "local": false,
+  "topic": "Fuzzy c-means",
+  "year": ""
+ },
+ {
+  "file": "A-Heuristic-for-Non-convex-Variance-Based-Clustering-Criteria.pdf",
+  "mb": 0.6,
+  "local": true,
+  "topic": "Metaheuristics",
+  "year": ""
+ },
+ {
+  "file": "A-dynamic-density-based-clustering-method-based-on-K-nearest-neighbor.pdf",
+  "mb": 3.3,
+  "local": false,
+  "topic": "Speed / scalability",
+  "year": ""
+ },
+ {
+  "file": "A-new-clustering-algorithm-based-on-connectivity.pdf",
+  "mb": 2.1,
+  "local": false,
+  "topic": "Other",
+  "year": ""
+ },
+ {
+  "file": "A-new-clustering-method-of-rock-discontinuity-sets-based-on-modified-K-means-algorithm.pdf",
+  "mb": 5.9,
+  "local": true,
+  "topic": "Other",
+  "year": ""
+ },
+ {
+  "file": "A-new-semi-supervised-fuzzy-K-means-clustering-method-with-dynamic-adjustment-and-label-discrimination.pdf",
+  "mb": 3.0,
+  "local": true,
+  "topic": "Speed / scalability",
+  "year": ""
+ },
+ {
+  "file": "A-novel-approach-for-dynamic-portfolio-management-integrating-K-means-clustering-mean-variance.pdf",
+  "mb": 4.0,
+  "local": false,
+  "topic": "Speed / scalability",
+  "year": ""
+ },
+ {
+  "file": "A-novel-enhancement-based-rapid-kernel-induced-intuitionistic-fuzzy-c-means-clustering-for.pdf",
+  "mb": 1.8,
+  "local": false,
+  "topic": "Fuzzy c-means",
+  "year": ""
+ },
+ {
+  "file": "A-novel-spectral-clustering-algorithm-based-on-neighbor-relation-and-Gaussian-kernel-function.pdf",
+  "mb": 1.0,
+  "local": false,
+  "topic": "Kernel / spectral / subspace",
+  "year": ""
+ },
+ {
+  "file": "A-novel-stratification-clustering-algorithm-based-on-a-new-local-density-estimation-method.pdf",
+  "mb": 9.8,
+  "local": true,
+  "topic": "Density-based",
+  "year": ""
+ },
+ {
+  "file": "A-novel-two-phase-clustering-based-under-sampling-method-for-imbalanced-classification-problems.pdf",
+  "mb": 7.4,
+  "local": false,
+  "topic": "Constrained / balanced / robust",
+  "year": ""
+ },
+ {
+  "file": "AN ENHANCED K-MEANS ALGORITHM USING AGGLOMERATIVE HIERARCHICAL CLUSTERING STRATEGY.pdf",
+  "mb": 0.2,
+  "local": false,
+  "topic": "Hierarchical / model-based",
+  "year": ""
+ },
+ {
+  "file": "AN INFORMATION THEORETIC PERSPECTIVE TO KERNEL K-MEANS *.pdf",
+  "mb": 5.2,
+  "local": false,
+  "topic": "Kernel / spectral / subspace",
+  "year": ""
+ },
+ {
+  "file": "Adaptive-active-learning-through-k-nearest-neighbor-optimized-local-density-clustering.pdf",
+  "mb": 2.3,
+  "local": false,
+  "topic": "Density-based",
+  "year": ""
+ },
+ {
+  "file": "Advances-in-Computational-Collective-Intelligence.pdf",
+  "mb": 69.5,
+  "local": true,
+  "topic": "Survey / review",
+  "year": ""
+ },
+ {
+  "file": "Advances-in-Data-Science-and-Analytics.pdf",
+  "mb": 11.7,
+  "local": false,
+  "topic": "Survey / review",
+  "year": ""
+ },
+ {
+  "file": "Advances-on-Intelligent-Computing-and-Data-Science.pdf",
+  "mb": 49.6,
+  "local": false,
+  "topic": "Survey / review",
+  "year": ""
+ },
+ {
+  "file": "An Introduction to Statistical Learning.pdf",
+  "mb": 19.1,
+  "local": true,
+  "topic": "Foundational textbook",
+  "year": ""
+ },
+ {
+  "file": "An efficient approximation to the K-means clustering for massive data.pdf",
+  "mb": 2.0,
+  "local": true,
+  "topic": "Speed / scalability",
+  "year": ""
+ },
+ {
+  "file": "An improved k-means algorithm based on average diameter method.pdf",
+  "mb": 0.2,
+  "local": false,
+  "topic": "Other",
+  "year": ""
+ },
+ {
+  "file": "An-algorithm-of-nonnegative-matrix-factorization-under-structure-constraints-for-image-clustering.pdf",
+  "mb": 2.4,
+  "local": false,
+  "topic": "Constrained / balanced / robust",
+  "year": ""
+ },
+ {
+  "file": "An-effective-clustering-scheme-for-high-dimensional-data.pdf",
+  "mb": 3.2,
+  "local": false,
+  "topic": "Other",
+  "year": ""
+ },
+ {
+  "file": "An-enhanced-whale-optimization-algorithm-for-clustering.pdf",
+  "mb": 0.9,
+  "local": false,
+  "topic": "Metaheuristics",
+  "year": ""
+ },
+ {
+  "file": "An-improved-density-peak-clustering-algorithm-guided-by-pseudo-labels.pdf",
+  "mb": 2.4,
+  "local": false,
+  "topic": "Density-based",
+  "year": ""
+ },
+ {
+  "file": "An-incremental-clustering-algorithm-based-on-semantic-concepts.pdf",
+  "mb": 2.4,
+  "local": true,
+  "topic": "Speed / scalability",
+  "year": ""
+ },
+ {
+  "file": "An-incremental-clustering-method-based-on-multiple-objectives-for-dynamic-data-analysis.pdf",
+  "mb": 0.8,
+  "local": false,
+  "topic": "Speed / scalability",
+  "year": ""
+ },
+ {
+  "file": "Artificial Intelligence A Modern Approach.pdf",
+  "mb": 31.3,
+  "local": false,
+  "topic": "Foundational textbook",
+  "year": ""
+ },
+ {
+  "file": "Bayesian Reasoning and Machine Learning.pdf",
+  "mb": 12.8,
+  "local": false,
+  "topic": "Foundational textbook",
+  "year": ""
+ },
+ {
+  "file": "Bishop-Pattern-Recognition-and-Machine-Learning-2006.pdf",
+  "mb": 17.3,
+  "local": false,
+  "topic": "Foundational textbook",
+  "year": "2006"
+ },
+ {
+  "file": "Brief Survey of K-means Clustering Algorithms.pdf",
+  "mb": 0.3,
+  "local": true,
+  "topic": "Survey / review",
+  "year": ""
+ },
+ {
+  "file": "Comprehensive-survey-on-hierarchical-clustering-algorithms-and-the-recent-developments.pdf",
+  "mb": 1.4,
+  "local": false,
+  "topic": "Survey / review",
+  "year": ""
+ },
+ {
+  "file": "Contrastive-deep-embedded-clustering.pdf",
+  "mb": 1.3,
+  "local": false,
+  "topic": "Deep / representation clustering",
+  "year": ""
+ },
+ {
+  "file": "Correction-K-means-tree-an-optimal-clustering-tree-for-unsupervised-learning.pdf",
+  "mb": 0.4,
+  "local": false,
+  "topic": "Hierarchical / model-based",
+  "year": ""
+ },
+ {
+  "file": "DG-means-a-superior-greedy-algorithm-for-clustering-distributed-data.pdf",
+  "mb": 1.9,
+  "local": false,
+  "topic": "Speed / scalability",
+  "year": ""
+ },
+ {
+  "file": "Data clustering using efficient similarity measures.pdf",
+  "mb": 0.4,
+  "local": false,
+  "topic": "Speed / scalability",
+  "year": ""
+ },
+ {
+  "file": "Deep Learning with Python.pdf",
+  "mb": 13.8,
+  "local": true,
+  "topic": "Foundational textbook",
+  "year": ""
+ },
+ {
+  "file": "Deep+Learning+Ian+Goodfellow.pdf",
+  "mb": 18.4,
+  "local": false,
+  "topic": "Deep / representation clustering",
+  "year": ""
+ },
+ {
+  "file": "Deep-multi-semantic-fuzzy-K-means-with-adaptive-weight-adjustment.pdf",
+  "mb": 3.2,
+  "local": true,
+  "topic": "Fuzzy c-means",
+  "year": ""
+ },
+ {
+  "file": "Density-clustering-algorithm-based-on-seed-point-with-cluster-expansion.pdf",
+  "mb": 4.3,
+  "local": false,
+  "topic": "Initialisation of centres",
+  "year": ""
+ },
+ {
+  "file": "Discriminatively-embedded-fuzzy-K-Means-clustering-with-feature-selection-strategy.pdf",
+  "mb": 2.4,
+  "local": false,
+  "topic": "Fuzzy c-means",
+  "year": ""
+ },
+ {
+  "file": "Dynamic Incremental K-means Clustering.pdf",
+  "mb": 0.7,
+  "local": false,
+  "topic": "Speed / scalability",
+  "year": ""
+ },
+ {
+  "file": "Enhancing-the-performance-of-deep-learning-models-with-fuzzy-c-means-clustering.pdf",
+  "mb": 7.7,
+  "local": false,
+  "topic": "Fuzzy c-means",
+  "year": ""
+ },
+ {
+  "file": "Expanding-the-Class-of-Global-Objective-Functions-for-Dissimilarity-Based-Hierarchical-Clustering.pdf",
+  "mb": 0.3,
+  "local": true,
+  "topic": "Hierarchical / model-based",
+  "year": ""
+ },
+ {
+  "file": "Fast K-means-like clustering in metric spaces .pdf",
+  "mb": 0.5,
+  "local": true,
+  "topic": "Speed / scalability",
+  "year": ""
+ },
+ {
+  "file": "Fast modified global k-means algorithm for incremental cluster construction.pdf",
+  "mb": 0.5,
+  "local": false,
+  "topic": "Speed / scalability",
+  "year": ""
+ },
+ {
+  "file": "Fully-Dynamic-k-Center-Clustering-with-Outliers.pdf",
+  "mb": 1.0,
+  "local": false,
+  "topic": "Speed / scalability",
+  "year": ""
+ },
+ {
+  "file": "Generalization of the Codebook Updating Method of the K-means Algorithm .pdf",
+  "mb": 0.2,
+  "local": false,
+  "topic": "Other",
+  "year": ""
+ },
+ {
+  "file": "Geodesic K-means Clustering.pdf",
+  "mb": 0.3,
+  "local": true,
+  "topic": "Kernel / spectral / subspace",
+  "year": ""
+ },
+ {
+  "file": "Grokking Deep Learning.pdf",
+  "mb": 13.6,
+  "local": true,
+  "topic": "Foundational textbook",
+  "year": ""
+ },
+ {
+  "file": "Hands-On_Machine_Learning_with_Scikit-Learn-Keras-and-TensorFlow-2nd-Edition-Aurelien-Geron.pdf",
+  "mb": 55.8,
+  "local": true,
+  "topic": "Foundational textbook",
+  "year": ""
+ },
+ {
+  "file": "Hybrid-multi-objective-metaheuristic-and-possibilistic-intuitionistic-fuzzy-c-means-algorithms.pdf",
+  "mb": 0.6,
+  "local": false,
+  "topic": "Fuzzy c-means",
+  "year": ""
+ },
+ {
+  "file": "Impact-of-new-seed-and-performance-criteria-in-proposed-rough-k-means-clustering.pdf",
+  "mb": 4.6,
+  "local": false,
+  "topic": "Initialisation of centres",
+  "year": ""
+ },
+ {
+  "file": "Improved Algorithm for the k-means Clustering .pdf",
+  "mb": 0.2,
+  "local": false,
+  "topic": "Other",
+  "year": ""
+ },
+ {
+  "file": "Improved-affinity-propagation-clustering-algorithms-a-PSO-based-approach.pdf",
+  "mb": 1.2,
+  "local": false,
+  "topic": "Metaheuristics",
+  "year": ""
+ },
+ {
+  "file": "Improved-fuzzy-C-means-clustering-algorithm-based-on-fuzzy-particle-swarm-optimization-for.pdf",
+  "mb": 4.5,
+  "local": false,
+  "topic": "Fuzzy c-means",
+  "year": ""
+ },
+ {
+  "file": "Improvement and Parallelism of k-Means Clustering Algorithm*.pdf",
+  "mb": 0.1,
+  "local": false,
+  "topic": "Speed / scalability",
+  "year": ""
+ },
+ {
+  "file": "Improvement of K-means Clustering algorithm with better initial centroids based on weighted average.pdf",
+  "mb": 0.2,
+  "local": false,
+  "topic": "Initialisation of centres",
+  "year": ""
+ },
+ {
+  "file": "Improvement-and-application-of-information-communication-technology-in-wireless-routing-protocol.pdf",
+  "mb": 1.5,
+  "local": false,
+  "topic": "Applied",
+  "year": ""
+ },
+ {
+  "file": "Information Theory, Inference, and Learning Algorithms.pdf",
+  "mb": 11.1,
+  "local": false,
+  "topic": "Foundational textbook",
+  "year": ""
+ },
+ {
+  "file": "Joint-Projected-Fuzzy-Neighborhood-Preserving-C-means-Clustering-with-Local-Adaptive-Learning.pdf",
+  "mb": 3.1,
+  "local": false,
+  "topic": "Fuzzy c-means",
+  "year": ""
+ },
+ {
+  "file": "K-Means Cloning- Adaptive Spherical K-Means Clustering.pdf",
+  "mb": 0.9,
+  "local": true,
+  "topic": "Other",
+  "year": ""
+ },
+ {
+  "file": "K-means clustering- A half-century synthesis.pdf",
+  "mb": 0.3,
+  "local": false,
+  "topic": "Survey / review",
+  "year": ""
+ },
+ {
+  "file": "K-meansn - Clustering by gradual data transformation.pdf",
+  "mb": 2.3,
+  "local": false,
+  "topic": "Other",
+  "year": ""
+ },
+ {
+  "file": "Knowledge-based Evolving Clustering Algorithm for Data Stream .pdf",
+  "mb": 0.4,
+  "local": true,
+  "topic": "Speed / scalability",
+  "year": ""
+ },
+ {
+  "file": "Local vs global interactions in clustering algorithms-advances over k-means.pdf",
+  "mb": 0.5,
+  "local": false,
+  "topic": "Survey / review",
+  "year": ""
+ },
+ {
+  "file": "ML Machine Learning-A Probabilistic Perspective.pdf",
+  "mb": 25.7,
+  "local": true,
+  "topic": "Foundational textbook",
+  "year": ""
+ },
+ {
+  "file": "MachineLearningTomMitchell.pdf",
+  "mb": 57.6,
+  "local": false,
+  "topic": "Other",
+  "year": ""
+ },
+ {
+  "file": "Model-Based-Clustering-with-Nested-Gaussian-Clusters.pdf",
+  "mb": 0.7,
+  "local": false,
+  "topic": "Hierarchical / model-based",
+  "year": ""
+ },
+ {
+  "file": "Multi-granularity-rough-k-means-clustering-in-the-optimization-of-collaborative-filtering.pdf",
+  "mb": 2.9,
+  "local": false,
+  "topic": "Constrained / balanced / robust",
+  "year": ""
+ },
+ {
+  "file": "Multi-start-local-search-algorithm-based-on-a-novel-objective-function-for-clustering-analysis.pdf",
+  "mb": 4.3,
+  "local": false,
+  "topic": "Metaheuristics",
+  "year": ""
+ },
+ {
+  "file": "Multiple-kernel-k-means-clustering-with-block-diagonal-property.pdf",
+  "mb": 1.4,
+  "local": true,
+  "topic": "Kernel / spectral / subspace",
+  "year": ""
+ },
+ {
+  "file": "New Efficient Strategy to Accelerate k-Means Clustering Algorithm.pdf",
+  "mb": 0.1,
+  "local": false,
+  "topic": "Speed / scalability",
+  "year": ""
+ },
+ {
+  "file": "New methods for the initialisation of clusters.pdf",
+  "mb": 0.3,
+  "local": true,
+  "topic": "Initialisation of centres",
+  "year": ""
+ },
+ {
+  "file": "Parameter-Free-Auto-Weighted-Possibilistic-Fuzzy-C-Means-Clustering-with-Kernel-Metric-and.pdf",
+  "mb": 7.4,
+  "local": false,
+  "topic": "Fuzzy c-means",
+  "year": ""
+ },
+ {
+  "file": "Recent advances in cluster analysis.pdf",
+  "mb": 0.2,
+  "local": true,
+  "topic": "Survey / review",
+  "year": ""
+ },
+ {
+  "file": "Research and Improvement on K-Means Clustering Algorithm .pdf",
+  "mb": 0.3,
+  "local": true,
+  "topic": "Other",
+  "year": ""
+ },
+ {
+  "file": "Research-and-Improvement-of-K-means-Clustering-Analysis-Algorithm-in-the-Information-Warfare.pdf",
+  "mb": 0.9,
+  "local": true,
+  "topic": "Applied",
+  "year": ""
+ },
+ {
+  "file": "Revisiting-data-augmentation-for-subspace-clustering.pdf",
+  "mb": 1.7,
+  "local": true,
+  "topic": "Survey / review",
+  "year": ""
+ },
+ {
+  "file": "Richard O. Duda, Peter E. Hart, David G. Stork - Pattern classification (2001, Wiley).pdf",
+  "mb": 11.7,
+  "local": false,
+  "topic": "Foundational textbook",
+  "year": "2001"
+ },
+ {
+  "file": "Semi-supervised-and-un-supervised-clustering-A-review-and-experimental-evaluation.pdf",
+  "mb": 7.0,
+  "local": true,
+  "topic": "Survey / review",
+  "year": ""
+ },
+ {
+  "file": "Statistical-initialization-of-intrinsic-K-means-clustering-on-homogeneous-manifolds.pdf",
+  "mb": 6.6,
+  "local": true,
+  "topic": "Initialisation of centres",
+  "year": ""
+ },
+ {
+  "file": "The Elements of Statistical Learning.pdf",
+  "mb": 12.7,
+  "local": false,
+  "topic": "Foundational textbook",
+  "year": ""
+ },
+ {
+  "file": "The Hundred Page Machine Learning BOOK.pdf",
+  "mb": 7.0,
+  "local": true,
+  "topic": "Foundational textbook",
+  "year": ""
+ },
+ {
+  "file": "The global k-means clustering algorithm.pdf",
+  "mb": 0.2,
+  "local": false,
+  "topic": "Other",
+  "year": ""
+ },
+ {
+  "file": "Transformer-Autoencoder-for-K-means-Efficient-clustering.pdf",
+  "mb": 2.0,
+  "local": false,
+  "topic": "Speed / scalability",
+  "year": ""
+ },
+ {
+  "file": "Two-dimensional-k-subspace-clustering-and-its-applications-on-image-recognition.pdf",
+  "mb": 1.8,
+  "local": false,
+  "topic": "Kernel / spectral / subspace",
+  "year": ""
+ },
+ {
+  "file": "Understanding-the-Interplay-Between-Metrics-Normalization-Forms-and-Data-distribution-in.pdf",
+  "mb": 6.5,
+  "local": true,
+  "topic": "Validation / metrics / normalisation",
+  "year": ""
+ },
+ {
+  "file": "Weighted adjacent matrix for K-means clustering.pdf",
+  "mb": 2.6,
+  "local": false,
+  "topic": "Other",
+  "year": ""
+ },
+ {
+  "file": "a-heuristic-kmeans-clustering-algorithm-by-kernel-pca.pdf",
+  "mb": 0.3,
+  "local": false,
+  "topic": "Kernel / spectral / subspace",
+  "year": ""
+ },
+ {
+  "file": "a-new-algorithm-to-get-the-initial-centroids.pdf",
+  "mb": 0.2,
+  "local": true,
+  "topic": "Other",
+  "year": ""
+ },
+ {
+  "file": "k-means- A revisit.pdf",
+  "mb": 1.2,
+  "local": true,
+  "topic": "Survey / review",
+  "year": ""
+ }
+]

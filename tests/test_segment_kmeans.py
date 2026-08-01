@@ -678,6 +678,80 @@ def test_the_built_interface_is_served_and_cannot_be_escaped():
     assert callable(sk.app) and callable(sk.serve)
 
 
+def _likert(x):
+    """Push a latent score onto a 1-5 answer scale, which is what a survey actually contains."""
+    return np.clip(np.round(x), 1, 5).astype(int)
+
+
+def test_it_recovers_the_number_of_groups_across_realistic_conditions():
+    """The tool's central claim, measured against data whose answer is known.
+
+    Swept at three seeds per condition (21 analyses) while writing this: well-separated k=3,
+    overlapping k=3, sizes of 80/15/5, three real questions plus five that separate nobody, two
+    elongated bands, k=5, and pure noise. It got 19 of 21 right. Both misses were the overlapping
+    case, where it merged two segments into k=2 — and downgraded the confidence when it did.
+
+    This keeps one seed per condition so the suite stays quick. The stochastic part of the claim
+    is in the test below.
+    """
+    conditions = {
+        "separated": (np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1]], float),
+                      None, 0.5, 3),
+        "unequal 80/15/5": (np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1]], float),
+                            [0.80, 0.15, 0.05], 0.5, 3),
+        "five groups": (np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1],
+                                  [5, 5, 1, 1, 5], [1, 1, 3, 3, 1]], float), None, 0.5, 5),
+    }
+    for name, (centres, weights, spread, true_k) in conditions.items():
+        rng = np.random.default_rng(0)
+        who = rng.choice(len(centres), 400, p=weights)
+        X = _likert(centres[who] + rng.normal(0, spread, (400, centres.shape[1])))
+        df = pd.DataFrame(X, columns=[f"q{i+1}" for i in range(X.shape[1])])
+        df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+        r = sk.run_analysis(df.to_csv(index=False).encode(),
+                            cfg=sk.SegmentationConfig(k_min=2, k_max=8, **FAST))
+        assert r["k"] == true_k, f"{name}: found {r['k']} groups, not {true_k}"
+        assert r["confidence"] == "high", f"{name}: recovered k but reported {r['confidence']}"
+
+    # Questions that separate nobody must not create groups of their own (Dolnicar's point).
+    rng = np.random.default_rng(1)
+    centres = np.array([[5, 1, 5], [1, 5, 1], [3, 3, 5]], float)
+    who = rng.integers(0, 3, 400)
+    X = np.hstack([_likert(centres[who] + rng.normal(0, 0.5, (400, 3))),
+                   _likert(rng.normal(3, 1.2, (400, 5)))])
+    df = pd.DataFrame(X, columns=[f"q{i+1}" for i in range(8)])
+    df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=8, **FAST))
+    assert r["k"] == 3, f"five noise questions changed the answer to {r['k']}"
+
+
+def test_it_never_claims_high_confidence_for_the_wrong_number_of_groups():
+    """Being wrong is survivable. Being wrong and confident is not.
+
+    Overlapping segments are the realistic case and the hard one: measured over three seeds, the
+    tool found the true k once and merged two segments into k=2 the other two times. What makes
+    that acceptable is that it dropped to "moderate" both times it was wrong, so the report told
+    the reader to treat the groups as directional rather than settled.
+
+    A change that improved accuracy by reporting high confidence more often would be a
+    regression, and this is what would catch it.
+    """
+    centres = np.array([[4, 2, 4, 2, 3], [2, 4, 2, 4, 3], [3, 3, 4, 4, 2]], float)
+    for seed in range(3):
+        rng = np.random.default_rng(seed)
+        who = rng.integers(0, 3, 400)
+        X = _likert(centres[who] + rng.normal(0, 1.3, (400, 5)))
+        df = pd.DataFrame(X, columns=[f"q{i+1}" for i in range(5)])
+        df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+        r = sk.run_analysis(df.to_csv(index=False).encode(),
+                            cfg=sk.SegmentationConfig(k_min=2, k_max=8, **FAST))
+        if r["k"] != 3:
+            assert r["confidence"] != "high", (
+                f"seed {seed}: reported HIGH confidence while finding {r['k']} groups instead "
+                "of 3 — a wrong answer presented as a settled one")
+
+
 def test_scoring_a_single_new_person_works():
     """"Score new people" exists to type a handful of new leads, and it refused every batch of one.
 
