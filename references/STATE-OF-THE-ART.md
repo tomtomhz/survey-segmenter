@@ -66,10 +66,26 @@ The weakness is real and worth stating plainly: **overlapping segments get merge
 mind-sets genuinely shade into one another, expect this tool to report one group and tell you the
 evidence is directional.
 
-## Established practice the tool already follows
+## Verified against the library
 
-Each is cited in the code next to the thing it justifies. **Unverified against the library** —
-these are from my own knowledge and are the first things to check when the PDFs open.
+Only one file would open (`The Hundred-Page Machine Learning Book`, Burkov). It corroborates the
+tool's single most consequential choice — how it picks k — on three specific points:
+
+| Burkov, §9.2.3 "Determining the Number of Clusters" | What the tool does |
+|---|---|
+| Presents **prediction strength** as the one practical formal method, over eyeballing scatter plots ("subjective, prone to error… an educated guess rather than a scientific method") | Weights prediction strength highest in the panel |
+| "a reasonable number of clusters is the largest k such that ps(k) is above **0.8**" | `ps_cutoff = 0.80`, and the k chart draws that line so the reader can see whether anything clears it |
+| "For non-deterministic algorithms such as k-means… do multiple runs for the same k and compute the **average** prediction strength" | `ps_splits = 10`, and the report carries `prediction_strength_sd` alongside the mean |
+
+That is three for three, including the exact threshold. It also confirms the tool's decision to
+draw the segment map *and* refuse to let it decide anything: Burkov's objection to reading
+structure off a scatter plot is why the map is presented next to the stability numbers rather
+than instead of them.
+
+## Established practice, not yet verified against the library
+
+Each is cited in the code next to the thing it justifies. These are from my own knowledge and are
+the first things to check when the remaining PDFs open.
 
 - **Range standardisation** rather than z-scores (Milligan & Cooper 1988). On a 1-5 answer scale
   z-scoring inflates the questions nobody disagreed about.
