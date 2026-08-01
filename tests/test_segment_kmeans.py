@@ -683,6 +683,104 @@ def _likert(x):
     return np.clip(np.round(x), 1, 5).astype(int)
 
 
+def test_shadow_values_replace_the_silhouette_and_leave_nobody_blank():
+    """Leisch's shadow value, s(x) = 2·d(closest) / [d(closest) + d(second closest)].
+
+    The per-respondent fit column used a silhouette, which needs every pairwise distance — O(n^2)
+    — so above 6,000 respondents it fell back to a sample and left everyone else blank, putting
+    holes in the CRM export exactly on the studies large enough to matter. A shadow value needs
+    only the two nearest centroids, O(n·k).
+    """
+    rng = np.random.default_rng(0)
+    centres = np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1]], float)
+    who = rng.integers(0, 3, 400)
+    X = np.clip(np.round(centres[who] + rng.normal(0, 0.5, (400, 5))), 1, 5)
+
+    # The formula itself, against a hand-checkable case: a point sitting on a centroid scores 0,
+    # a point exactly between two scores 1.
+    cents = np.array([[0.0, 0.0], [10.0, 0.0]])
+    shadow, closest, second = sk.shadow_values(np.array([[0.0, 0.0], [5.0, 0.0]]), cents)
+    assert abs(shadow[0] - 0.0) < 1e-9 and abs(shadow[1] - 1.0) < 1e-9
+    assert closest[0] == 0 and second[0] == 1
+
+    df = pd.DataFrame(X.astype(int), columns=[f"q{i+1}" for i in range(5)])
+    df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=6, **FAST))
+    assigned = pd.read_csv(io.StringIO(r["files"]["segment_assignments.csv"]))
+    assert assigned["fit"].isna().sum() == 0, "some respondents were left without a fit"
+    assert assigned["fit"].between(0, 1).all()
+
+    # The gorge plot is drawn from those same values, and its shape separates real structure
+    # from noise: measured here, a typical respondent scores 0.33 on three genuine segments and
+    # 0.86 when the same machinery is pointed at random answers.
+    assert any(c["id"] == "gorge" for c in r["charts"])
+    assert float(np.median(1.0 - assigned["fit"])) < 0.55
+
+    noise = np.clip(np.round(rng.normal(3, 1.1, (400, 5))), 1, 5).astype(int)
+    df = pd.DataFrame(noise, columns=[f"q{i+1}" for i in range(5)])
+    df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+    rn = sk.run_analysis(df.to_csv(index=False).encode(),
+                         cfg=sk.SegmentationConfig(k_min=2, k_max=6, **FAST))
+    noisy = pd.read_csv(io.StringIO(rn["files"]["segment_assignments.csv"]))
+    assert float(np.median(1.0 - noisy["fit"])) > 0.7, (
+        "respondents in structureless data should be stranded between segments")
+
+
+def test_the_report_names_which_segments_are_nearly_the_same():
+    """The question that decides how many campaigns get funded.
+
+    The report said how each segment differs from the average respondent. It never said which two
+    segments sit next to each other — so somebody could sign off five campaigns without being
+    told that two of them target much the same people. Leisch's s_ij, the average shadow value
+    over the respondents caught between a given pair, is exactly that number.
+
+    Bands calibrated on this machine by planting segments at known separations: two far apart
+    0.27, three far apart 0.40, two just touching 0.65, three with two adjacent 0.87, three with
+    two nearly identical 0.97, pure noise 0.99.
+    """
+    def analyse(centres, spread=0.5):
+        rng = np.random.default_rng(0)
+        who = rng.integers(0, len(centres), 400)
+        X = np.clip(np.round(centres[who] + rng.normal(0, spread, (400, centres.shape[1]))), 1, 5)
+        df = pd.DataFrame(X.astype(int), columns=[f"q{i+1}" for i in range(centres.shape[1])])
+        df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+        return sk.run_analysis(df.to_csv(index=False).encode(),
+                               cfg=sk.SegmentationConfig(k_min=2, k_max=6, **FAST))
+
+    apart = analyse(np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1]], float))
+    assert "Which segments sit next to each other" in apart["digest"]
+    assert "each has its own territory" in apart["digest"]
+
+    # Two segments planted almost on top of one another must be called out, not glossed over.
+    crowded = analyse(np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [1.2, 4.8, 1.2, 4.8, 3]], float))
+    assert "each has its own territory" not in crowded["digest"], (
+        "two nearly identical segments were reported as having their own territory")
+
+
+def test_the_report_says_which_of_the_three_kinds_of_segmentation_this_is():
+    """Dolnicar, Grün & Leisch's distinction, used throughout *Market Segmentation Analysis*.
+
+    A single confidence word cannot separate "there is nothing here" from "there is nothing
+    NATURAL here, but the split is stable enough to work with" — two very different situations
+    that both feel like a weak result. The field's three words do.
+    """
+    def kind_of(centres, spread=0.5):
+        rng = np.random.default_rng(0)
+        who = rng.integers(0, len(centres), 400)
+        X = np.clip(np.round(centres[who] + rng.normal(0, spread, (400, centres.shape[1]))), 1, 5)
+        df = pd.DataFrame(X.astype(int), columns=[f"q{i+1}" for i in range(centres.shape[1])])
+        df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+        r = sk.run_analysis(df.to_csv(index=False).encode(),
+                            cfg=sk.SegmentationConfig(k_min=2, k_max=6, **FAST))
+        found = re.search(r"\*\*This is a (\w+) segmentation\*\*", r["digest"])
+        assert found, "the report did not classify the segmentation at all"
+        return found.group(1)
+
+    assert kind_of(np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1]], float)) == "natural"
+    assert kind_of(np.array([[3, 3, 3, 3, 3]], float), spread=1.2) == "constructive"
+
+
 def test_a_stable_but_wrong_partition_does_not_get_high_confidence():
     """A wrong answer can be perfectly reproducible, and reproducibility was the whole verdict.
 
@@ -1977,7 +2075,7 @@ def test_every_run_produces_the_full_chart_set_as_valid_standalone_svg():
     r = sk.run_analysis(_three_group_survey().to_csv(index=False).encode(),
                         cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
     assert [c["id"] for c in r["charts"]] == ["map", "fit", "k", "profiles",
-                                              "radar", "heatmap"]
+                                              "radar", "heatmap", "gorge"]
     for c in r["charts"]:
         assert c["svg"].startswith("<svg") and c["svg"].endswith("</svg>")
         assert c["svg"].count("<svg") == c["svg"].count("</svg>") == 1
@@ -2063,7 +2161,7 @@ def test_categorical_surveys_are_charted_too():
                                                   check_variable_selection=False))
     assert r["method"] == "lca"
     assert [c["id"] for c in r["charts"]] == ["map", "fit", "k", "profiles",
-                                              "radar", "heatmap"]
+                                              "radar", "heatmap", "gorge"]
     prof = next(c for c in r["charts"] if c["id"] == "profiles")
     # Probabilities, not means — the caption must not tell the reader to read them as ratings.
     assert "How likely each answer is" in prof["caption"]
@@ -2677,5 +2775,6 @@ def test_every_chart_is_offered_on_a_normal_run():
     missing one looks like the tool decided the reader did not need it."""
     r = sk.run_analysis(_three_group_survey().to_csv(index=False).encode(),
                         cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
-    assert [c["id"] for c in r["charts"]] == ["map", "fit", "k", "profiles", "radar", "heatmap"]
-    assert sk.charts_html(r["charts"]).count("<svg") == 6
+    assert [c["id"] for c in r["charts"]] == ["map", "fit", "k", "profiles", "radar", "heatmap",
+                                              "gorge"]
+    assert sk.charts_html(r["charts"]).count("<svg") == 7

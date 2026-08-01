@@ -1094,11 +1094,103 @@ def _hopkins_caveat(distinct_share, n_items):
             "dataset. Judge this run on the replication and per-segment stability figures "
             "below, which are not affected.\n")
 
+def segmentation_kind(single_cluster, repro, median_shadow):
+    """Which of the three kinds of segmentation this is, in the field's own words.
+
+    Dolnicar, Grün & Leisch use a three-way distinction throughout *Market Segmentation Analysis*
+    (Springer 2018), and it is more informative than a single confidence word because it separates
+    "there is nothing here" from "there is nothing natural here but the split is stable enough to
+    work with" — two very different situations that both feel like a weak result:
+
+      natural       — genuine groups exist in the data and the analysis found them.
+      reproducible  — no natural groups, but the data has enough structure that the same split
+                      comes back every time, so it is a usable working division.
+      constructive  — no structure at all; the segments are an artefact of the method.
+
+    Deciding between them from what the tool already measures: the gap statistic's verdict on a
+    single cluster, split-half replication, and the typical shadow value (how stranded the average
+    respondent is between two segments — near 0 means people sit firmly somewhere).
+    """
+    if single_cluster and repro is not None and repro < 0.5:
+        kind = "constructive"
+        gloss = ("there is no group structure in these answers. The split below is one the method "
+                 "constructed, not one it found, and it will not correspond to anything real "
+                 "about your customers.")
+    elif median_shadow is not None and median_shadow < 0.55 and (repro or 0) >= 0.6:
+        kind = "natural"
+        gloss = ("the groups are really there in the answers — most respondents sit firmly inside "
+                 "one of them, and the same groups come back when the analysis is repeated.")
+    elif (repro or 0) >= 0.6:
+        kind = "reproducible"
+        gloss = ("there are no sharply separated natural groups here, but the division is stable: "
+                 "repeat the analysis and you get the same split. That makes it a usable working "
+                 "segmentation as long as nobody claims these are naturally occurring types.")
+    else:
+        kind = "constructive"
+        gloss = ("the division does not survive being repeated on half the sample, which is what "
+                 "happens when the method is imposing groups rather than finding them.")
+    return kind, gloss
+
+
+def neighbours_paragraph(pairs, names, k):
+    """Which two segments are nearly the same — the question that decides how many campaigns.
+
+    The report says how each segment differs from the average respondent. It never said which
+    segments sit next to each other, and a marketer signing off five campaigns needs to know that
+    two of them are aimed at much the same people. Leisch's s_ij (average shadow value over the
+    respondents caught between a given pair) is exactly that number.
+
+    The bands were calibrated on this machine rather than guessed, by planting segments at known
+    separations and reading off the worst pair: two segments far apart score 0.27, three far
+    apart 0.40, two just touching 0.65, three with two adjacent 0.87, three with two nearly
+    identical 0.97, and pure noise cut into three 0.99. Hence 0.55 and 0.80 as the boundaries.
+
+    Only pairs with respondents actually stranded between them are shown, and each unordered
+    pair once.
+    """
+    if not pairs or k < 2:
+        return ""
+
+    # The automatic names come from question codes and two segments can easily end up with the
+    # same one, which produced a row reading "q2 + q4 | q2 + q4". Number the duplicates.
+    def label(i):
+        base = names[i] if i < len(names) else f"Segment {i}"
+        return f"{base} (segment {i})" if names.count(base) > 1 else base
+
+    seen, rows = set(), []
+    for i, j, mean_shadow, n in pairs:
+        key = (min(i, j), max(i, j))
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append((label(i), label(j), mean_shadow, n))
+    rows = rows[:4]
+    worst = rows[0][2]
+    if worst >= 0.80:
+        verdict = ("**These two are barely distinguishable at their boundary.** Before running "
+                   "separate campaigns, check that the difference is one your team can actually "
+                   "act on; one message may serve both.")
+    elif worst >= 0.55:
+        verdict = ("The closest pair shades into one another at the edges. The centres are "
+                   "distinct, but expect people near the boundary to respond to either message.")
+    else:
+        verdict = "No two segments crowd each other; each has its own territory."
+    lines = ["\n**Which segments sit next to each other.** For every respondent, how close they "
+             "are to their own segment compared with the next nearest one. A pair scoring near 1 "
+             "means the people on that boundary are almost equally at home in either.\n",
+             _md(pd.DataFrame([{"segment": a, "next nearest": b,
+                                "how alike at the boundary": round(m, 2),
+                                "people between them": n} for a, b, m, n in rows])),
+             "\n" + verdict + "\n"]
+    return "".join(lines)
+
+
 def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccard,
                 sizes, defining, differentiating, centroids, hopkins, mb_agreement,
                 var_importance, consensus_agreement, cfg, typing=None, varsel=None,
                 k_agreement=None, ward_ari=None, distinct_share=None,
-                single_cluster=False, gap_one=None, gap_two=None):
+                single_cluster=False, gap_one=None, gap_two=None, neighbours=None,
+                median_shadow=None):
     method_name = ("a Gaussian mixture / latent-class model (" + cfg.gmm_covariance +
                    " covariance)" if getattr(cfg, "method", "kmeans") == "gmm" else "k-means")
     # Said first and said plainly. The gap statistic is the only criterion here that can return
@@ -1131,6 +1223,13 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
          f"final fit used {cfg.n_init_final} restarts. Search range: k = "
          f"{cfg.k_min} to {cfg.k_max}.\n",
          "## Is there anything to segment? (cluster tendency)\n",
+         (lambda kg: f"**This is a {kg[0]} segmentation** — {kg[1]}\n\n"
+                     "The three kinds, as market segmentation research distinguishes them "
+                     "(Dolnicar, Grün & Leisch): a **natural** segmentation finds groups that are "
+                     "genuinely there; a **reproducible** one finds no natural groups but a stable "
+                     "division you can still work with; a **constructive** one is the method "
+                     "inventing groups in data that has none.\n"
+          )(segmentation_kind(single_cluster, split_half, median_shadow)),
          single_cluster_note,
          f"Hopkins statistic = **{hopkins:.2f}** — {hopkins_reading(hopkins)}. "
          "A value near 0.5 means the data are essentially random and any segments will be "
@@ -1143,6 +1242,7 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
          "k-means gives everybody a segment because it has no way to answer *none of these* — so "
          "before spending money on a list, filter out the low scores rather than mailing people "
          "who matched nothing in particular.\n",
+         neighbours_paragraph(neighbours, _names, len(_names)),
          "## Choosing the number of segments\n", rationale, "\n",
          _md(diag.round(3)),
          "\n**How to read this table.** The two columns to trust most are **prediction_strength** "
@@ -1335,6 +1435,7 @@ chart_k_choice = _charts.chart_k_choice
 chart_profiles = _charts.chart_profiles
 chart_radar = _charts.chart_radar
 chart_heatmap = _charts.chart_heatmap
+chart_gorge = _charts.chart_gorge
 onehot_matrix = _charts.onehot_matrix
 
 
@@ -1417,16 +1518,93 @@ def write_html_report(markdown_text, path, title="Segmentation report"):
 # =====================================================================================
 # Typing tool: assign NEW respondents to segments, and measure how reliably that can be done
 # =====================================================================================
-def _per_respondent_fit(X, labels):
-    """Each respondent's silhouette, rounded, or NaN when it cannot be defined.
+def segment_centres(X, labels):
+    """Mean position of each segment, in whatever space the clustering happened in.
 
-    Undefined for a single segment, and expensive on large samples (it is O(n^2) in distances),
-    so it is computed on a sample above a few thousand respondents and the rest are left blank
-    rather than guessed at. A blank is honest; a fabricated 0.5 is not.
+    An empty segment keeps a row of NaN rather than being dropped, so row i is always segment i
+    and nothing downstream has to renumber.
+    """
+    X = np.asarray(X, float)
+    labels = np.asarray(labels)
+    k = int(labels.max()) + 1 if len(labels) else 0
+    return np.array([X[labels == c].mean(0) if (labels == c).any()
+                     else np.full(X.shape[1], np.nan) for c in range(k)])
+
+
+def shadow_values(X, centroids):
+    """Leisch's shadow value for every respondent, plus who their two nearest segments are.
+
+        s(x) = 2 d(x, closest) / [ d(x, closest) + d(x, second closest) ]
+
+    Near 0 the respondent sits squarely inside their own segment; near 1 they are stranded
+    halfway between two and could plausibly belong to either. Leisch introduces it in
+    *Neighborhood Graphs, Stripes and Shadow Plots* (2010) and says outright that it is "similar
+    both in spirit and interpretation to the well known silhouette plots".
+
+    Used here in preference to the silhouette for one practical reason. A silhouette needs the
+    distance from every respondent to every other — O(n^2) — so it had to be computed on a sample
+    of 6,000 and everybody else left blank, which put holes in the exported file exactly on the
+    large studies where per-person fit matters most. A shadow value needs only the distance to
+    two centroids, O(n·k), so every respondent gets a real number at any sample size.
+
+    Returns (shadow, closest, second_closest). A degenerate case — one segment, or a respondent
+    sitting exactly on top of two centroids — yields 0.0 rather than a division by zero: someone
+    at zero distance from their centroid fits perfectly, which is what 0 means.
+    """
+    X = np.asarray(X, float)
+    C = np.asarray(centroids, float)
+    if C.ndim != 2 or len(C) < 2:
+        return np.zeros(len(X)), np.zeros(len(X), int), np.zeros(len(X), int)
+    d = np.sqrt(((X[:, None, :] - C[None, :, :]) ** 2).sum(2))     # (n, k)
+    order = np.argsort(d, axis=1)
+    closest, second = order[:, 0], order[:, 1]
+    rows = np.arange(len(X))
+    d1, d2 = d[rows, closest], d[rows, second]
+    total = d1 + d2
+    return np.where(total > 0, 2 * d1 / np.where(total > 0, total, 1.0), 0.0), closest, second
+
+
+def segment_neighbours(shadow, closest, second, k):
+    """How close each pair of segments sits, from the respondents caught between them.
+
+    Leisch's s_ij: average the shadow value over everyone whose closest segment is i and whose
+    second-closest is j. A high value means the people on i's edge are barely nearer to i than to
+    j — the two segments are neighbours and their boundary is soft.
+
+    This answers a question the tool could not previously ask. It reports how distinct each
+    segment is from the average respondent; it never said WHICH TWO SEGMENTS ARE NEARLY THE SAME,
+    which is what somebody needs before committing to five campaigns rather than three.
+
+    Returns a list of (i, j, mean_shadow, n_between) sorted worst-first, covering only pairs that
+    actually have respondents stranded between them.
+    """
+    out = []
+    for i in range(k):
+        for j in range(k):
+            if i == j:
+                continue
+            between = (closest == i) & (second == j)
+            n = int(between.sum())
+            if n:
+                out.append((i, j, float(shadow[between].mean()), n))
+    return sorted(out, key=lambda r: -r[2])
+
+
+def _per_respondent_fit(X, labels, centroids=None):
+    """How well each respondent sits in the segment they were given: 1 = squarely inside, 0 =
+    stranded between two. This is 1 - the shadow value, flipped so that higher reads as better
+    in the exported file, which is what a non-analyst expects of a column called `fit`.
+
+    Falls back to the silhouette when no centroids are available (the latent-class path has
+    probabilities rather than centres), and to NaN if neither can be computed. A blank is honest;
+    a fabricated 0.5 is not.
     """
     labels = np.asarray(labels)
     if len(np.unique(labels)) < 2:
         return np.full(len(labels), np.nan)
+    if centroids is not None:
+        shadow, _, _ = shadow_values(X, centroids)
+        return np.round(1.0 - shadow, 3)
     try:
         from sklearn.metrics import silhouette_samples
         if len(X) <= 6000:
@@ -1984,6 +2162,19 @@ class LatentClassSegmenter:
         # Categorical answers have no distances of their own, so the charts work on the indicator
         # (one-hot) coding — the standard way to put pick-any data in a Euclidean space.
         self.Xcat, self.level_counts = Xcat, level_counts
+        # Shadow values for the categorical path too, so the gorge plot and the "which segments
+        # sit next to each other" table are not privileges of the numeric half of the tool.
+        # Categorical answers have no distances of their own, so this uses the same indicator
+        # coding the charts already work in.
+        try:
+            _Xoh = onehot_matrix(Xcat, level_counts)
+            _oh_cents = segment_centres(_Xoh, self.labels)
+            self.shadow, _c1, _c2 = shadow_values(_Xoh, _oh_cents)
+            self.neighbours = segment_neighbours(self.shadow, _c1, _c2, int(self.recommended_k))
+            self.assignments["fit"] = np.round(1.0 - self.shadow, 3)
+        except Exception as e:
+            print(f"NOTE: could not score class fit ({type(e).__name__}: {e}).")
+            self.shadow, self.neighbours = None, None
         self.report_markdown = latent_class_report(self.diagnostics, self.recommended_k, rationale,
                                                    self.model, self.jaccard, names, level_labels,
                                                    self.labels, cfg, typing=self.typing,
@@ -2765,11 +2956,19 @@ class Segmenter:
         # marketer a tidy segment for the respondent who matched nothing, and it goes to the CRM
         # looking exactly like everyone else.
         #
-        # The number is that respondent's silhouette: ~1 sits inside their own segment, ~0 sits on
-        # the boundary between two, below 0 means they are closer to a different segment than the
-        # one they were given. Filter on it before spending money on a list.
+        # The number is 1 minus Leisch's shadow value: 1 sits squarely inside their own segment,
+        # 0 means they are stranded halfway between two and could plausibly belong to either.
+        # Filter on it before spending money on a list.
+        #
+        # Computed from the two nearest centroids rather than as a silhouette, which needs every
+        # pairwise distance: O(n·k) against O(n^2), so every respondent gets a real number instead
+        # of the largest studies falling back to a 6,000-row sample with the rest left blank.
+        _cents = segment_centres(X, self.labels)
+        self.shadow, _closest, _second = shadow_values(X, _cents)
+        self.neighbours = segment_neighbours(self.shadow, _closest, _second,
+                                             int(self.recommended_k))
         self.assignments = pd.DataFrame({"id": ids, "segment": self.labels,
-                                         "fit": _per_respondent_fit(X, self.labels)})
+                                         "fit": _per_respondent_fit(X, self.labels, _cents)})
         # Keep the clustered matrix so the charts can show the reader the actual point cloud.
         # A confidence word is a claim; a picture of the data is evidence they can check.
         self.X, self.item_names = X, list(X_raw.columns)
@@ -2783,7 +2982,11 @@ class Segmenter:
                                             self.consensus_agreement, cfg, self.typing, self.varsel,
                                             k_agree, self.ward_ari,
                                             getattr(self, 'distinct_share', None),
-                                            self.single_cluster, self.gap_one, self.gap_two)
+                                            self.single_cluster, self.gap_one, self.gap_two,
+                                            getattr(self, 'neighbours', None),
+                                            float(np.median(self.shadow))
+                                            if getattr(self, 'shadow', None) is not None
+                                            and len(self.shadow) else None)
         if demographics is not None and (not isinstance(demographics, pd.DataFrame) or not demographics.empty):
             self.report_markdown += "\n\n" + self._profile_external(demographics, id_col)
         if outdir:

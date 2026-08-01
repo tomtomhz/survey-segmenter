@@ -601,6 +601,61 @@ def chart_heatmap(centroids, names=None, kind="means"):
         return _finish(figure, "heatmap", "Every group against every question", caption)
 
 
+def chart_gorge(shadow, names=None):
+    """The distribution of how stranded people are between segments — Leisch's gorge plot.
+
+    For every respondent, 2·d(closest) / [d(closest) + d(second closest)]. Near 0 they sit
+    squarely inside their own segment; near 1 they are halfway between two and could belong to
+    either. Piled up on the left with a dip in the middle — a gorge — means the segments genuinely
+    separate. One lump sitting near the right means nobody is clearly anywhere and the split is
+    imposed.
+
+    This is the tool's central question answered in a single picture, and it needs no statistical
+    training to read. Leisch introduces it in *Neighborhood Graphs, Stripes and Shadow Plots*
+    (2010), noting it is "similar both in spirit and interpretation to the well known silhouette
+    plots" — but a shape, rather than a sorted bar for every respondent.
+    """
+    shadow = np.asarray(shadow, float)
+    shadow = shadow[np.isfinite(shadow)]
+    if len(shadow) < 20:
+        return None
+
+    with _Figure(height=3.9) as figure:
+        ax = figure.fig.add_subplot(111)
+        ax.hist(shadow, bins=np.linspace(0, 1, 41), color=seg_colour(0), alpha=0.85, linewidth=0)
+        median = float(np.median(shadow))
+        ax.axvline(median, color="#9C4029", linewidth=1.4, linestyle="--")
+        ax.annotate(f"typical respondent {median:.2f}", xy=(median, 1.0),
+                    xycoords=("data", "axes fraction"), color="#9C4029", fontsize=10,
+                    ha="right" if median > 0.5 else "left", va="bottom",
+                    xytext=(-4 if median > 0.5 else 4, 4), textcoords="offset points")
+        ax.set_xlim(0, 1)
+        ax.set_xlabel("← sits firmly in one segment        stranded between two →")
+        ax.set_ylabel("respondents")
+        ax.grid(axis="x", visible=False)
+
+        stranded = float((shadow > 0.8).mean())
+        firm = float((shadow < 0.4).mean())
+        if firm >= 0.5 and median < 0.55:
+            verdict = ("<strong>This is the shape you want.</strong> Most respondents sit firmly "
+                       "inside one segment, and the tail off to the right is the handful on the "
+                       "boundaries.")
+        elif median > 0.75:
+            verdict = ("<strong>This is the shape of a split that was imposed rather than "
+                       "found.</strong> The typical respondent is nearly equidistant from two "
+                       "segments, which is what happens when there are no real groups to find.")
+        else:
+            verdict = ("<strong>A mixed picture.</strong> A core of each segment sits firmly "
+                       "inside it, but a substantial share of people could reasonably have gone "
+                       "either way.")
+        caption = (f"Every respondent, measured by how much closer they are to their own segment "
+                   f"than to the next nearest. {firm:.0%} sit firmly in one segment; "
+                   f"{stranded:.0%} are essentially on a boundary. " + verdict +
+                   " Two humps with a dip between them — a gorge — is the signature of segments "
+                   "that genuinely separate.")
+        return _finish(figure, "gorge", "Does anyone actually belong to one segment?", caption)
+
+
 def build_charts(seg, method, names=None, errors=None):
     """Draw everything this result supports, skipping whatever it does not.
 
@@ -672,4 +727,7 @@ def build_charts(seg, method, names=None, errors=None):
         attempt("group profiles", lambda: chart_profiles(centroids, names, kind=kind))
         attempt("group shapes", lambda: chart_radar(centroids, names, kind=kind))
         attempt("full grid", lambda: chart_heatmap(centroids, names, kind=kind))
+    shadow = getattr(seg, "shadow", None)
+    if shadow is not None:
+        attempt("gorge", lambda: chart_gorge(shadow, names))
     return out
