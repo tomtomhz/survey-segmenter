@@ -17,6 +17,8 @@ files to act on. Everything runs on your own machine — see [PRIVACY.md](docs/P
 
 ---
 
+> **Taking this project over?** Start with [docs/ONBOARDING.md](docs/ONBOARDING.md) — scope, the reasoning behind the design decisions, what is measured versus asserted, and the mistakes already made here.
+
 ## Where everything is
 
 | | |

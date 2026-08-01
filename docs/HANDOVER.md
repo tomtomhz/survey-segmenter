@@ -1,5 +1,10 @@
 # Handover — state of play
 
+> **New to this project (human or assistant)? Read [ONBOARDING.md](ONBOARDING.md) first.**
+> It carries the scope, the decisions that must not be silently reversed and why, what is
+> measured versus merely asserted, and the traps this project has already fallen into.
+> This file is the narrower engineering state of play.
+
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
