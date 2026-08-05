@@ -3,6 +3,42 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.4.0] — 2026-08-05
+
+### The charts can be asked questions
+
+Four of the six charts are now interactive on screen, while the same picture as before goes into
+the printed report, the PDF and the image Claude reads.
+
+- **The segment map** reports which group a mark belongs to and **how many people share that exact
+  set of answers** — the count the static chart can only encode as the size of a dot.
+- **The full grid** reports the second number behind each cell: how far that group sits from the
+  question's own average, which is what the colour encodes and what the printed value cannot say.
+- **Who belongs** reports how many people in a group fall in a given range of fit. The low bands
+  are the people who could belong to either group, so this is the number to filter a list on.
+- **How many groups** reports every quality measure at once for a candidate, instead of asking you
+  to trace three lines back to an axis.
+
+Everything reachable by pointer is reachable by keyboard, the segment map offers its numbers as a
+table, and the full grid is a real table so a screen reader can simply walk it.
+
+**How this is built, because it matters for what comes next.** A chart is computed once, in Python,
+and drawn twice. The computation emits a *spec* — the numbers behind the picture — and both
+matplotlib and the browser render from it. The straightforward alternative is a second chart engine
+in TypeScript, which then quietly disagrees with the first the day somebody edits one of them. A
+test asserts the spec matches what was drawn.
+
+A chart with too many marks to stay responsive ships no spec and shows the static drawing instead;
+so does a project saved before this release. There is always a correct picture.
+
+### Fixed
+
+- Past eight groups, two segments could be drawn identically — colour and shape both cycled on
+  eight, so group 8 matched group 0 in both.
+- A question worded like a colour code came out garbled in the chart.
+- The test suite was making real network requests, which failed harmlessly and filled every run
+  with connection errors that looked like a broken build.
+
 ## [1.3.0] — 2026-08-05
 
 ### The charts show every respondent, and colour means one thing at a time
