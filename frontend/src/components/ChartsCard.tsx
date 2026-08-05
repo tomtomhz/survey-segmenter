@@ -2,7 +2,8 @@ import { useId, useRef, useState } from 'react'
 import type { Chart } from '../api/types'
 import { CHART_TAB } from '../lib/labels'
 import { SegmentMap } from '../charts/SegmentMap'
-import { usableSpec } from '../charts/spec'
+import { Heatmap } from '../charts/Heatmap'
+import { usableSpec, usableHeatmap } from '../charts/spec'
 
 /**
  * The point of showing the charts is that a reader can disagree with the write-up: a wrong
@@ -77,6 +78,7 @@ export function ChartsCard({ charts }: { charts: Chart[] }) {
                 contain anything the user typed. */}
             {(() => {
               const spec = usableSpec(chart.spec)
+              const heat = usableHeatmap(chart.spec)
               // When a chart ships a spec, the interactive version is what appears on screen and
               // the static drawing stays in the document for print — the print stylesheet swaps
               // them. Without a spec (an older saved project, or a chart with too many marks to
@@ -89,8 +91,13 @@ export function ChartsCard({ charts }: { charts: Chart[] }) {
                       <SegmentMap spec={spec} title={chart.title} />
                     </div>
                   )}
+                  {heat && (
+                    <div className="cwrap conly-screen">
+                      <Heatmap spec={heat} title={chart.title} />
+                    </div>
+                  )}
                   <div
-                    className={`cwrap${spec ? ' conly-print' : ''}`}
+                    className={`cwrap${spec || heat ? ' conly-print' : ''}`}
                     dangerouslySetInnerHTML={{ __html: chart.svg }}
                   />
                 </>

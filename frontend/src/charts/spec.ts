@@ -65,7 +65,23 @@ export interface SegmentMapSpec {
   faithful: number
 }
 
-export type ChartSpec = SegmentMapSpec
+export interface HeatmapSpec {
+  version: number
+  kind: 'heatmap'
+  /** Question labels, one per row of the grid. */
+  items: string[]
+  segments: SegmentKey[]
+  /** values[segment][question] — the group's answer, on the original scale. */
+  values: number[][]
+  /** The same cell measured against that question's own average; what the colour encodes. */
+  deviation: number[][]
+  /** The largest deviation in either direction, so both arms of the scale are comparable. */
+  limit: number
+  /** "average" for ratings, "share" on the categorical path. */
+  kind_of_value: string
+}
+
+export type ChartSpec = SegmentMapSpec | HeatmapSpec
 
 /**
  * A spec is only usable if it is the version this build understands. Anything else falls back to
@@ -87,4 +103,21 @@ export function usableSpec(spec: unknown): SegmentMapSpec | null {
   }
   if (!Array.isArray(candidate.segments) || !candidate.segments.length) return null
   return candidate as SegmentMapSpec
+}
+
+/** The same gate for the grid: right version, right kind, and rows that line up with columns. */
+export function usableHeatmap(spec: unknown): HeatmapSpec | null {
+  if (!spec || typeof spec !== 'object') return null
+  const candidate = spec as Partial<HeatmapSpec>
+  if (candidate.version !== SUPPORTED_SPEC_VERSION) return null
+  if (candidate.kind !== 'heatmap') return null
+  const { items, segments, values, deviation } = candidate
+  if (!Array.isArray(items) || !Array.isArray(segments) || !segments.length) return null
+  if (!Array.isArray(values) || values.length !== segments.length) return null
+  if (!Array.isArray(deviation) || deviation.length !== segments.length) return null
+  // Every row must cover every question, or a cell would silently read as blank rather than as
+  // the number it is.
+  if (values.some((row) => row.length !== items.length)) return null
+  if (deviation.some((row) => row.length !== items.length)) return null
+  return candidate as HeatmapSpec
 }

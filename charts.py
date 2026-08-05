@@ -1056,7 +1056,22 @@ def chart_heatmap(centroids, names=None, kind="means"):
                    "the strongest colours</strong> &mdash; those cells are what distinguishes a "
                    "group. A row of pale cells is a group with no distinctive profile, which is "
                    "worth knowing before it becomes a persona.")
-        return _finish(figure, "heatmap", "Every group against every question", caption)
+        # Same contract as the map: the numbers behind the picture, built from the arrays that
+        # were just drawn. The interactive version can then report a cell's exact value and how
+        # far from that question's average it sits, which colour can only suggest.
+        spec = {
+            "kind": "heatmap",
+            "items": [str(c) for c in items],
+            "segments": _segment_key(len(data.index), names),
+            # values[row][col] is a group's answer on a question; deviation is the same cell
+            # measured against that question's own average, which is what the colour encodes.
+            "values": [[round(float(v), 3) for v in row] for row in data.to_numpy(float)],
+            "deviation": [[round(float(v), 3) for v in row] for row in centred.to_numpy(float)],
+            "limit": round(float(limit), 3),
+            "kind_of_value": "share" if kind == "shares" else "average",
+        }
+        return _finish(figure, "heatmap", "Every group against every question", caption,
+                       spec=spec)
 
 
 def chart_gorge(shadow, names=None):

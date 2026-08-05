@@ -304,3 +304,20 @@ header .sp{flex:1}
   font-size:12px;color:var(--ink-soft)}
 .imap-key li{display:flex;align-items:center;gap:6px}
 .imap-key svg{width:13px;height:13px;flex:none;overflow:visible}
+
+/* The full grid, interactive. A grid of numbers IS a table, so it is one: a screen reader walks
+   it and announces group, question and value with no parallel "accessible version" to maintain.
+   Colour sits behind the number and never replaces it. */
+.iheat{display:flex;flex-direction:column;gap:8px}
+.iheat-scroll{overflow-x:auto}
+.iheat table{border-collapse:separate;border-spacing:2px;width:100%;font-size:12px;
+  font-variant-numeric:tabular-nums}
+.iheat th{font-weight:600;color:var(--ink-soft);text-align:left;padding:5px 8px;white-space:nowrap}
+.iheat thead th{vertical-align:bottom}
+.iheat-chip{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px}
+.iheat td{padding:6px 10px;text-align:center;border-radius:4px;cursor:default;
+  outline:none;color:var(--ink)}
+.iheat td:focus-visible,.iheat td.iheat-on{box-shadow:inset 0 0 0 2px var(--accent)}
+:root{--heat-low:#2a78d6;--heat-high:#e34948}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);
+  white-space:nowrap}
