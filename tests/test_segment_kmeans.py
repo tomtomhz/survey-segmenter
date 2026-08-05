@@ -3427,3 +3427,56 @@ def test_charts_carry_their_own_dark_mode():
         prefix = svg[max(0, hit.start() - 90):hit.start()]
         assert "style=" in prefix.rsplit(">", 1)[-1], (
             "a themed colour landed in a presentation attribute, where var() does not apply")
+
+
+def test_the_fit_chart_compares_segments_instead_of_stacking_everybody():
+    """It answers "which group is the weak one", so that has to be the thing you read first.
+
+    The old form sorted every respondent into one tall column of bars. At any realistic sample
+    size each bar was a fraction of a pixel, so it showed an outline and hid the individuals it
+    claimed to be about — and comparing groups meant measuring three silhouettes against each
+    other by eye. It is now one distribution per segment on a shared axis, each with its own
+    median and size printed, and the whole sample's median drawn across them.
+
+    Heights are normalised per segment on purpose, so a 40-person group's shape is as readable as
+    a 900-person one; the counts are printed beside each row because shape is the question here.
+    """
+    def build(real):
+        rng = np.random.default_rng(0)
+        n = 900
+        if real:
+            centres = np.array([[5, 1, 5, 1], [1, 5, 1, 5], [3, 3, 5, 5]], float)
+            X = _likert(centres[rng.integers(0, 3, n)] + rng.normal(0, 0.8, (n, 4)))
+        else:
+            X = _likert(rng.normal(3, 1.2, (n, 4)))
+        X = X.astype(float)
+        labels = sk._km(X, 3, 10, 0).labels_
+        fit = 1.0 - sk.shadow_values(X, sk.segment_centres(X, labels))[0]
+        return charts.chart_silhouette(X, labels, fit=fit), fit, labels
+
+    chart, fit, labels = build(real=True)
+    svg = chart["svg"]
+    # Every segment is named on its own row, and carries its own median and size.
+    for c in range(3):
+        assert f"Group {c}" in svg
+        assert f"{int((labels == c).sum()):,} people" in svg
+    assert "whole sample" in svg, "each row has to be readable against the study as a whole"
+    assert f"Every one of the {len(fit):,} respondents is drawn here" in chart["caption"]
+
+    # The falsification job still works: on structureless data every group should look the same
+    # and sit low, which is the signature this chart exists to make obvious.
+    noise_chart, noise_fit, noise_labels = build(real=False)
+    real_median = float(np.median(fit))
+    noise_median = float(np.median(noise_fit))
+    assert noise_median < real_median - 0.25, (
+        f"noise ({noise_median:.2f}) should sit far below real structure ({real_median:.2f})")
+    spread = [float(np.median(noise_fit[noise_labels == c])) for c in range(3)]
+    assert max(spread) - min(spread) < 0.1, "on noise the groups should be indistinguishable"
+    assert noise_chart is not None
+
+    # A segment too small to bin must not take the chart down, and must still get its own row.
+    lopsided = np.array([0] * 400 + [1] * 400 + [2] * 6)
+    rng = np.random.default_rng(1)
+    X = _likert(rng.normal(3, 1, (len(lopsided), 4))).astype(float)
+    tiny = charts.chart_silhouette(X, lopsided, fit=rng.random(len(lopsided)))
+    assert tiny is not None and "6 people" in tiny["svg"]

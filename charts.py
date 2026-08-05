@@ -581,44 +581,66 @@ def chart_silhouette(X, labels, names=None, max_rows=900, metric="euclidean", fi
         sampled = len(X) - len(rows)
     mean = float(np.mean(sv))
 
-    with _Figure(height=4.6) as figure:
-        ax = figure.fig.add_subplot(111)
-        y = 0
-        for c in range(k):
-            here = np.sort(sv[labels[rows] == c])
-            if not len(here):
-                continue
-            rung = np.arange(y, y + len(here))
-            if len(here) <= _BARS_MAX:
-                ax.barh(rung, here, height=1.0, color=seg_colour(c), alpha=0.85, linewidth=0,
-                        label=_label(names, c))
-            else:
-                # One rectangle per respondent is 50,000 patches on a large study, which took 22
-                # seconds to draw and produced a picture indistinguishable from this one: past a
-                # few hundred people each bar is well under a pixel tall, so the outline IS the
-                # chart. Same respondents, same values, one polygon. Sampling instead would have
-                # been the easy fix and would have gone back to describing part of the study.
-                # Rasterised, because the polygon has one vertex per respondent: left as vector
-                # it made a 4.9 MB SVG for 50,000 people. The raster still contains every one of
-                # them — this bounds the file, it does not drop anybody.
-                ax.fill_betweenx(rung, 0, here, step="post", color=seg_colour(c), alpha=0.85,
-                                 linewidth=0, label=_label(names, c),
-                                 rasterized=len(sv) > _VECTOR_FILL_MAX)
-            y += len(here) + max(4, len(sv) // 60)      # a gap so groups read as blocks
+    groups = [(c, np.sort(sv[labels[rows] == c])) for c in range(k)]
+    groups = [(c, v) for c, v in groups if len(v)]
+    if not groups:
+        return None
 
-        ax.axvline(0, color=_INK, linewidth=1, alpha=0.5)
-        ax.axvline(mean, color="#9C4029", linewidth=1.4, linestyle="--")
-        # Pinned to the top of the axes, not to a data row: the y axis is inverted so that group
-        # 0 reads first, which would otherwise drop this label onto the last group's bars.
-        ax.annotate(f"average {_num(mean)}", xy=(mean, 1.0),
-                    xycoords=("data", "axes fraction"), color="#9C4029", fontsize=10,
-                    ha="right" if mean > 0 else "left", va="bottom",
-                    xytext=(-4 if mean > 0 else 4, 4), textcoords="offset points")
-        ax.set_ylim(-2, y)
-        ax.invert_yaxis()          # group 0 at the top, matching the key and the other charts
-        ax.set_yticks([])
+    with _Figure(height=max(3.4, 0.78 * len(groups) + 1.9)) as figure:
+        ax = figure.fig.add_subplot(111)
+        # One distribution per segment on a shared axis, rather than every respondent's bar
+        # stacked into one column. The old form drew a solid block: at any realistic sample size
+        # each bar was a fraction of a pixel tall, so it showed an outline and hid the individuals
+        # it claimed to be about — and the comparison this chart exists for, WHICH group is the
+        # weak one, meant measuring three silhouettes against each other by eye.
+        #
+        # Heights are normalised per segment, so a 40-person group's shape is as readable as a
+        # 900-person group's. That is a deliberate choice and the sizes are printed beside each
+        # row, because shape is the question here and absolute counts are answered elsewhere.
+        # Bin count follows the smallest group, so a 40-person segment is not drawn as a comb of
+        # single-respondent spikes next to a smooth 900-person one.
+        smallest = min(len(v) for _, v in groups)
+        bins = int(np.clip(np.sqrt(smallest) * 1.15, 10, 26))
+        edges = np.linspace(float(np.min(sv)), float(np.max(sv)), bins + 1)
+        if edges[-1] <= edges[0]:
+            edges = np.linspace(edges[0] - 0.5, edges[0] + 0.5, bins + 1)
+        mids = (edges[:-1] + edges[1:]) / 2
+        # Row 0 sits at the TOP, laid out by arithmetic rather than by inverting the axis. Fills
+        # grow upward from their own baseline, so each one reads as a distribution standing on its
+        # line; inverting the axis instead left them hanging downward and dropped every label onto
+        # the row beneath.
+        for row, (c, values) in enumerate(groups):
+            base = len(groups) - 1 - row
+            counts, _ = np.histogram(values, bins=edges)
+            shape = counts / (counts.max() or 1) * 0.72
+            ax.fill_between(mids, base, base + shape, step="mid", color=seg_colour(c), alpha=0.82,
+                            linewidth=0, label=_label(names, c))
+            # A hairline under each ridge, so a row reads as a distribution standing on its own
+            # line rather than as bars floating in the panel.
+            ax.plot([edges[0], edges[-1]], [base, base], color=_INK, alpha=0.28, linewidth=0.8,
+                    zorder=2)
+            middle = float(np.median(values))
+            # The segment's own median, and its size. Those two numbers are the whole reading:
+            # where this group sits, and how much of the sample it speaks for.
+            ax.plot([middle, middle], [base, base + 0.76], color=_SURFACE, linewidth=3, zorder=4)
+            ax.plot([middle, middle], [base, base + 0.76], color=_INK, linewidth=1.1, zorder=5)
+            ax.annotate(f"{_num(middle)}  ({len(values):,} people)", (middle, base + 0.78),
+                        fontsize=9, ha="center", va="bottom", zorder=6)
+
+        # The whole sample's typical value, so each row can be read against the study as a whole.
+        ax.axvline(mean, color=_INK, linewidth=1, alpha=0.35, zorder=1)
+        ax.annotate(f"whole sample {_num(mean)}", xy=(mean, 1.0),
+                    xycoords=("data", "axes fraction"), fontsize=9.5, alpha=0.75,
+                    ha="right" if mean > np.mean(edges[[0, -1]]) else "left",
+                    va="bottom", xytext=(-5 if mean > np.mean(edges[[0, -1]]) else 5, 3),
+                    textcoords="offset points")
+        ax.set_yticks([len(groups) - 1 - row for row in range(len(groups))])
+        ax.set_yticklabels([_label(names, c) for c, _ in groups], fontsize=9.5)
+        ax.set_ylim(-0.12, len(groups) - 1 + 1.02)
         ax.set_xlabel("how well each person fits their group →")
-        figure.legend_below(ax, ncol=min(k, 5))
+        ax.grid(axis="y", visible=False)
+        # Rows are labelled directly, so a legend would repeat itself.
+        ax.set_ylabel("")
 
         # A silhouette can go negative (closer to another group); a fit score bottoms out at 0
         # (exactly between two). Count whichever this is, and say which.
