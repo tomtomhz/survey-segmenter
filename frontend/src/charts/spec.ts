@@ -81,7 +81,29 @@ export interface HeatmapSpec {
   kind_of_value: string
 }
 
-export type ChartSpec = SegmentMapSpec | HeatmapSpec
+export interface FitSpec {
+  version: number
+  kind: 'fit'
+  /** Shared bin edges: one more than the number of bands in each row. */
+  edges: number[]
+  segments: SegmentKey[]
+  rows: { segment: number; counts: number[]; median: number; people: number }[]
+  overall_median: number
+  /** Respondents left out, non-zero only on the latent-class path's sampled fallback. */
+  sampled: number
+}
+
+export interface KChoiceSpec {
+  version: number
+  kind: 'k_choice'
+  ks: number[]
+  chosen: number
+  /** The conventional "this partition reproduces" threshold, drawn on the chart. */
+  cutoff: number
+  series: { key: string; label: string; lead: boolean; values: (number | null)[] }[]
+}
+
+export type ChartSpec = SegmentMapSpec | HeatmapSpec | FitSpec | KChoiceSpec
 
 /**
  * A spec is only usable if it is the version this build understands. Anything else falls back to
@@ -120,4 +142,28 @@ export function usableHeatmap(spec: unknown): HeatmapSpec | null {
   if (values.some((row) => row.length !== items.length)) return null
   if (deviation.some((row) => row.length !== items.length)) return null
   return candidate as HeatmapSpec
+}
+
+/** Bands must line up with the edges that bound them, and every row must cover every band. */
+export function usableFit(spec: unknown): FitSpec | null {
+  if (!spec || typeof spec !== 'object') return null
+  const c = spec as Partial<FitSpec>
+  if (c.version !== SUPPORTED_SPEC_VERSION || c.kind !== 'fit') return null
+  if (!Array.isArray(c.edges) || c.edges.length < 2) return null
+  if (!Array.isArray(c.rows) || !c.rows.length) return null
+  if (!Array.isArray(c.segments) || !c.segments.length) return null
+  const bands = c.edges.length - 1
+  if (c.rows.some((r) => !Array.isArray(r.counts) || r.counts.length !== bands)) return null
+  return c as FitSpec
+}
+
+/** Every series must have one value per candidate, or a line would be drawn against the wrong k. */
+export function usableKChoice(spec: unknown): KChoiceSpec | null {
+  if (!spec || typeof spec !== 'object') return null
+  const c = spec as Partial<KChoiceSpec>
+  if (c.version !== SUPPORTED_SPEC_VERSION || c.kind !== 'k_choice') return null
+  if (!Array.isArray(c.ks) || !c.ks.length) return null
+  if (!Array.isArray(c.series) || !c.series.length) return null
+  if (c.series.some((s) => !Array.isArray(s.values) || s.values.length !== c.ks!.length)) return null
+  return c as KChoiceSpec
 }

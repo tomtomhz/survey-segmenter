@@ -321,3 +321,7 @@ header .sp{flex:1}
 :root{--heat-low:#2a78d6;--heat-high:#e34948}
 .visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);
   white-space:nowrap}
+.iridge,.ikchoice{display:flex;flex-direction:column;gap:8px}
+.iridge svg.chart,.ikchoice svg.chart{width:100%;height:auto;display:block}
+.iridge rect,.ikchoice rect{outline:none}
+.iridge rect:focus-visible,.ikchoice rect:focus-visible{stroke:var(--accent);stroke-width:2}

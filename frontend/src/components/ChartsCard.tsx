@@ -3,7 +3,9 @@ import type { Chart } from '../api/types'
 import { CHART_TAB } from '../lib/labels'
 import { SegmentMap } from '../charts/SegmentMap'
 import { Heatmap } from '../charts/Heatmap'
-import { usableSpec, usableHeatmap } from '../charts/spec'
+import { FitRidges } from '../charts/FitRidges'
+import { KChoice } from '../charts/KChoice'
+import { usableSpec, usableHeatmap, usableFit, usableKChoice } from '../charts/spec'
 
 /**
  * The point of showing the charts is that a reader can disagree with the write-up: a wrong
@@ -79,6 +81,9 @@ export function ChartsCard({ charts }: { charts: Chart[] }) {
             {(() => {
               const spec = usableSpec(chart.spec)
               const heat = usableHeatmap(chart.spec)
+              const ridges = usableFit(chart.spec)
+              const kchoice = usableKChoice(chart.spec)
+              const live = spec || heat || ridges || kchoice
               // When a chart ships a spec, the interactive version is what appears on screen and
               // the static drawing stays in the document for print — the print stylesheet swaps
               // them. Without a spec (an older saved project, or a chart with too many marks to
@@ -96,8 +101,18 @@ export function ChartsCard({ charts }: { charts: Chart[] }) {
                       <Heatmap spec={heat} title={chart.title} />
                     </div>
                   )}
+                  {ridges && (
+                    <div className="cwrap conly-screen">
+                      <FitRidges spec={ridges} title={chart.title} />
+                    </div>
+                  )}
+                  {kchoice && (
+                    <div className="cwrap conly-screen">
+                      <KChoice spec={kchoice} title={chart.title} />
+                    </div>
+                  )}
                   <div
-                    className={`cwrap${spec || heat ? ' conly-print' : ''}`}
+                    className={`cwrap${live ? ' conly-print' : ''}`}
                     dangerouslySetInnerHTML={{ __html: chart.svg }}
                   />
                 </>

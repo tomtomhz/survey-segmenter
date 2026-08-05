@@ -798,7 +798,22 @@ def chart_silhouette(X, labels, names=None, max_rows=900, metric="euclidean", fi
                        "positive while nobody is much closer to their own group than to the next "
                        "one. Do not read these as natural segments. " + misfits)
 
-        return _finish(figure, "fit", "Who actually belongs — fit of every respondent", verdict)
+        # Same bins the ridges were drawn from, so the interactive version can answer what the
+        # picture can only gesture at: how many people in THIS group scored between here and here
+        # — which is what somebody filtering a list before spending money actually needs.
+        spec = {
+            "kind": "fit",
+            "edges": [round(float(v), 4) for v in edges],
+            "segments": _segment_key(int(labels.max()) + 1, names),
+            "rows": [{"segment": int(c),
+                      "counts": [int(v) for v in np.histogram(values, bins=edges)[0]],
+                      "median": round(float(np.median(values)), 4),
+                      "people": int(len(values))} for c, values in groups],
+            "overall_median": round(float(mean), 4),
+            "sampled": int(sampled),
+        }
+        return _finish(figure, "fit", "Who actually belongs — fit of every respondent", verdict,
+                       spec=spec)
 
 
 #: The deciding criterion on the choice-of-k chart keeps the accent; the corroborating ones are
@@ -870,9 +885,22 @@ def chart_k_choice(diag, rec_k):
                 "Nothing reaches the 0.80 line, which means no number of groups reproduces "
                 "strongly. Treat the groups as a working hypothesis, not a finding, and lean on "
                 "judgement about how many you can actually act on.")
+        spec = {
+            "kind": "k_choice",
+            "ks": [int(v) for v in ks],
+            "chosen": int(rec_k),
+            "cutoff": 0.80,
+            # One entry per criterion drawn, so hovering a number of groups can report every
+            # measure at once instead of asking the reader to trace three lines back to an axis.
+            "series": [{"key": col, "label": name,
+                        "lead": col == "prediction_strength",
+                        "values": [None if not np.isfinite(v) else round(float(v), 4)
+                                   for v in pd.to_numeric(diag[col], errors="coerce")]}
+                       for col, name, _ in present],
+        }
         return _finish(figure, "k", "Was the number of groups a clear call?",
                        "Each line is a different test of quality, run for every number of groups "
-                       "the tool tried. Higher is better for all three. " + read)
+                       "the tool tried. Higher is better for all three. " + read, spec=spec)
 
 
 def _separating(centroids, limit):
