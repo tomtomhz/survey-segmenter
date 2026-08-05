@@ -129,6 +129,17 @@ non-obvious:
   hand-written Gower functions that would need their own tests and would drift. **If you add a
   distance-based diagnostic, go through `_geometry()`** — do not hand-roll.
 
+**Charts are computed once and drawn twice, through a spec.** `charts.py` emits the numbers behind
+each picture; matplotlib renders the static version for the report, the PDF and the image Claude
+reads, and `frontend/src/charts/` renders an interactive one from the same arrays. The obvious
+alternative — a second chart engine in TypeScript — quietly disagrees with the first the day
+somebody edits one of them, so a Python test asserts the spec matches what was drawn. Segment
+identity (colour, dark step, marker shape) is **sent** in the spec, never re-derived in TypeScript,
+for the same reason. If you add a chart, add its spec the same way; if you change the spec's shape,
+bump `SPEC_VERSION` so an older interface falls back to the static drawing instead of misreading
+it. A chart too large to stay responsive ships no spec on purpose (`INTERACTIVE_MAX_POINTS`), and
+there is always a correct static picture behind it.
+
 **Colour does exactly one job per chart, and the palette is validated by a script, not by eye.**
 Four jobs — segment identity, above/below average, magnitude, and plain chrome — each get their
 own encoding and they do not overlap. They used to share one palette, so orange meant "Group 1" on
