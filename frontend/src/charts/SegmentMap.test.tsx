@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { scaleLinear } from 'd3-scale'
 
 import { SegmentMap } from './SegmentMap'
 import { usableSpec, SUPPORTED_SPEC_VERSION } from './spec'
@@ -73,9 +74,10 @@ describe('marker shapes', () => {
 describe('the interactive segment map', () => {
   it('draws every mark and names the study without anyone touching it', () => {
     render(<SegmentMap spec={spec()} title="The segment map" />)
-    // One path per distinct answer pattern, plus the centroid badges.
-    const marks = document.querySelectorAll('svg.chart path')
-    expect(marks.length).toBe(4)
+    // One mark per distinct answer pattern. Targeted by class rather than by element type: the
+    // chart also draws decision regions and centroid badges as paths, and counting all of them
+    // would make this assertion about the chart's internals instead of about the data.
+    expect(document.querySelectorAll('svg.chart .imap-mark').length).toBe(4)
     // The reading line states the whole study before any interaction, so the chart is informative
     // to somebody who never hovers.
     expect(screen.getByRole('status')).toHaveTextContent('51 respondents')
@@ -119,7 +121,7 @@ describe('the interactive segment map', () => {
 
   it('uses the theme variables so it follows light and dark like the static chart', () => {
     render(<SegmentMap spec={spec()} title="The segment map" />)
-    const mark = document.querySelector('svg.chart path') as SVGPathElement
+    const mark = document.querySelector('svg.chart .imap-mark') as SVGPathElement
     expect(mark.getAttribute('fill')).toContain('var(--seg-0')
     // The light hex stays as the fallback, so the chart is coloured even with no stylesheet.
     expect(mark.getAttribute('fill')).toContain('#2a78d6')
@@ -133,8 +135,78 @@ describe('the interactive segment map', () => {
       people: 10,
     })
     render(<SegmentMap spec={flat} title="The segment map" />)
-    for (const mark of document.querySelectorAll('svg.chart path')) {
+    for (const mark of document.querySelectorAll('svg.chart .imap-mark')) {
       expect(mark.getAttribute('transform')).not.toMatch(/NaN/)
     }
+  })
+})
+
+describe('parity with the static chart', () => {
+  it('places centroids with the same scale the points used', () => {
+    // An earlier version re-derived centroid positions by interpolating between the extreme
+    // points. It agreed with the real scale only because the scale is linear, and would have
+    // drifted silently the day anybody changed it.
+    const map = spec()
+    render(<SegmentMap spec={map} title="t" />)
+    const badge = document.querySelectorAll('svg.chart g')[0] as SVGGElement
+    const got = badge.getAttribute('transform')!.match(/translate\(([-\d.]+) ([-\d.]+)\)/)!
+    // Rebuild the scale the component says it uses and compare.
+    const x = scaleLinear().domain([0, 3]).range([34, 720 - 18]).nice()
+    const y = scaleLinear().domain([0, 2]).range([400 - 52, 18]).nice()
+    expect(Number(got[1])).toBeCloseTo(x(1), 0)
+    expect(Number(got[2])).toBeCloseTo(y(0.25), 0)
+  })
+
+  it('does not crash when a point names a segment with no key', () => {
+    // Defensive: the spec is produced by this project's own Python, but a component that throws
+    // takes the whole report card down with it, and a missing key is a survivable condition.
+    const map = spec()
+    map.points.segment = [0, 1, 9, 1]      // 9 has no entry in segments
+    expect(() => render(<SegmentMap spec={map} title="t" />)).not.toThrow()
+  })
+
+  it('shows which colour is which group without needing to hover', () => {
+    // The static chart has a legend. The first interactive version did not, which made it worse
+    // at a glance than the picture it replaced: the only way to learn which colour meant which
+    // group was to hover every one of them.
+    render(<SegmentMap spec={spec()} title="t" />)
+    // The static chart has a legend. Without one, a glance cannot tell the groups apart.
+    const key = document.querySelector('.imap-key')
+    expect(key).not.toBeNull()
+    expect(key!.textContent).toContain('Loyal Fans')
+    expect(key!.textContent).toContain('Price Hunters')
+    // Shape is half the identity, so the legend has to show it, not just a colour chip.
+    expect(key!.querySelectorAll('svg path').length).toBe(2)
+  })
+
+  it('labels both axes, as the static chart does', () => {
+    // Judging whether a separation means anything needs to know what the direction it happens
+    // along is worth, so both shares belong on the chart, not only the horizontal one.
+    const { container } = render(<SegmentMap spec={spec()} title="t" />)
+    const text = container.textContent ?? ''
+    expect(text).toMatch(/Direction 1/)
+    expect(text).toMatch(/Direction 2/)
+  })
+})
+
+describe('the decision regions', () => {
+  it('draws the regions the caption promises', () => {
+    // The shared caption tells the reader that the shaded regions show where a new person would
+    // land. For a while the interactive chart quietly had none, so the caption described
+    // something that was not on screen.
+    render(<SegmentMap spec={spec()} title="t" />)
+    const regions = document.querySelectorAll('svg.chart path:not(.imap-mark)')
+    expect(regions.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('draws none when there is only one centre to divide between', () => {
+    // One group has no boundary with anything, and a single region covering the whole plot would
+    // imply a decision that was never made.
+    const alone = spec({ centroids: [{ segment: 0, x: 1, y: 1 }] })
+    render(<SegmentMap spec={alone} title="t" />)
+    // Only the centroid badge remains as a non-mark path-bearing element.
+    const shaded = [...document.querySelectorAll('svg.chart path:not(.imap-mark)')]
+      .filter((p) => (p.getAttribute('d') ?? '').length > 40)
+    expect(shaded.length).toBe(0)
   })
 })

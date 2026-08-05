@@ -39,7 +39,7 @@ export function SegmentMap({ spec, title }: { spec: SegmentMapSpec; title: strin
   const height = 400
   const pad = { top: 18, right: 18, bottom: 52, left: 34 }
 
-  const { xs, ys, sizes, byIndex, delaunay } = useMemo(() => {
+  const { xs, ys, sizes, byIndex, xScale, yScale, delaunay, regions } = useMemo(() => {
     const { x, y, people } = spec.points
     const xDomain = extent(x)
     const yDomain = extent(y)
@@ -51,13 +51,32 @@ export function SegmentMap({ spec, title }: { spec: SegmentMapSpec; title: strin
     const areaFor = (n: number) => 16 + (460 - 16) * (busiest > 1 ? (n - 1) / (busiest - 1) : 0)
     const px = x.map((v) => xScale(v))
     const py = y.map((v) => yScale(v))
+    const byIndex: Record<number, SegmentMapSpec['segments'][number]> = {}
+    for (const key of spec.segments) byIndex[key.index] = key
     return {
       xs: px,
       ys: py,
       sizes: people.map(areaFor),
-      byIndex: spec.segments.reduce<Record<number, SegmentMapSpec['segments'][number]>>(
-        (all, s) => ({ ...all, [s.index]: s }), {}),
+      byIndex,
+      // The scales themselves, so anything else that needs to place a value — the centroids —
+      // uses the SAME mapping the points did. An earlier version re-derived centroid positions by
+      // interpolating between the extreme points; it happened to agree, but only because the
+      // scale is linear, and it would have drifted silently the day anyone changed the scale.
+      xScale,
+      yScale,
       delaunay: Delaunay.from(px.map((v, i) => [v, py[i]] as [number, number])),
+      // The decision regions: which group a new person landing at a spot would be put into. That
+      // is nearest-centroid, which is exactly a Voronoi diagram of the centres — so it is computed
+      // rather than approximated, from the same centroids the badges use. The caption promises
+      // these regions, and for a while the interactive chart quietly did not have them.
+      regions: (() => {
+        const live = spec.centroids
+        if (live.length < 2) return []
+        const cells = Delaunay
+          .from(live.map((c) => [xScale(c.x), yScale(c.y)] as [number, number]))
+          .voronoi([0, 0, width, height])
+        return live.map((c, i) => ({ segment: c.segment, path: cells.renderCell(i) }))
+      })(),
     }
   }, [spec, pad.left, pad.right, pad.top, pad.bottom])
 
@@ -77,6 +96,7 @@ export function SegmentMap({ spec, title }: { spec: SegmentMapSpec; title: strin
     return (
       <path
         key={i}
+        className="imap-mark"
         d={markerPath(key.marker, sizes[i])}
         transform={`translate(${xs[i]} ${ys[i]})`}
         fill={`var(--seg-${key.index}, ${key.colour})`}
@@ -137,13 +157,24 @@ export function SegmentMap({ spec, title }: { spec: SegmentMapSpec; title: strin
           {'distinct answer patterns. Use the arrow keys to step through them.'}
         </title>
 
+        {/* Behind everything, and faint: the regions exist to expose the pie-slice failure, not
+            to identify anybody — that is what the marks are for. */}
+        {regions.map((r) => {
+          const key = byIndex[r.segment]
+          return key && r.path ? (
+            <path key={`region-${r.segment}`} d={r.path}
+                  fill={`var(--seg-${key.index}, ${key.colour})`}
+                  opacity={Math.max(0.05, 0.13 - 0.012 * spec.segments.length)} />
+          ) : null
+        })}
+
         {marks}
 
         {spec.centroids.map((c) => {
           const key = byIndex[c.segment]
           if (!key) return null
-          const cx = scaleFrom(xs, spec.points.x, c.x)
-          const cy = scaleFrom(ys, spec.points.y, c.y)
+          const cx = xScale(c.x)
+          const cy = yScale(c.y)
           return (
             <g key={c.segment} transform={`translate(${cx} ${cy})`}>
               <circle r={11} fill="var(--chart-surface, #FBFAF3)"
@@ -166,7 +197,28 @@ export function SegmentMap({ spec, title }: { spec: SegmentMapSpec; title: strin
         <text x={width / 2} y={height - 14} textAnchor="middle" fontSize={12} fill="currentColor">
           {`Direction 1 — ${pct(spec.axes.x_share)} of the variation →`}
         </text>
+        {/* The vertical axis carries its own share too. Reading whether a separation means
+            anything needs to know what the direction it happens along is worth. */}
+        <text x={12} y={height / 2} fontSize={12} fill="currentColor" textAnchor="middle"
+              transform={`rotate(-90 12 ${height / 2})`}>
+          {`← Direction 2 — ${pct(spec.axes.y_share)}`}
+        </text>
       </svg>
+
+      {/* A legend, because the static chart has one and losing it made the interactive version
+          worse at a glance: without it the only way to learn which colour is which group is to
+          hover every one of them. Each entry shows the segment's real marker shape, since shape
+          is half of the identity — colour alone cannot separate eight groups. */}
+      <ul className="imap-key">
+        {spec.segments.map((key) => (
+          <li key={key.index}>
+            <svg viewBox="-9 -9 18 18" aria-hidden="true" focusable="false">
+              <path d={markerPath(key.marker, 90)} fill={`var(--seg-${key.index}, ${key.colour})`} />
+            </svg>
+            {key.label}
+          </li>
+        ))}
+      </ul>
 
       <div className="imap-read" role="status" aria-live="polite">
         {hovered ? (
@@ -224,24 +276,6 @@ function extent(values: number[]): [number, number] {
   // A single distinct value has no extent to scale; widen it so the mark lands mid-axis rather
   // than dividing by zero.
   return lo === hi ? [lo - 0.5, hi + 0.5] : [lo, hi]
-}
-
-/** Map a data value onto the pixel scale already computed for the points.
- *
- * The centroids come from the same projection as the points, so rather than rebuild their scale
- * (and risk it differing by a rounding), interpolate against the point arrays that were scaled.
- */
-function scaleFrom(pixels: number[], data: number[], value: number): number {
-  let loI = 0
-  let hiI = 0
-  for (let i = 1; i < data.length; i += 1) {
-    if (data[i] < data[loI]) loI = i
-    if (data[i] > data[hiI]) hiI = i
-  }
-  const span = data[hiI] - data[loI]
-  if (!span) return pixels[loI]
-  const t = (value - data[loI]) / span
-  return pixels[loI] + t * (pixels[hiI] - pixels[loI])
 }
 
 function pct(share: number): string {
