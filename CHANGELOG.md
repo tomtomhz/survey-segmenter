@@ -3,6 +3,39 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.5.0] — 2026-08-06
+
+### A second opinion on whether there is anything to segment
+
+The Hopkins statistic was the tool's only real answer to that question, and it has two measured
+weaknesses. Adolfsson, Ackerman & Brownstein (*Pattern Recognition*, 2019) put numbers on both
+across 35,000 simulated datasets: its power falls to **32%** when groups overlap rather than sit
+apart, and it reads a handful of unusual respondents as a group of their own.
+
+Overlapping segments merging into one is this tool's single measured failure mode, so a second test
+earns its place exactly there. Hartigan's dip test now runs alongside it, and the report says how
+the two line up — worth more than either alone, because they fail in opposite directions.
+
+Measured on this tool's own data: three groups at heavy overlap, where Hopkins sinks to 0.66, are
+still detected at p < 0.001; noise with five outliers, where Hopkins drifts over its own threshold
+to 0.60, correctly returns p = 0.51.
+
+**The form the literature recommends does not work on survey data**, and that is recorded so nobody
+re-adds it. The published method runs the dip on all pairwise distances. Rating answers are whole
+numbers, so those distances take very few values — 400 people on five questions produce 79,800
+distances with **50 distinct values among them** — and the dip reads that comb as many modes,
+returning p = 0.0000 on data with no groups whatsoever. What runs instead is the same paper's other
+variant, the dip on the first principal component, which is a weighted sum and therefore continuous.
+
+It needs at least four questions to be trustworthy and says so plainly when a survey is shorter,
+rather than guessing.
+
+### Fixed
+
+- `clusterability` was missing from the installed package, the same defect that shipped once
+  before with another module. The manifest is now checked by a test rather than maintained by
+  memory.
+
 ## [1.4.1] — 2026-08-05
 
 ### The remaining two charts became interactive

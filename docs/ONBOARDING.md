@@ -140,6 +140,15 @@ bump `SPEC_VERSION` so an older interface falls back to the static drawing inste
 it. A chart too large to stay responsive ships no spec on purpose (`INTERACTIVE_MAX_POINTS`), and
 there is always a correct static picture behind it.
 
+**The dip test runs on the first principal component, NOT on pairwise distances.** The published
+recommendation (Adolfsson et al. 2019) is pairwise distances, and it is wrong for rating scales:
+whole-number answers make those distances take very few values — 400 people on five questions give
+79,800 distances with 50 distinct values — and the dip reads that comb as multimodality, returning
+p = 0.0000 on data with no groups at all. A principal component is a weighted sum, so it stays
+continuous. It needs four questions minimum, and the guard counts **questions**, not distinct
+values: tight real groups also drive distinct values down, and guarding on that refused three
+well-separated groups. Do not "fix" this back to the published form.
+
 **Interactive charts take their colours from the spec, never from CSS variables.** Both the light
 and the dark step travel per segment, and `charts/theme.ts` decides which one the page wants. The
 previous arrangement read `var(--seg-N)`, which resolved only because the theme block Python
