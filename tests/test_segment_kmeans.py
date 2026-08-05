@@ -3756,3 +3756,28 @@ def test_the_report_carries_the_second_opinion():
                             cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))["digest"]
     if clusterability.available():
         assert "not run" in brief
+
+
+def test_every_module_is_actually_shipped_in_the_wheel():
+    """`py-modules` in pyproject.toml is a hand-kept list, and it has now been forgotten twice.
+
+    Both times the symptom was the same and invisible locally: every test passes, because tests
+    import from the working directory, and then every *installed* copy dies at import with
+    ModuleNotFoundError. `kprototypes` went out that way, and `clusterability` repeated it a few
+    days later. A list that must be updated by memory will be forgotten a third time, so this
+    checks it instead of trusting it.
+    """
+    root = Path(__file__).resolve().parent.parent
+    declared = set(re.findall(r'"([a-z_]+)"',
+                              re.search(r"py-modules = \[(.*?)\]",
+                                        (root / "pyproject.toml").read_text(), re.S).group(1)))
+    # Everything at the top level that is part of the package: not the entry points, not the build
+    # script, not this suite.
+    not_shipped = {"run_app", "build_app", "conftest", "setup"}
+    present = {p.stem for p in root.glob("*.py")} - not_shipped
+    missing = present - declared
+    assert not missing, (
+        f"{sorted(missing)} exist but are not in pyproject.toml's py-modules, so a `pip install` "
+        "of this project would be missing them")
+    stale = declared - present
+    assert not stale, f"{sorted(stale)} are declared but no longer exist"
