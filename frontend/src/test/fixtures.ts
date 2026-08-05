@@ -16,7 +16,7 @@ export function analysis(overrides: Partial<Analysis> = {}): Analysis {
     k: 3,
     n_people: 240,
     columns: { q1: 'used', q2: 'used', age: 'background' },
-    charts: [chart('map', 'Segment map'), chart('radar', 'Group shapes')],
+    charts: [chart('map', 'Segment map'), chart('heatmap', 'Group shapes')],
     confidence: 'high',
     ...overrides,
   }

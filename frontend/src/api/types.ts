@@ -23,7 +23,7 @@ export interface Failure {
   kind?: ErrorKind
 }
 
-export type ChartId = 'map' | 'fit' | 'k' | 'profiles' | 'radar' | 'heatmap'
+export type ChartId = 'map' | 'fit' | 'k' | 'profiles' | 'heatmap' | 'gorge'
 
 export interface Chart {
   id: ChartId

@@ -1777,19 +1777,22 @@ strong{color:#111}
 #
 # Re-exported by assignment rather than a bare `from charts import ...` so that
 # `segment_kmeans` remains the one public surface — the tests, the report writer and the web
-# layer all reach for `sk.chart_radar` and friends, and moving the drawing into its own file
+# layer all reach for `sk.chart_segment_map` and friends, and moving the drawing into its own file
 # should not change what any caller imports.
 import charts as _charts
 from charts import build_charts
 
 SEG_COLOURS = _charts.SEG_COLOURS
+SEG_LIGHT = _charts.SEG_LIGHT
+SEG_DARK = _charts.SEG_DARK
+SEG_MARKERS = _charts.SEG_MARKERS
 seg_colour = _charts.seg_colour
+seg_marker = _charts.seg_marker
 pca_2d = _charts.pca_2d
 chart_segment_map = _charts.chart_segment_map
 chart_silhouette = _charts.chart_silhouette
 chart_k_choice = _charts.chart_k_choice
 chart_profiles = _charts.chart_profiles
-chart_radar = _charts.chart_radar
 chart_heatmap = _charts.chart_heatmap
 chart_gorge = _charts.chart_gorge
 onehot_matrix = _charts.onehot_matrix

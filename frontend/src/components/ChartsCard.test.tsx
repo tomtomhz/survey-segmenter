@@ -14,7 +14,7 @@ describe('the charts card', () => {
 
   it('shows one chart at a time and switches on click', async () => {
     const user = userEvent.setup()
-    const { container } = render(<ChartsCard charts={[chart('map'), chart('radar')]} />)
+    const { container } = render(<ChartsCard charts={[chart('map'), chart('heatmap')]} />)
 
     const visible = () =>
       [...container.querySelectorAll('.cpane')]
@@ -22,9 +22,9 @@ describe('the charts card', () => {
         .map((pane) => pane.querySelector('svg')?.dataset.id)
 
     expect(visible()).toEqual(['map'])
-    await user.click(screen.getByRole('tab', { name: 'Group shapes' }))
-    expect(visible()).toEqual(['radar'])
-    expect(screen.getByRole('tab', { name: 'Group shapes' })).toHaveAttribute('aria-selected', 'true')
+    await user.click(screen.getByRole('tab', { name: 'Full grid' }))
+    expect(visible()).toEqual(['heatmap'])
+    expect(screen.getByRole('tab', { name: 'Full grid' })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('keeps every pane in the document, because print un-hides all of them', () => {

@@ -18,8 +18,8 @@ export const CHART_TAB: Record<ChartId, string> = {
   fit: 'Who belongs',
   k: 'How many groups',
   profiles: 'What differs',
-  radar: 'Group shapes',
   heatmap: 'Full grid',
+  gorge: 'Do they separate',
 }
 
 /**

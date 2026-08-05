@@ -46,10 +46,66 @@ from matplotlib.backends import backend_agg, backend_svg  # noqa: E402
 # it for every way this module is ever packaged.
 _REQUIRED_BACKENDS = (backend_agg, backend_svg)
 
-# Okabe-Ito, extended. Chosen for colour-vision deficiency rather than for looking pretty: these
-# stay distinguishable under the common forms, which matters when colour IS the group identity.
-SEG_COLOURS = ("#46785C", "#D55E00", "#0072B2", "#CC79A7", "#E69F00",
-               "#56B4E9", "#7A5195", "#8C6D3F", "#3F7F7F", "#9C4029")
+# =====================================================================================
+# The colour system
+# =====================================================================================
+# Colour here does four different jobs, and the previous palette did all of them with one set of
+# hues. Orange meant "Group 1" on four charts, "Separation (silhouette)" on the choice-of-k chart,
+# and "above average" on the heatmap. A reader who learns one of those is misled by the next. Each
+# job now has its own encoding and they do not overlap:
+#
+#   identity   which segment somebody is in         SEG_LIGHT / SEG_DARK, plus a marker shape
+#   polarity   above or below the average answer    DIVERGING, warm against cool, grey middle
+#   magnitude  how much of something                one hue, light to dark
+#   neutral    the sample as a whole, and chrome    the ink colour at low emphasis
+#
+# The identity palette is not eyeballed. It is checked with a validator against this app's own
+# surfaces, and the previous one FAILED: three hues sat below the chroma floor and read as grey,
+# and the worst adjacent pair was slots 1 and 2 — Group 0 against Group 1, the most common
+# comparison in the whole tool — at CVD ΔE 7.9. The comment it carried, that these "stay
+# distinguishable under the common forms", was not true as measured. The true Okabe-Ito set it
+# claimed to be does pass (ΔE 15.8); it had been edited into failing by swapping in a muted green
+# and appending low-chroma extras.
+#
+# Slot ORDER is part of the safety rather than decoration: the checks run on adjacent pairs, so
+# reordering changes whether the palette passes. Do not reorder these to taste.
+SEG_LIGHT = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100",
+             "#e87ba4", "#008300", "#4a3aa7", "#e34948")
+
+# The same eight hues stepped for a dark surface — chosen for it, not flipped into it. Measured on
+# the app's own dark card (#222724) all eight clear the dark lightness band and 3:1 contrast,
+# which the light steps do not. Charts used to ship one fixed hex for both grounds.
+SEG_DARK = ("#3987e5", "#d95926", "#199e70", "#c98500",
+            "#d55181", "#008300", "#9085e9", "#e66767")
+
+# Marker shape per segment: a requirement, not a flourish. The segment map is a scatter, so every
+# pair of colours is on screen at once — the "all pairs" case, not the "adjacent pairs" case a bar
+# chart or a legend gets. Measured at eight groups: worst all-pairs CVD ΔE 3.2 (green against
+# orange, protanopia) and worst normal-vision ΔE 7.1 (red against orange). Seven is far below the
+# floor of 15 — two segments a reader with full colour vision cannot tell apart. Only the first
+# three slots clear all-pairs on colour alone. Shape carries the identity colour cannot, and
+# survives a photocopier and a bad projector as well.
+SEG_MARKERS = ("o", "s", "^", "D", "v", "P", "X", "*")
+
+# Above and below average, for the heatmap only. Warm against cool so the poles read as opposite,
+# with a genuinely neutral middle so "no difference" reads as nothing. Never used for identity.
+DIVERGING = ("#2a78d6", "#f0efec", "#e34948")
+
+SEG_COLOURS = SEG_LIGHT       # the old name; everything reads it through seg_colour()
+
+# Injected into every chart. Both scopes are declared on purpose: the media query follows the
+# operating system, and the [data-theme] rules follow the reader's own toggle in the app, which
+# has to win in BOTH directions — hence the :not() guard letting an explicit light choice beat an
+# OS set to dark.
+_THEME_STYLE = ("<style>" + "".join(
+    f"--seg-{i}:{light};" for i, light in enumerate(SEG_LIGHT)).join(("svg.chart{", "}")) + "".join((
+        "@media (prefers-color-scheme:dark){:root:not([data-theme=light]) svg.chart{",
+        "".join(f"--seg-{i}:{dark};" for i, dark in enumerate(SEG_DARK)),
+        "}}",
+        ":root[data-theme=dark] svg.chart{",
+        "".join(f"--seg-{i}:{dark};" for i, dark in enumerate(SEG_DARK)),
+        "}",
+    )) + "</style>")
 
 # Everything that is chrome rather than data is drawn in this colour and rewritten as
 # `currentColor` when the SVG is emitted. It has to be a value matplotlib will not produce by
@@ -110,7 +166,18 @@ _STYLE = {
 
 
 def seg_colour(index):
-    return SEG_COLOURS[int(index) % len(SEG_COLOURS)]
+    """The light-mode hex for a segment.
+
+    Drawn with the light value and swapped for `var(--seg-N, <that value>)` on the way out, so the
+    page can hand the chart its dark step. The fallback in the var() is what keeps a chart saved
+    to a file on its own still looking right.
+    """
+    return SEG_LIGHT[int(index) % len(SEG_LIGHT)]
+
+
+def seg_marker(index):
+    """The marker shape for a segment. See SEG_MARKERS for why this is not optional."""
+    return SEG_MARKERS[int(index) % len(SEG_MARKERS)]
 
 
 def _label(names, index):
@@ -193,9 +260,20 @@ class _Figure:
         # name leaves the whole stack inside one pair of quotes and the browser reads it as a
         # single family with a very strange name, matches nothing, and silently falls back.
         out = out.replace(f"'{_METRIC_FONT}'", _FONT_STACK).replace(_METRIC_FONT, _FONT_STACK)
+        # Segment hues become CSS variables so the page can supply the dark step. matplotlib must
+        # be given a real colour to draw with, so it draws in the light value and that value then
+        # becomes the var()'s own fallback — which is what keeps a chart saved to a file, or opened
+        # outside this app, looking right rather than black.
+        for slot, light in enumerate(SEG_LIGHT):
+            for form in (light, light.upper()):
+                out = out.replace(form, f"var(--seg-{slot}, {light})")
         # Let it scale to its container rather than sitting at a fixed pixel width.
         out = out.replace("<svg ", '<svg class="chart" preserveAspectRatio="xMidYMid meet" ', 1)
-        return out.strip()
+        # The dark steps travel inside the chart rather than living in the app's stylesheet. A
+        # chart gets downloaded, pasted into a document and printed; carrying its own theming is
+        # what makes it right in those places too, not only inside this interface.
+        cut = out.index(">") + 1
+        return (out[:cut] + _THEME_STYLE + out[cut:]).strip()
 
     def png(self):
         """A raster copy, for Claude. Rendered on a light ground because a transparent PNG
@@ -315,7 +393,10 @@ def chart_segment_map(X, labels, names=None, seed=0):
             grid = np.column_stack([gx.ravel(), gy.ravel()])
             d = np.stack([((grid - cents[c]) ** 2).sum(1) for c in live])
             region = np.array(live)[d.argmin(0)].reshape(gx.shape)
-            ax.pcolormesh(gx, gy, region, shading="nearest", alpha=0.10,
+            # Recede as the number of groups grows. At k=6 six tinted regions behind six colours
+            # and six shapes is three encodings of the same fact competing for the same pixels;
+            # the regions are there to expose the pie-slice failure, not to identify anybody.
+            ax.pcolormesh(gx, gy, region, shading="nearest", alpha=max(0.05, 0.13 - 0.012 * k),
                           cmap=LinearSegmentedColormap.from_list(
                               "segments", [seg_colour(c) for c in range(k)], N=k),
                           vmin=-0.5, vmax=k - 0.5, rasterized=True)
@@ -328,13 +409,24 @@ def chart_segment_map(X, labels, names=None, seed=0):
         for c in range(k):
             here = spot_labels == c
             if here.any():
+                # Shape as well as colour. See SEG_MARKERS: on a scatter every pair of hues is on
+                # screen together, and at eight groups the worst pair measures ΔE 3.2 under
+                # protanopia — indistinguishable. Shape is what actually separates them, and it
+                # keeps working on a photocopy.
                 ax.scatter(spots[here, 0], spots[here, 1], s=area[here], c=seg_colour(c),
-                           alpha=0.62, linewidths=0, label=_label(names, c), rasterized=True)
+                           marker=seg_marker(c), alpha=0.62, linewidths=0,
+                           label=_label(names, c), rasterized=True)
         for c in live:
-            ax.scatter(*cents[c], s=190, c=seg_colour(c), edgecolors="white", linewidths=2,
-                       zorder=5)
-            ax.annotate(str(c), cents[c], color="white", fontsize=10, fontweight="bold",
-                        ha="center", va="center", zorder=6)
+            # A plain white badge with the segment's colour as its ring, whatever shape that
+            # segment's respondents wear. White text written straight onto the marker worked
+            # while every marker was a fat circle; on a plus, a star or a downward triangle there
+            # is no solid centre to write on and the number became unreadable. The shape identity
+            # is already carried by the hundreds of dots around it — the centre only has to be
+            # findable and named.
+            ax.scatter(*cents[c], s=330, c="white", marker="o",
+                       edgecolors=seg_colour(c), linewidths=2.6, zorder=6)
+            ax.annotate(str(c), cents[c], color=seg_colour(c), fontsize=10, fontweight="bold",
+                        ha="center", va="center", zorder=7)
 
         ax.set_xlim(lo[0], hi[0])
         ax.set_ylim(lo[1], hi[1])
@@ -352,6 +444,8 @@ def chart_segment_map(X, labels, names=None, seed=0):
             # real extremes in this data, so the reader can calibrate against something true.
             from matplotlib.lines import Line2D
             for count, size in ((1, _COUNT_DOT_MIN), (stacked, _COUNT_DOT_MAX)):
+                # Plain circles in ink: the key is about how MANY, and borrowing a segment's
+                # shape or hue here would read as though it were about a particular group.
                 handles.append(Line2D([], [], marker="o", linestyle="none", color=_INK,
                                       alpha=0.45, markersize=float(np.sqrt(size))))
                 texts.append(f"{count:,} {'person' if count == 1 else 'people'}")
@@ -527,6 +621,14 @@ def chart_silhouette(X, labels, names=None, max_rows=900, metric="euclidean", fi
         return _finish(figure, "fit", "Who actually belongs — fit of every respondent", verdict)
 
 
+#: The deciding criterion on the choice-of-k chart keeps the accent; the corroborating ones are
+#: drawn in ink. These lines are METRICS, not segments — colouring them from the identity palette
+#: made orange mean "Group 1" on four charts and "Separation (silhouette)" on this one.
+_METRIC_INK = _INK
+_METRIC_LEAD = "#4a3aa7"
+_METRIC_MARKS = ("s", "^", "D", "v")
+
+
 def chart_k_choice(diag, rec_k):
     """The elbow plot's honest cousin: every quality measure at every number of groups tried.
 
@@ -536,8 +638,8 @@ def chart_k_choice(diag, rec_k):
     if diag is None or len(diag) == 0 or "k" not in diag:
         return None
     series = [("prediction_strength", "Prediction strength", "#46785C"),
-              ("stability_ARI", "Reproducibility (ARI)", "#0072B2"),
-              ("silhouette", "Separation (silhouette)", "#D55E00")]
+              ("stability_ARI", "Reproducibility (ARI)", _METRIC_INK),
+              ("silhouette", "Separation (silhouette)", _METRIC_INK)]
     present = [(col, name, colour) for col, name, colour in series if col in diag]
     if not present:
         return None
@@ -546,9 +648,22 @@ def chart_k_choice(diag, rec_k):
         ax = figure.fig.add_subplot(111)
         ks = list(diag["k"])
         best = 0.0
-        for col, name, colour in present:
+        # Emphasis rather than eight hues: prediction strength is the criterion the panel weighs
+        # most, so it leads and the corroborating lines recede into ink. Three equally loud
+        # coloured lines invited the reader to pick whichever one supported the answer they
+        # wanted, and borrowed the segment palette to do it.
+        for idx, (col, name, colour) in enumerate(present):
             values = pd.to_numeric(diag[col], errors="coerce")
-            ax.plot(ks, values, marker="o", markersize=5, linewidth=2, color=colour, label=name)
+            lead = col == "prediction_strength"
+            # Marker shape separates the two recessive lines. Receding them both to the same ink
+            # made the legend the only way to tell reproducibility from separation, which is no
+            # way to read a chart.
+            ax.plot(ks, values, marker="o" if lead else _METRIC_MARKS[idx % len(_METRIC_MARKS)],
+                    markersize=5.5 if lead else 4.5,
+                    linewidth=2.4 if lead else 1.6,
+                    color=_METRIC_LEAD if lead else _METRIC_INK,
+                    alpha=1.0 if lead else 0.45, zorder=3 if lead else 2,
+                    label=name + (" — decides" if lead else ""))
             finite = values[np.isfinite(values)]
             if len(finite):
                 best = max(best, float(np.nanmax(finite)))
@@ -560,8 +675,12 @@ def chart_k_choice(diag, rec_k):
                     xytext=(0, 3), textcoords="offset points", alpha=0.75)
         if rec_k in ks:
             ax.axvline(rec_k, color=_INK, linewidth=1, alpha=0.22)
-            ax.annotate(f"chosen: {rec_k}", (rec_k, ax.get_ylim()[1]), fontsize=10, ha="center",
-                        va="top", xytext=(0, -4), textcoords="offset points")
+            # Below the axis, not inside the plot. Pinned to the top it landed exactly where the
+            # lines cross on a typical run and became unreadable — the label sat on the data it
+            # was describing.
+            ax.annotate(f"chosen: {rec_k}", (rec_k, 0), xycoords=("data", "axes fraction"),
+                        fontsize=10, fontweight="bold", ha="center", va="top",
+                        xytext=(0, -20), textcoords="offset points")
         ax.set_xticks(ks)
         ax.set_xlabel("number of groups")
         ax.set_ylim(min(0.0, ax.get_ylim()[0]), max(1.0, ax.get_ylim()[1]))
@@ -595,7 +714,20 @@ def _separating(centroids, limit):
 
 
 def chart_profiles(centroids, names=None, max_items=9, kind="means"):
-    """What actually distinguishes the groups, on the original answer scale."""
+    """What actually distinguishes the groups, on the original answer scale.
+
+    A Cleveland dot plot rather than grouped bars, for two reasons that both bit the old version.
+
+    **Bars have to start at zero, and a rating scale does not.** Drawn from 0 on a 1-5 scale,
+    every bar carried a meaningless stub from 0 to 1 and the differences that matter — usually
+    within one or two steps — were squeezed into the far end. A dot has no baseline to be honest
+    about, so the axis can show the answer scale as it really is.
+
+    **A dot plot compares groups within a question, which is the question being asked.** Grouped
+    bars put the reader's eye on lengths from a shared left edge; the reading anybody actually
+    wants is "how far apart are these groups on this question", and that is a distance between
+    dots on one line. The connecting rule makes that distance the visible thing.
+    """
     if centroids is None or centroids.empty:
         return None
     keep, trimmed = _separating(centroids, max_items)
@@ -604,16 +736,31 @@ def chart_profiles(centroids, names=None, max_items=9, kind="means"):
     data = centroids[keep]
     k = len(data.index)
 
-    with _Figure(height=max(3.4, 0.42 * len(keep) + 1.6)) as figure:
+    with _Figure(height=max(3.4, 0.46 * len(keep) + 1.6)) as figure:
         ax = figure.fig.add_subplot(111)
         y = np.arange(len(keep))
-        height = 0.8 / max(k, 1)
+        values = data.to_numpy(float)
+        # The rule joining a question's dots: it is the spread on that question, so a reader can
+        # see at a glance which questions actually pull the groups apart.
+        for j, row in enumerate(values.T):
+            ax.plot([np.nanmin(row), np.nanmax(row)], [y[j], y[j]], color=_INK, alpha=0.22,
+                    linewidth=2.5, solid_capstyle="round", zorder=1)
         for i in range(k):
-            ax.barh(y + i * height - 0.4 + height / 2, data.iloc[i].values, height=height,
-                    color=seg_colour(i), label=_label(names, i), linewidth=0)
+            ax.scatter(values[i], y, s=118, color=seg_colour(i), marker=seg_marker(i),
+                       label=_label(names, i), zorder=3, edgecolors="white", linewidths=1.2)
         ax.set_yticks(y)
         ax.set_yticklabels([_short(c, 26) for c in keep])
-        ax.invert_yaxis()
+        ax.set_ylim(len(keep) - 0.5, -0.5)
+        # Start the axis at the bottom of the answer scale, not at zero. On 1-5 data the old
+        # zero-based bars spent a fifth of their length on a region no respondent can occupy.
+        if kind != "shares" and np.isfinite(values).any():
+            # Guarded: a column that is entirely missing makes nanmin/nanmax NaN, and matplotlib
+            # rejects a NaN limit outright — which took the whole chart down rather than just the
+            # nicer axis. Fall back to the default limits, which are always drawable.
+            lo, hi = float(np.nanmin(values)), float(np.nanmax(values))
+            if np.isfinite(lo) and np.isfinite(hi):
+                pad = max(0.25, (hi - lo) * 0.12)
+                ax.set_xlim(lo - pad, hi + pad)
         ax.set_xlabel("share of the group" if kind == "shares" else "average answer")
         ax.grid(axis="y", visible=False)
         figure.legend_below(ax, ncol=min(k, 5))
@@ -625,9 +772,10 @@ def chart_profiles(centroids, names=None, max_items=9, kind="means"):
         else:
             caption = ("Average answer per group, on your original answer scale, for the questions "
                        "that separate the groups most.")
-        caption += (" Bars of visibly different lengths are a real difference you can write a "
-                    "brief around; bars of near-identical length mean that question does not "
-                    "distinguish anybody, whatever the report calls it.")
+        caption += (" Each row is one question and each mark is one group, joined by a rule "
+                    "showing how far apart they are. A long rule is a real difference you can "
+                    "write a brief around; dots sitting almost on top of one another mean that "
+                    "question does not distinguish anybody, whatever the report calls it.")
         if trimmed > 0:
             caption += (f" ({trimmed} more question{'' if trimmed == 1 else 's'} separated the "
                         "groups less and would not fit legibly here. The <strong>Full grid</strong> "
@@ -635,56 +783,13 @@ def chart_profiles(centroids, names=None, max_items=9, kind="means"):
         return _finish(figure, "profiles", "What makes the groups different", caption)
 
 
-def chart_radar(centroids, names=None, max_axes=12, kind="means"):
-    """Each group as an outline, so its shape can be read at a glance.
-
-    Declines below three spokes or two groups: a two-spoke radar is a line, and one outline has
-    nothing to be compared with. Drawing it anyway would imply a comparison that is not there.
-    """
-    if centroids is None or centroids.empty or len(centroids.index) < 2:
-        return None
-    keep, trimmed = _separating(centroids, max_axes)
-    if len(keep) < 3:
-        return None
-    data = centroids[keep].astype(float)
-
-    # Each spoke scaled to its own range: questions on different scales would otherwise let one
-    # dominate the shape entirely, and shape is the whole point of this chart.
-    lo, hi = data.min(axis=0), data.max(axis=0)
-    span = (hi - lo).replace(0, 1.0)
-    scaled = (data - lo) / span
-
-    angles = np.linspace(0, 2 * np.pi, len(keep), endpoint=False)
-    closed = np.concatenate([angles, angles[:1]])
-
-    with _Figure(width=7.4, height=5.4) as figure:
-        ax = figure.fig.add_subplot(111, polar=True)
-        for i in range(len(data.index)):
-            values = np.concatenate([scaled.iloc[i].values, scaled.iloc[i].values[:1]])
-            ax.plot(closed, values, linewidth=2, color=seg_colour(i), label=_label(names, i))
-            ax.fill(closed, values, color=seg_colour(i), alpha=0.12)
-        ax.set_xticks(angles)
-        ax.set_xticklabels([_short(c, 18) for c in keep], fontsize=9.5)
-        ax.set_yticks([])
-        ax.set_ylim(0, 1.08)
-        ax.spines["polar"].set_alpha(0.25)
-        figure.legend_below(ax, ncol=min(len(data.index), 4))
-
-        caption = ("Each outline is one group, drawn across the questions that separate the groups "
-                   "most. A spoke reaching further out means that group scores higher on it. "
-                   "<strong>What to look for:</strong> outlines with genuinely different shapes "
-                   "are distinct personas you can write separate briefs for. Outlines that nest "
-                   "neatly inside one another describe the same people at different intensities "
-                   "&mdash; one message with a volume knob, not several audiences. Each spoke is "
-                   "scaled to its own range, so shapes are comparable but distances between "
-                   "spokes are not.")
-        if trimmed > 0:
-            caption += (f" ({trimmed} more question{'' if trimmed == 1 else 's'} separated the "
-                        "groups less and would have crowded the spokes; the <strong>Full "
-                        "grid</strong> tab has all of them.)")
-        return _finish(figure, "radar", "Group shapes — the persona view", caption)
-
-
+# There was a radar ("spider") chart here, showing each group as a polygon over the questions. It
+# was removed rather than fixed. A radar encodes value as distance from a centre, so the eye reads
+# the enclosed AREA — which grows with the square of the values and, worse, changes entirely when
+# the questions are reordered, an order that carries no meaning at all. Three of its six labels
+# also truncated ("I want premium qu…") and one overlapped the plot. The Cleveland dot plot in
+# chart_profiles answers the same question — how far apart are these groups on this item — as a
+# distance along a common axis, which is the comparison people actually read accurately.
 def chart_heatmap(centroids, names=None, kind="means"):
     """Every question against every group, with nothing trimmed.
 
@@ -703,17 +808,38 @@ def chart_heatmap(centroids, names=None, kind="means"):
 
     with _Figure(width=8.0, height=max(2.6, 0.30 * len(items) + 1.8)) as figure:
         ax = figure.fig.add_subplot(111)
-        cmap = LinearSegmentedColormap.from_list(
-            "divergent", ["#0072B2", "#F2F0E6", "#D55E00"])
+        # DIVERGING, not the identity palette. The old scale ran between two of the very hues
+        # that mean "Group 1" and "Group 2" elsewhere in the report, so orange meant a segment on
+        # four charts and "above average" on this one. Warm against cool with a genuinely neutral
+        # middle, kept clear of the identity slots.
+        cmap = LinearSegmentedColormap.from_list("divergent", list(DIVERGING))
         mesh = ax.pcolormesh(centred.values.T, cmap=cmap, vmin=-limit, vmax=limit,
                              edgecolors="none")
         ax.set_xticks(np.arange(len(data.index)) + 0.5)
-        ax.set_xticklabels([_label(names, i) for i in range(len(data.index))],
-                           rotation=30, ha="right", fontsize=9.5)
+        # Horizontal: with a handful of short group names there is nothing to avoid, and angled
+        # text is harder to read for no gain. Only tilt when the names are genuinely long.
+        _heads = [_label(names, i) for i in range(len(data.index))]
+        _tilt = len(_heads) > 6 or max((len(h) for h in _heads), default=0) > 12
+        ax.set_xticklabels([_short(h, 18) for h in _heads],
+                           rotation=30 if _tilt else 0,
+                           ha="right" if _tilt else "center", fontsize=9.5)
         ax.set_yticks(np.arange(len(items)) + 0.5)
         ax.set_yticklabels([_short(c, 30) for c in items], fontsize=9.5)
         ax.invert_yaxis()
         ax.grid(False)
+
+        # The value in the cell. Nobody can read a number off a colour, and this grid is small
+        # enough to label every cell — which is the one case where labelling everything is right
+        # rather than chaos. The colour then does what colour is good at: showing the pattern at
+        # a glance, while the number answers "by how much".
+        if len(items) * len(data.index) <= 90:
+            for col, item in enumerate(items):
+                for row in range(len(data.index)):
+                    value = centred.values[row, col]
+                    ax.text(row + 0.5, col + 0.5, _num(data.values[row, col], 1),
+                            ha="center", va="center", fontsize=8.5,
+                            color="white" if abs(value) > limit * 0.55 else _INK)
+
         bar = figure.fig.colorbar(mesh, ax=ax, pad=0.02, fraction=0.04)
         bar.set_label("below average          above average", fontsize=9.5)
         bar.outline.set_visible(False)
@@ -752,7 +878,10 @@ def chart_gorge(shadow, names=None):
 
     with _Figure(height=3.9) as figure:
         ax = figure.fig.add_subplot(111)
-        ax.hist(shadow, bins=np.linspace(0, 1, 41), color=seg_colour(0), alpha=0.85, linewidth=0)
+        # Ink, not a segment colour. This histogram is the whole sample, so wearing Group 0's
+        # hue implied it was about Group 0 — the same colour-means-two-things error the palette
+        # rework exists to remove.
+        ax.hist(shadow, bins=np.linspace(0, 1, 41), color=_INK, alpha=0.55, linewidth=0)
         median = float(np.median(shadow))
         ax.axvline(median, color="#9C4029", linewidth=1.4, linestyle="--")
         ax.annotate(f"typical respondent {median:.2f}", xy=(median, 1.0),
@@ -875,7 +1004,6 @@ def build_charts(seg, method, names=None, errors=None):
     attempt("choice of k", lambda: chart_k_choice(seg.diagnostics, int(seg.recommended_k)))
     if centroids is not None:
         attempt("group profiles", lambda: chart_profiles(centroids, names, kind=kind))
-        attempt("group shapes", lambda: chart_radar(centroids, names, kind=kind))
         attempt("full grid", lambda: chart_heatmap(centroids, names, kind=kind))
     shadow = getattr(seg, "shadow", None)
     if shadow is not None:
