@@ -274,3 +274,29 @@ header .sp{flex:1}
 @media(max-width:820px){.side{display:none}}
 @media(max-width:560px){.wrap{padding:18px 14px 40px}.stat{flex:1 1 100%}
  header{padding:10px 14px}}
+
+/* Interactive charts ------------------------------------------------------------------------
+   A chart with a spec is drawn twice: interactively for the screen, and as the static matplotlib
+   SVG for print. Only one is ever visible, so a circulated PDF carries the same picture the
+   reader saw rather than an empty frame where a hover-driven chart used to be. */
+.conly-print{display:none}
+@media print{
+  .conly-screen{display:none}
+  .conly-print{display:block}
+}
+.imap{display:flex;flex-direction:column;gap:8px}
+.imap svg.chart{width:100%;height:auto;display:block;border-radius:var(--r-sm);outline:none}
+/* The plot takes keyboard focus, so it has to show that it has it. */
+.imap svg.chart:focus-visible{box-shadow:0 0 0 2px var(--accent)}
+.imap-read{display:flex;align-items:center;gap:8px;min-height:22px;
+  font-size:13px;color:var(--ink-soft)}
+.imap-swatch{width:11px;height:11px;border-radius:3px;flex:none}
+.imap-toggle{align-self:flex-start;border:1px solid var(--line-strong);background:transparent;
+  color:var(--ink-soft);border-radius:var(--r-sm);padding:5px 10px;font-size:12px;cursor:pointer}
+.imap-toggle:hover{border-color:var(--accent);color:var(--accent)}
+.imap-table{max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:var(--r-sm)}
+.imap-table table{border-collapse:collapse;width:100%;font-size:12px}
+.imap-table caption{text-align:left;padding:8px 10px;color:var(--ink-soft);font-size:12px}
+.imap-table th,.imap-table td{padding:5px 10px;border-top:1px solid var(--line);text-align:left;
+  font-variant-numeric:tabular-nums}
+.imap-table thead th{position:sticky;top:0;background:var(--surface)}

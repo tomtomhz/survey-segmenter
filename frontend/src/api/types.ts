@@ -32,6 +32,12 @@ export interface Chart {
   svg: string
   /** A sentence of interpretation, containing safe inline markup (<strong>, <em>). */
   caption: string
+  /**
+   * The numbers behind the picture, when the chart has an interactive renderer and is small
+   * enough for one to stay responsive. Typed as unknown here and narrowed by `usableSpec`, so a
+   * spec from a different build version can never be read as though it were this one.
+   */
+  spec?: unknown
 }
 
 /** A finished analysis — returned by /analyze, /regroup and /project alike. */

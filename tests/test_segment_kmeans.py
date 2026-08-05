@@ -3589,3 +3589,54 @@ def test_the_report_says_the_number_of_groups_was_searched_for():
     assert "nothing else was chosen by any of them" in only
     tied = sk.how_k_was_chosen({"a": 3, "b": 4, "c": 4}, 3, 2, 8)
     assert "judgement call" in tied, "a rival with more votes must not read as settled"
+
+
+def test_the_interactive_spec_and_the_drawn_chart_cannot_disagree():
+    """One computation, two renderers — which is the whole reason a spec exists.
+
+    The obvious way to add interactive charts is to write a second chart engine in TypeScript, and
+    then the two slowly disagree about what the data says the first time somebody edits one of
+    them. The spec is built from the SAME arrays matplotlib drew from, so the browser cannot show
+    a different number of people, a different segment, or a different colour from the picture in
+    the printed report.
+    """
+    rng = np.random.default_rng(0)
+    n = 800
+    centres = np.array([[5, 1, 5, 1], [1, 5, 1, 5], [3, 3, 5, 5]], float)
+    X = _likert(centres[rng.integers(0, 3, n)] + rng.normal(0, 0.8, (n, 4))).astype(float)
+    labels = sk._km(X, 3, 10, 0).labels_
+    chart = charts.chart_segment_map(X, labels)
+    spec = chart["spec"]
+
+    assert spec["version"] == charts.SPEC_VERSION and spec["kind"] == "segment_map"
+    # Every respondent is accounted for exactly once, which is the same promise the drawing makes.
+    assert sum(spec["points"]["people"]) == n == spec["people"]
+    # One mark per distinct answer pattern — the same aggregation the chart drew.
+    coords, _, _ = charts.pca_2d(X)
+    assert len(spec["points"]["x"]) == len(np.unique(np.round(coords, 9), axis=0))
+    # Parallel arrays must stay parallel, or the browser drops respondents off the chart.
+    assert len({len(v) for v in spec["points"].values()}) == 1
+
+    # Identity is sent, never re-derived on the other side: the palette carries the measured
+    # colour-vision properties and the markers carry what colour cannot, so they have one home.
+    for i, key in enumerate(spec["segments"]):
+        assert key["index"] == i
+        assert key["colour"] == sk.seg_colour(i)
+        assert key["colour_dark"] == charts.SEG_DARK[i % len(charts.SEG_DARK)]
+        assert key["marker"] == sk.seg_marker(i)
+
+    # No respondent identity travels with the spec — it is the same aggregate the picture shows.
+    blob = json.dumps(spec)
+    assert "respondent" not in blob and "id" not in spec["points"]
+
+    # Past the cap the chart still draws; it simply ships no spec, and the interface falls back to
+    # the static picture rather than to nothing.
+    assert charts.INTERACTIVE_MAX_POINTS > 0
+    wide = _likert(rng.normal(3, 1.2, (300, 4))).astype(float)
+    small = charts.chart_segment_map(wide, sk._km(wide, 2, 10, 0).labels_)
+    assert "spec" in small, "an ordinary survey should be interactive"
+    huge = np.arange(charts.INTERACTIVE_MAX_POINTS + 50, dtype=float).reshape(-1, 1)
+    huge = np.hstack([huge, huge * 2])
+    no_spec = charts.chart_segment_map(huge, (np.arange(len(huge)) % 2))
+    assert no_spec is not None and "spec" not in no_spec
+    assert no_spec["svg"].startswith("<svg"), "the static drawing must still be there"

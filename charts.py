@@ -368,12 +368,61 @@ def _restore_text(svg, held):
     return svg
 
 
-def _finish(figure, chart_id, title, caption, with_png=True):
-    """Package a drawn figure into the shape the interface and the report expect."""
+#: Bumped when the shape of a chart spec changes in a way the interface must notice. The browser
+#: renderer checks it and falls back to the static drawing rather than reading a spec it does not
+#: understand — an old saved project must not render as a broken chart.
+SPEC_VERSION = 1
+
+#: Above this many distinct marks a chart ships WITHOUT a spec and the interface shows the static
+#: drawing instead. Not a data limit — the static chart still contains every respondent either way
+#: — but a limit on what an interactive layer can carry, since each mark becomes a live DOM node.
+#:
+#: Set from measurement rather than instinct. Payloads: 6 KB at 207 marks, 72 KB at 2,962,
+#: 1,212 KB at 49,975 — the last is the real objection, along with fifty thousand nodes. At the
+#: cap itself, measured in a browser on 5,896 marks: 0.06 ms per pointer move, because the marks
+#: are memoised and hit-testing is a log-time Delaunay lookup, so hovering costs a ring and a line
+#: of text rather than the chart. One-off render at that size is ~119 ms.
+#:
+#: If you raise this, measure the pointer-move cost again first — an interactive chart that lags
+#: behind the cursor, or names the wrong dot, is worse than a crisp static one.
+INTERACTIVE_MAX_POINTS = 6000
+
+
+def _finish(figure, chart_id, title, caption, with_png=True, spec=None):
+    """Package a drawn figure into the shape the interface and the report expect.
+
+    A chart can carry a `spec`: the numbers behind the picture, in a form the browser can draw
+    interactively. Both renderings come from ONE computation, which is the entire point — the
+    obvious way to add interactive charts is to write a second chart engine in TypeScript, and
+    then the two slowly disagree about what the data says. Here matplotlib and the browser consume
+    the same spec, so they cannot.
+
+    The static drawing is not replaced by it. It is what goes into the printed report, the PDF, and
+    the PNG that Claude reads, and it is the fallback whenever the interface cannot use a spec.
+
+    A spec carries the same aggregate the picture shows — positions, counts, segment numbers — and
+    never a respondent id or a free-text answer, exactly like everything else that leaves this
+    process.
+    """
     chart = {"id": chart_id, "title": title, "svg": figure.svg(), "caption": caption}
     if with_png:
         chart["png_b64"] = base64.b64encode(figure.png()).decode("ascii")
+    if spec is not None:
+        chart["spec"] = {"version": SPEC_VERSION, **spec}
     return chart
+
+
+def _segment_key(count, names):
+    """The per-segment identity both renderers share: name, colour in each theme, marker shape.
+
+    Sent rather than re-derived in TypeScript. Duplicating the palette on the other side is how
+    the two renderings drift the day somebody edits one of them, and the palette is the part with
+    the measured colour-vision properties — it should have exactly one home.
+    """
+    return [{"index": c, "label": _label(names, c),
+             "colour": SEG_LIGHT[c % len(SEG_LIGHT)],
+             "colour_dark": SEG_DARK[c % len(SEG_DARK)],
+             "marker": seg_marker(c)} for c in range(count)]
 
 
 def onehot_matrix(Xcat, level_counts):
@@ -581,8 +630,32 @@ def chart_segment_map(X, labels, names=None, seed=0):
                         "different group from the one they are actually in, so read the coloured "
                         "regions as a rough guide rather than as the real boundary.")
 
+        # The spec is built from the SAME arrays the drawing above used — spots, counts,
+        # spot_labels, cents — rather than recomputed. That is what makes the interactive chart
+        # and the static one incapable of disagreeing: there is one projection, one aggregation,
+        # one set of centres, and two renderers reading them.
+        spec = {
+            "kind": "segment_map",
+            "points": {"x": [round(float(v), 5) for v in spots[:, 0]],
+                       "y": [round(float(v), 5) for v in spots[:, 1]],
+                       "segment": [int(v) for v in spot_labels],
+                       "people": [int(v) for v in counts]},
+            "centroids": [{"segment": int(c), "x": round(float(cents[c][0]), 5),
+                           "y": round(float(cents[c][1]), 5)} for c in live],
+            "segments": _segment_key(k, names),
+            "axes": {"x_share": round(float(spread[0]), 4),
+                     "y_share": round(float(spread[1]), 4),
+                     "kept": round(float(kept), 4)},
+            "people": int(len(coords)),
+            "busiest_spot": stacked,
+            # How often the picture's own nearest-centre rule reproduces the real assignment. The
+            # interactive layer surfaces this the same way the caption does, so hovering a dot
+            # never implies more precision than the projection has.
+            "faithful": round(float(faithful), 4),
+        }
         return _finish(figure, "map", "The segment map — do these groups actually separate?",
-                       caption)
+                       caption,
+                       spec=spec if len(spots) <= INTERACTIVE_MAX_POINTS else None)
 
 
 def chart_silhouette(X, labels, names=None, max_rows=900, metric="euclidean", fit=None):

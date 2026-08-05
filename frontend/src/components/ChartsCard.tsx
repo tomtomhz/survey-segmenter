@@ -1,6 +1,8 @@
 import { useId, useRef, useState } from 'react'
 import type { Chart } from '../api/types'
 import { CHART_TAB } from '../lib/labels'
+import { SegmentMap } from '../charts/SegmentMap'
+import { usableSpec } from '../charts/spec'
 
 /**
  * The point of showing the charts is that a reader can disagree with the write-up: a wrong
@@ -73,7 +75,27 @@ export function ChartsCard({ charts }: { charts: Chart[] }) {
             <div className="ctitle">{chart.title}</div>
             {/* Both are built by the Python chart engine from aggregate numbers and never
                 contain anything the user typed. */}
-            <div className="cwrap" dangerouslySetInnerHTML={{ __html: chart.svg }} />
+            {(() => {
+              const spec = usableSpec(chart.spec)
+              // When a chart ships a spec, the interactive version is what appears on screen and
+              // the static drawing stays in the document for print — the print stylesheet swaps
+              // them. Without a spec (an older saved project, or a chart with too many marks to
+              // stay responsive) the static drawing is simply what you get. Either way there is a
+              // correct picture: an interactive layer must never be the only way to see a chart.
+              return (
+                <>
+                  {spec && (
+                    <div className="cwrap conly-screen">
+                      <SegmentMap spec={spec} title={chart.title} />
+                    </div>
+                  )}
+                  <div
+                    className={`cwrap${spec ? ' conly-print' : ''}`}
+                    dangerouslySetInnerHTML={{ __html: chart.svg }}
+                  />
+                </>
+              )
+            })()}
             <p className="ccap" dangerouslySetInnerHTML={{ __html: chart.caption }} />
           </div>
         ))}
