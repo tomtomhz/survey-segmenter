@@ -25,6 +25,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import segment_kmeans as sk
 import charts
+import clusterability
 import kprototypes as kp
 import webapp
 from sklearn.metrics import adjusted_rand_score
@@ -3640,3 +3641,118 @@ def test_the_interactive_spec_and_the_drawn_chart_cannot_disagree():
     no_spec = charts.chart_segment_map(huge, (np.arange(len(huge)) % 2))
     assert no_spec is not None and "spec" not in no_spec
     assert no_spec["svg"].startswith("<svg"), "the static drawing must still be there"
+
+
+def test_a_second_cluster_tendency_test_covers_where_hopkins_is_weak():
+    """Hopkins has always been the tool's only real answer to "is there anything here".
+
+    Adolfsson, Ackerman & Brownstein (Pattern Recognition, 2019) measured its two failure modes
+    over 35,000 simulated datasets: its power falls to 32% on partially overlapping clusters, and
+    it reads a handful of outliers as a group. Overlapping segments merging into one is the single
+    failure mode measured in `references/kbench.py`, so the second test earns its place precisely
+    there.
+    """
+    if not clusterability.available():
+        pytest.skip("the dip test add-on is not installed")
+
+    rng = np.random.default_rng(0)
+    n = 400
+    centres = np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1]], float)
+
+    def tendency(X):
+        lo, hi = X.min(0), X.max(0)
+        Xs = (X - lo) / np.where(hi > lo, hi - lo, 1)
+        return clusterability.pca_dip(Xs, charts.pca_2d(Xs)[0][:, 0])
+
+    # Real groups are found at every separation, including the heavy overlap where Hopkins fades.
+    for spread in (0.5, 1.0, 1.4):
+        found = tendency(_likert(centres[rng.integers(0, 3, n)] + rng.normal(0, spread, (n, 5))))
+        assert found["p"] < 0.05, f"missed real groups at spread {spread}: {found}"
+
+    # And it does not invent them. Both cases below are ones Hopkins reads as structure.
+    assert tendency(_likert(rng.normal(3, 1.1, (n, 5))))["p"] >= 0.05
+    outliers = _likert(rng.normal(3, 1.0, (n, 5)))
+    outliers[:5] = 5
+    assert tendency(outliers)["p"] >= 0.05, "five eccentric respondents were read as a group"
+
+
+def test_the_dip_refuses_the_data_it_cannot_read_rather_than_guessing():
+    """The obvious form of this test is wrong for survey data, and the guard is the whole story.
+
+    The paper's headline recommendation is the dip on all PAIRWISE DISTANCES. Rating answers are
+    whole numbers, so those distances take very few values — measured, 400 people answering five
+    questions produce 79,800 distances with 50 distinct values among them — and the dip reads that
+    comb as many modes, returning p = 0.0000 on data with no groups at all. The same test on
+    continuous noise of identical size returns p = 0.9962. So the first principal component is
+    used instead, being a weighted sum and therefore continuous.
+
+    That still needs enough questions to sum. Measured on pure noise: two and three questions
+    false-alarm, four and up are correct. The guard counts QUESTIONS rather than distinct values,
+    because a low count of distinct values has two causes and only one is a fault — genuinely tight
+    groups drive it down too, and guarding on it refused three well-separated groups.
+    """
+    if not clusterability.available():
+        pytest.skip("the dip test add-on is not installed")
+
+    rng = np.random.default_rng(0)
+    n = 400
+
+    def run(X):
+        lo, hi = X.min(0), X.max(0)
+        Xs = (X - lo) / np.where(hi > lo, hi - lo, 1)
+        return clusterability.pca_dip(Xs, charts.pca_2d(Xs)[0][:, 0])
+
+    # Too few questions: refused, with a reason, rather than a false alarm.
+    for items in (2, 3):
+        verdict = run(_likert(rng.normal(3, 1.1, (n, items))))
+        assert "p" not in verdict, f"{items} questions should be refused, got {verdict}"
+        assert "question" in verdict["skipped"]
+
+    # Too few people: refused for a different, stated reason.
+    assert "respondents" in run(_likert(rng.normal(3, 1.1, (20, 5))))["skipped"]
+
+    # Tight, well-separated groups must NOT be refused — they were, when the guard counted
+    # distinct values, because people in one segment genuinely give identical answers.
+    centres = np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1]], float)
+    tight = run(_likert(centres[rng.integers(0, 3, n)] + rng.normal(0, 0.4, (n, 5))))
+    assert "p" in tight, f"the clearest case in the set was refused: {tight}"
+    assert tight["p"] < 0.05
+
+
+def test_the_two_tendency_tests_are_read_against_each_other():
+    """Disagreement is informative, because the two fail in opposite directions."""
+    assert clusterability.agreement(0.9, None) is None
+    assert clusterability.agreement(0.9, {"skipped": "nope"}) is None
+    assert clusterability.agreement(0.9, {"p": 0.001})[0] == "both"
+    assert clusterability.agreement(0.4, {"p": 0.9})[0] == "neither"
+    # Hopkins quiet, dip loud: the signature of groups that overlap, which is Hopkins' weak spot.
+    label, sentence = clusterability.agreement(0.4, {"p": 0.001})
+    assert label == "dip only" and "overlap" in sentence
+    # Hopkins loud, dip quiet: the signature of a few outliers, which Hopkins reads as a group.
+    label, sentence = clusterability.agreement(0.9, {"p": 0.9})
+    assert label == "hopkins only" and "outliers" in sentence
+
+
+def test_the_report_carries_the_second_opinion():
+    """It is only useful if the reader sees it, and it must say when it could not run."""
+    rng = np.random.default_rng(0)
+    centres = np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1]], float)
+    df = pd.DataFrame(_likert(centres[rng.integers(0, 3, 400)] + rng.normal(0, 0.7, (400, 5))),
+                      columns=[f"q{i+1}" for i in range(5)])
+    df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+    digest = sk.run_analysis(df.to_csv(index=False).encode(),
+                             cfg=sk.SegmentationConfig(k_min=2, k_max=6, **FAST))["digest"]
+    if clusterability.available():
+        assert "Dip test (second opinion)" in digest
+        # Never printed as "p 0": a test reports a probability, and zero claims a certainty no
+        # statistical test has.
+        assert "p 0**" not in digest and "p = 0**" not in digest
+        assert "Both cluster-tendency tests agree" in digest
+
+    # Two questions: the section has to say it did not run, not vanish silently.
+    short = pd.DataFrame(_likert(rng.normal(3, 1.1, (400, 2))), columns=["q1", "q2"])
+    short.insert(0, "respondent_id", [f"P{i}" for i in range(len(short))])
+    brief = sk.run_analysis(short.to_csv(index=False).encode(),
+                            cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))["digest"]
+    if clusterability.available():
+        assert "not run" in brief

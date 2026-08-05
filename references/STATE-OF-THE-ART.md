@@ -127,6 +127,53 @@ shadow, e.g. 89% on pure noise where the two directions carry only 21% of the va
 
 Per-axis variance share is on the axes themselves, not only in the prose.
 
+## Is there anything to segment? Two tests, not one
+
+Hopkins was the only real answer to this, and it has two measured failure modes. Adolfsson,
+Ackerman & Brownstein, *To Cluster, or Not to Cluster* (Pattern Recognition, 2019), 35,000
+simulated datasets: its power falls to **32%** on partially overlapping clusters, and it reads a
+handful of outliers as a cluster. Overlapping segments merging into one is this tool's single
+measured failure mode, so the second test earns its place exactly there.
+
+`clusterability.py` adds Hartigan's dip test, and the report states how the two line up — worth
+more than either alone, because they fail in opposite directions.
+
+**The form the paper recommends does not work on survey data, and that is worth recording.** Its
+headline method is *dip-dist*: the dip on all pairwise distances. Rating answers are whole numbers,
+so those distances take very few values — measured, 400 people on five questions give **79,800
+distances with 50 distinct values among them** — and the dip reads that comb of spikes as many
+modes, returning **p = 0.0000 on data with no groups at all**. The same test on continuous noise of
+identical size returns p = 0.9962. The paper's simulations are continuous Gaussians; nothing there
+was run against a five-point questionnaire.
+
+What is used is the paper's other evaluated variant, **PCA-dip**: the dip on the first principal
+component, which is a weighted sum of every question and therefore continuous even when each answer
+is not.
+
+### Measured, with the guard in place
+
+| Condition | Hopkins | Dip p | Correct? |
+|---|---|---|---|
+| 3 groups, well separated | 0.91 | <0.001 | yes |
+| 3 groups, moderate overlap | 0.84 | <0.001 | yes |
+| **3 groups, heavy overlap** | **0.66** | **<0.001** | **yes — where Hopkins fades** |
+| 5 groups, separated | 0.90 | <0.001 | yes |
+| Pure noise, 5 questions | 0.59 | 0.94 | yes |
+| Pure noise, 12 questions | 0.51 | 0.995 | yes |
+| **Noise + 5 outliers** | **0.55–0.60** | **0.51** | **yes — Hopkins drifts up, dip does not** |
+| Pure noise, 2 questions | 1.00 | *refused* | refuses rather than false-alarms |
+
+The floor is four questions: on pure noise the dip false-alarms at two and three and is correct
+from four up. The guard counts **questions**, not distinct values, and the first version got that
+wrong — guarding on distinct values refused three well-separated groups, because people in one tight
+segment genuinely give identical answers. A low count has two causes and only one is a fault.
+
+The statistic itself is the `diptest` package rather than a local implementation. That is a
+deliberate dependency: the first hand-rolled attempt scored a plain normal sample at 0.25, the
+maximum possible, by measuring distance from *convexity* rather than from *unimodality* — a
+unimodal distribution is convex then concave. The reference scores it 0.0091. The tool still runs
+without the package and reports the check as not run.
+
 ## Choosing k, and refusing to
 
 The number of groups is not chosen by an elbow. It is a weighted panel, and the weighting is the

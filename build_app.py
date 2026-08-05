@@ -67,6 +67,11 @@ cmd = [sys.executable, "-m", "PyInstaller", "--name", "Survey Segmenter", "--win
        # Belt and braces alongside the explicit import in charts.py: matplotlib resolves output
        # writers lazily, so a bundler sees only the backend selected at import time.
        "--collect-submodules", "matplotlib.backends",
+       # The dip test is a compiled extension, so PyInstaller has to be told to carry its binary
+       # rather than only the Python that wraps it. Without this the packaged app runs and simply
+       # reports the second cluster-tendency check as unavailable — a silent downgrade, which is
+       # the kind this project has shipped before.
+       "--collect-all", "diptest",
        # The interface itself. Without this the packaged app starts, serves its API, and shows
        # nothing at all — the failure looks like a broken server rather than a missing folder.
        "--add-data", f"webui{os.pathsep}webui",

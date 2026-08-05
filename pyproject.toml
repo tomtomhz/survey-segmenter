@@ -20,6 +20,12 @@ dependencies = [
     # Core, not optional: every result draws six charts, and "see the data yourself" is the
     # feature that lets a reader disagree with the write-up rather than take it on trust.
     "matplotlib>=3.6",
+    # Hartigan's dip test, used as the second cluster-tendency check. A dependency rather than a
+    # local implementation on purpose: the algorithm is subtle enough that a re-derivation is a
+    # liability, and the first attempt at one scored a plain normal sample at the maximum possible
+    # dip. The tool still runs without it — the check reports itself as not run — but a build that
+    # ships without it is quietly weaker, so it belongs here rather than under an extra.
+    "diptest>=0.9",
 ]
 
 [project.optional-dependencies]

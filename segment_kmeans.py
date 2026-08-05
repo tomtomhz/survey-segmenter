@@ -116,6 +116,7 @@ from sklearn.metrics import (silhouette_score, silhouette_samples,
 from sklearn.neighbors import NearestNeighbors
 
 import kprototypes
+import clusterability
 
 
 def _use_utf8_for_output():
@@ -1301,6 +1302,32 @@ def executive_summary(n_resp, names, shares, wants, min_jaccard, repro, unit="gr
     return "\n".join(x for x in L if x is not None) + "\n"
 
 
+def _dip_section(dip, tendency):
+    """The second cluster-tendency test, and what it means read against the first.
+
+    Written to be useful when the two disagree, which is the interesting case: they fail in
+    opposite directions, so a disagreement narrows down what kind of data this is rather than
+    leaving the reader stuck between two numbers.
+    """
+    if not dip:
+        return None
+    if "p" not in dip:
+        return (f"\n*Second opinion on cluster tendency: not run — {dip['skipped']}.*\n")
+    # "p < 0.001" rather than "p 0": the test reports a probability, and printing zero claims a
+    # certainty no statistical test has.
+    shown = "< 0.001" if dip["p"] < 0.001 else f"= {dip['p']:.3g}"
+    line = (f"\n**Dip test (second opinion): p {shown}** — "
+            f"{clusterability.dip_reading(dip['p'])}. This is a different question asked a "
+            "different way: whether everyone's answers form one single spread or more than one. "
+            "It is worth having beside the Hopkins statistic because the two fail in opposite "
+            "directions — Hopkins can read a handful of unusual respondents as a group, and it "
+            "loses power when groups overlap instead of sitting apart, which is exactly where "
+            "this tool is weakest.\n")
+    if tendency:
+        line += f"\n> {tendency[1]}\n"
+    return line
+
+
 def _varsel_section(varsel, rec_k):
     """Report section for the Dolnicar variable-selection comparison (None if it was not run)."""
     if varsel is None:
@@ -1546,7 +1573,7 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
                 var_importance, consensus_agreement, cfg, typing=None, varsel=None,
                 k_agreement=None, ward_ari=None, distinct_share=None,
                 single_cluster=False, gap_one=None, gap_two=None, neighbours=None,
-                median_shadow=None, persistence=None, signals=None):
+                median_shadow=None, persistence=None, signals=None, dip=None, tendency=None):
     _method = getattr(cfg, "method", "kmeans")
     method_name = {"gmm": "a Gaussian mixture / latent-class model ("
                           + cfg.gmm_covariance + " covariance)",
@@ -1620,6 +1647,7 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
          "constructed by the method rather than discovered; above ~0.75 signals a real tendency "
          "to cluster. Read the rest of this report in that light.\n"
          + _hopkins_caveat(distinct_share, centroids.shape[1] if centroids is not None else 0),
+         _dip_section(dip, tendency),
          "**Who fits, person by person.** `segment_assignments.csv` carries a `fit` column: how "
          "well each respondent sits in the segment they were given (about 1 = squarely inside, "
          "about 0 = on the boundary between two, below 0 = closer to a different segment). "
@@ -3411,6 +3439,17 @@ class Segmenter:
               f"({_how}). Running the diagnostic panel...\n")
 
         self.hopkins = hopkins_statistic(X, np.random.default_rng(cfg.random_state + 7), cfg=cfg)
+        # A second, independent read on the same question. It uses the SAME projection the segment
+        # map draws, so a reader comparing the number with the picture is looking at one thing.
+        # See clusterability.py for why this is the dip on a principal component rather than on
+        # pairwise distances, which is the form the literature recommends and which whole-number
+        # survey answers break.
+        try:
+            _coords, _kept, _ = _charts.pca_2d(_geometry(X, cfg)[0])
+            self.dip = clusterability.pca_dip(X, _coords[:, 0])
+        except Exception as e:
+            self.dip = {"skipped": f"could not be computed ({type(e).__name__})"}
+        self.tendency = clusterability.agreement(self.hopkins, self.dip)
         # The one test in the panel that can return "this is a single group". See
         # supports_single_cluster for why the k>=2 search would otherwise never ask.
         self.single_cluster, self.gap_one, self.gap_two = supports_single_cluster(
@@ -3520,7 +3559,9 @@ class Segmenter:
                                             if getattr(self, 'shadow', None) is not None
                                             and len(self.shadow) else None,
                                             getattr(self, 'persistence', None),
-                                            getattr(self, 'signals', None))
+                                            getattr(self, 'signals', None),
+                                            getattr(self, 'dip', None),
+                                            getattr(self, 'tendency', None))
         if demographics is not None and (not isinstance(demographics, pd.DataFrame) or not demographics.empty):
             self.report_markdown += "\n\n" + self._profile_external(demographics, id_col)
         if outdir:
