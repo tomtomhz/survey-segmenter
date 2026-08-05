@@ -3424,10 +3424,17 @@ def test_charts_carry_their_own_dark_mode():
     # var() resolves in a CSS declaration but NOT in an SVG presentation attribute, so every
     # reference has to land inside style="…". If matplotlib ever emits `fill="…"` instead, the
     # colours silently stop following the theme.
+    #
+    # The spans are parsed rather than sniffed with a fixed lookback. The first version of this
+    # check searched the preceding 90 characters for `style=` and passed locally while failing on
+    # CI, where a longer font stack pushed the attribute out of the window — a test that depended
+    # on how much text happened to sit in front of the thing it was checking.
+    styled = [m.span(1) for m in re.finditer(r'style="([^"]*)"', svg)]
     for hit in re.finditer(r"var\(--seg-\d", svg):
-        prefix = svg[max(0, hit.start() - 90):hit.start()]
-        assert "style=" in prefix.rsplit(">", 1)[-1], (
+        inside = any(lo <= hit.start() < hi for lo, hi in styled)
+        assert inside, (
             "a themed colour landed in a presentation attribute, where var() does not apply")
+    assert styled, "no style attributes at all — the check above would pass vacuously"
 
 
 def test_the_fit_chart_compares_segments_instead_of_stacking_everybody():
