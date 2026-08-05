@@ -2134,8 +2134,8 @@ def test_every_run_produces_the_full_chart_set_as_valid_standalone_svg():
     a run that produces a report must produce the pictures of that report too."""
     r = sk.run_analysis(_three_group_survey().to_csv(index=False).encode(),
                         cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
-    assert [c["id"] for c in r["charts"]] == ["map", "fit", "k", "profiles",
-                                              "heatmap", "gorge"]
+    assert [c["id"] for c in r["charts"]] == ["map", "gorge", "fit", "k",
+                                              "profiles", "heatmap"]
     for c in r["charts"]:
         assert c["svg"].startswith("<svg") and c["svg"].endswith("</svg>")
         assert c["svg"].count("<svg") == c["svg"].count("</svg>") == 1
@@ -2245,8 +2245,8 @@ def test_categorical_surveys_are_charted_too():
                                                   run_consensus=False,
                                                   check_variable_selection=False))
     assert r["method"] == "lca"
-    assert [c["id"] for c in r["charts"]] == ["map", "fit", "k", "profiles",
-                                              "heatmap", "gorge"]
+    assert [c["id"] for c in r["charts"]] == ["map", "gorge", "fit", "k",
+                                              "profiles", "heatmap"]
     prof = next(c for c in r["charts"] if c["id"] == "profiles")
     # Probabilities, not means — the caption must not tell the reader to read them as ratings.
     assert "How likely each answer is" in prof["caption"]
@@ -2867,8 +2867,9 @@ def test_every_chart_is_offered_on_a_normal_run():
     missing one looks like the tool decided the reader did not need it."""
     r = sk.run_analysis(_three_group_survey().to_csv(index=False).encode(),
                         cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
-    assert [c["id"] for c in r["charts"]] == ["map", "fit", "k", "profiles", "heatmap",
-                                              "gorge"]
+    # The order is the reading order: whether these groups are real (map, gorge, fit, k) before
+    # what is in them (profiles, heatmap). It is also the tab order in the app.
+    assert [c["id"] for c in r["charts"]] == ["map", "gorge", "fit", "k", "profiles", "heatmap"]
     assert sk.charts_html(r["charts"]).count("<svg") == 6
 
 

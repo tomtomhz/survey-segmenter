@@ -1074,19 +1074,29 @@ def build_charts(seg, method, names=None, errors=None):
         return []
 
     kind = "shares" if method == "lca" else "means"
-    attempt("segment map", lambda: chart_segment_map(X, labels, names))
-    # 1 - shadow is the `fit` column of the exported file, computed for every respondent. Passing
-    # it means this chart covers everyone and cannot disagree with the CSV. The latent-class path
-    # has no shadow value, so it falls back to the sampled silhouette inside the chart.
+    # The order is the order somebody should read them in, and it is also the tab order in the
+    # app. Two questions, asked in the only sequence that makes sense: FIRST whether these groups
+    # are real at all, and only then what they contain. Describing a segmentation before
+    # establishing it exists is how a partition of noise acquires a persona.
+    #
+    #   are they real?    the map, the gorge, per-person fit, the choice of k
+    #   what are they?    what differs between them, then the full grid
+    #
+    # The gorge used to sit last, after the profile charts — a "does this hold up" chart placed
+    # where a reader has already stopped asking.
     _shadow = getattr(seg, "shadow", None)
+    # 1 - shadow is the `fit` column of the exported file, computed for every respondent. Passing
+    # it means that chart covers everyone and cannot disagree with the CSV. The latent-class path
+    # has no shadow value, so it falls back to the sampled silhouette inside the chart.
     _fit = None if _shadow is None else 1.0 - np.asarray(_shadow, float)
+
+    attempt("segment map", lambda: chart_segment_map(X, labels, names))
+    if _shadow is not None:
+        attempt("gorge", lambda: chart_gorge(_shadow, names))
     attempt("per-person fit",
             lambda: chart_silhouette(X, labels, names, metric=metric, fit=_fit))
     attempt("choice of k", lambda: chart_k_choice(seg.diagnostics, int(seg.recommended_k)))
     if centroids is not None:
         attempt("group profiles", lambda: chart_profiles(centroids, names, kind=kind))
         attempt("full grid", lambda: chart_heatmap(centroids, names, kind=kind))
-    shadow = getattr(seg, "shadow", None)
-    if shadow is not None:
-        attempt("gorge", lambda: chart_gorge(shadow, names))
     return out

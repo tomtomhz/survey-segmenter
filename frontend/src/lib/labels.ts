@@ -13,13 +13,18 @@ export const CONFIDENCE_ADVICE: Record<Confidence, string> = {
   unknown: 'Confidence unclear',
 }
 
+/**
+ * Declared in reading order: are these groups real (map, gorge, fit, k), and only then what is in
+ * them (profiles, heatmap). The tab order itself comes from the server's chart list; this map
+ * mirrors it so the two cannot drift.
+ */
 export const CHART_TAB: Record<ChartId, string> = {
   map: 'Segment map',
+  gorge: 'Do they separate',
   fit: 'Who belongs',
   k: 'How many groups',
   profiles: 'What differs',
   heatmap: 'Full grid',
-  gorge: 'Do they separate',
 }
 
 /**
