@@ -129,6 +129,43 @@ non-obvious:
   hand-written Gower functions that would need their own tests and would drift. **If you add a
   distance-based diagnostic, go through `_geometry()`** — do not hand-roll.
 
+**Colour does exactly one job per chart, and the palette is validated by a script, not by eye.**
+Four jobs — segment identity, above/below average, magnitude, and plain chrome — each get their
+own encoding and they do not overlap. They used to share one palette, so orange meant "Group 1" on
+four charts, "Separation (silhouette)" on the choice-of-k chart and "above average" on the
+heatmap. The identity palette was measured and it FAILED: three hues below the chroma floor
+(reading grey) and the worst adjacent pair at CVD ΔE 7.9 — slots 1 and 2, which is Group 0 against
+Group 1, the most common comparison in the tool. Its comment claimed Okabe-Ito, which does pass at
+15.8; it had been edited into failing. If you touch these hues, re-run the validator. **Slot order
+is part of the safety**, because the checks run on adjacent pairs.
+
+**Segments carry a marker shape as well as a colour, and this is required.** The segment map is a
+scatter, so every pair of hues is on screen at once. Measured at eight groups: worst all-pairs CVD
+ΔE 3.2 and worst normal-vision ΔE 7.1 — two segments a reader with full colour vision cannot tell
+apart. Only three slots clear all-pairs on colour alone. The shape also advances an extra step on
+each wrap past eight, because colour and shape both cycling on eight made group 8 identical to
+group 0 in *both* channels.
+
+**No radar chart. It was removed, not lost.** A radar encodes value as distance from a centre, so
+the eye reads enclosed AREA — which grows with the square of the values and changes completely
+when the questions are reordered, an order carrying no meaning. Its labels truncated too. The
+Cleveland dot plot in `chart_profiles` answers the same question as a distance along a shared
+axis. Do not re-add it because a stakeholder asks for a "spider chart".
+
+**Bars start at the scale floor, never at zero, on rating data.** A 1-5 scale drawn from 0 spends a
+fifth of every bar on a region no respondent can occupy. That is why profiles is a dot plot.
+
+**Charts carry their own dark mode as CSS variables, and only VECTOR marks follow it.** A
+rasterised mark bakes the light palette into a bitmap; measured on the dark card that leaves the
+violet slot at 1.77:1. Marks stay vector under a measured size threshold and rasterise above it.
+`var()` resolves in a `style="…"` declaration but NOT in an SVG presentation attribute — if
+matplotlib ever emits `fill="…"` instead, theming silently stops, which a test guards.
+
+**Respondent text is lifted out of the SVG before colours are swapped.** The swap is string
+replacement and cannot tell data from markup: a question worded "#2a78d6 is my favourite" was
+being rewritten into a theme token. Whatever holds that text must be per-call, never module or
+function state — the server draws for several people at once.
+
 **Per-respondent fit is Leisch's shadow value, not a silhouette.** A silhouette needs every
 pairwise distance, O(n²), so it fell back to a 6,000-row sample and left everyone else blank —
 holes in the exported file exactly on the studies large enough to matter. Shadow values need only

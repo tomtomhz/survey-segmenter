@@ -1,7 +1,7 @@
 {
   "name": "survey-segmenter-frontend",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "The Survey Segmenter interface. Builds to ../webui, which the Python app serves.",
   "type": "module",
   "scripts": {

@@ -3,6 +3,68 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.3.0] — 2026-08-05
+
+### The charts show every respondent, and colour means one thing at a time
+
+- **Every respondent is on the segment map.** It drew a random 1,200 before. Worse and invisible
+  to the reader: rating answers come in whole steps, so people who answered identically land on
+  exactly the same spot and stack. Measured — 3,000 people on five 1-5 questions occupy 422
+  distinct positions, so a plain scatter was showing **14% of the data**. Each dot is now drawn
+  once per distinct answer pattern with its area proportional to how many share it, plus a size
+  key. No jitter: it would place points where no respondent sits.
+- **The per-person fit chart covers everyone too**, and became one distribution per segment rather
+  than every respondent stacked into one column of sub-pixel bars. Which group is weakest is now
+  the first thing you read.
+- **Colour does one job per chart.** Orange used to mean "Group 1" on four charts, "Separation
+  (silhouette)" on the choice-of-k chart, and "above average" on the heatmap. Identity, polarity,
+  magnitude and chrome now have separate encodings.
+- **The identity palette was replaced because it failed a check.** Three hues sat below the chroma
+  floor and read as grey, and the worst adjacent pair — Group 0 against Group 1 — measured CVD
+  ΔE 7.9. Segments also carry a **marker shape**, which is required rather than decorative: on a
+  scatter every pair of hues is visible at once, and at eight groups the worst pair measured ΔE 3.2
+  under protanopia and 7.1 for normal vision.
+- **Charts carry their own light and dark steps** as CSS variables, so a downloaded or printed
+  chart keeps them.
+- **The radar chart is gone.** It encoded value as distance from a centre, so the eye read enclosed
+  area — which grows with the square of the values and changes entirely when the questions are
+  reordered. Its replacement is a Cleveland dot plot, which also fixed bars starting at zero on a
+  1-5 scale.
+- The heatmap labels every cell, the choice-of-k chart leads with the criterion that decides, and
+  the charts are ordered the way they should be read: are these groups real, then what is in them.
+
+### Fixed
+
+- Two segments could be drawn identically past eight groups — colour and shape both cycled on
+  eight, so group 8 matched group 0 in both channels.
+- A question worded like a colour ("#2a78d6 is my favourite") was rewritten into a theme token in
+  the chart, because the colour swap could not tell data from markup.
+- The gorge chart had no entry in the interface's tab labels, so its tab showed a raw id.
+
+## [1.2.0] — 2026-08-01
+
+### Surveys that mix rating scales with pick-any questions
+
+- A questionnaire holding both kinds used to have the multiple-choice columns set aside with an
+  apology and the groups built on the ratings alone. On a study where the brand question is the
+  interesting one, that threw away the finding.
+- `kprototypes.py` implements Gower k-prototypes (Szepannek, Aschenbruck & Wilhelm, *Advances in
+  Data Analysis and Classification*, 2024). Ratings are read as **ordered** answers rather than as
+  numbers; pick-any answers count by whether two people chose the same thing.
+- The report now names the answer each segment actually picks — "Mostly picks Nespresso (69% of
+  them, vs 29% overall)" — instead of averaging brand codes, and scores pick-any questions by
+  Cramér's V squared rather than eta-squared, which depends on the order the answers were listed.
+- Measured over nine analyses: recovers the right number at high confidence when both kinds of
+  question carry signal, and drops to moderate or low rather than claiming a result when either
+  half is noise.
+
+### Fixed
+
+- Two standard Swedish five-point wordings were unrecognised, and one unmapped phrase fails a whole
+  column — so a Swedish survey silently lost the ordering it was measuring.
+- The empty-cluster refill could oscillate to `max_iter` on data with fewer distinct answer
+  patterns than groups requested.
+
 ## [1.1.0] — 2026-07-31
 
 ### Charts are drawn by matplotlib
