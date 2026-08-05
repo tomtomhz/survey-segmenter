@@ -23,6 +23,7 @@ lets the interpretation be based on the same picture the reader is looking at.
 import base64
 import io
 import os
+import re
 import time
 
 import numpy as np
@@ -208,8 +209,20 @@ def seg_colour(index):
 
 
 def seg_marker(index):
-    """The marker shape for a segment. See SEG_MARKERS for why this is not optional."""
-    return SEG_MARKERS[int(index) % len(SEG_MARKERS)]
+    """The marker shape for a segment. See SEG_MARKERS for why this is not optional.
+
+    Colour and shape both have eight values, so cycling them together would hand group 8 exactly
+    the colour AND the shape of group 0 — two segments drawn identically, which is worse than
+    either channel failing alone. Measured before this: groups 0/8, 1/9, 2/10 and 3/11 were
+    indistinguishable in both channels at once, reachable with `--kmax 10`.
+    #
+    Advancing the shape by one extra step on each wrap makes the (colour, shape) PAIR unique out
+    to 64 groups, which is far past anything a survey can support. The first eight are untouched,
+    so the ordinary case still gets its own colour and its own shape.
+    """
+    index = int(index)
+    slots = len(SEG_MARKERS)
+    return SEG_MARKERS[(index + index // slots) % slots]
 
 
 def _label(names, index):
@@ -278,7 +291,7 @@ class _Figure:
         # a timestamp that makes otherwise identical output differ byte for byte.
         self.fig.savefig(buf, format="svg", bbox_inches="tight", pad_inches=0.15,
                          metadata={"Date": None, "Creator": None, "Format": None, "Type": None})
-        out = buf.getvalue()
+        out, held_text = _protect_text(buf.getvalue())
         # Drop matplotlib's XML preamble and DOCTYPE: this is embedded in an HTML document, not
         # served as a standalone file, and a stray <?xml ...?> mid-page is a parse error.
         start = out.find("<svg")
@@ -309,7 +322,7 @@ class _Figure:
         # chart gets downloaded, pasted into a document and printed; carrying its own theming is
         # what makes it right in those places too, not only inside this interface.
         cut = out.index(">") + 1
-        return (out[:cut] + _THEME_STYLE + out[cut:]).strip()
+        return _restore_text(out[:cut] + _THEME_STYLE + out[cut:], held_text).strip()
 
     def png(self):
         """A raster copy, for Claude. Rendered on a light ground because a transparent PNG
@@ -318,6 +331,41 @@ class _Figure:
         self.fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.2,
                          facecolor="#FBFAF3", dpi=110)
         return buf.getvalue()
+
+
+#: Colours are swapped for theme tokens by plain string replacement over the whole document,
+#: which is simple and has one sharp edge: it does not know data from markup. A question worded
+#: "#2a78d6 is my favourite" came out of a chart reading "var(--seg-0, #2a78d6) is my favourite",
+#: because the label is just text in the SVG and the replacement could not tell.
+#:
+#: Respondent-supplied strings only ever appear inside <text> elements, so those are lifted out
+#: before any replacement runs and put back afterwards. Everything the swaps are actually aiming
+#: at — style declarations and presentation attributes — stays in place and still gets rewritten.
+_TEXT_NODE = re.compile(r"(<text\b[^>]*>)(.*?)(</text>)", re.DOTALL)
+_TEXT_MARK = "\x00text%d\x00"
+
+
+def _protect_text(svg):
+    """Return (masked svg, the text that was lifted out).
+
+    The held strings are RETURNED rather than parked on the module or the function, because two
+    people can be analysing surveys in the same process at the same time. Shared mutable state
+    here would let one run's labels reappear inside another's chart — the same shape as the
+    global error list that once made three healthy runs report failures they never had.
+    """
+    held = []
+
+    def stash(m):
+        held.append(m.group(2))
+        return m.group(1) + (_TEXT_MARK % (len(held) - 1)) + m.group(3)
+
+    return _TEXT_NODE.sub(stash, svg), held
+
+
+def _restore_text(svg, held):
+    for i, body in enumerate(held):
+        svg = svg.replace(_TEXT_MARK % i, body)
+    return svg
 
 
 def _finish(figure, chart_id, title, caption, with_png=True):

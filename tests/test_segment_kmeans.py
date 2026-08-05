@@ -3488,3 +3488,61 @@ def test_the_fit_chart_compares_segments_instead_of_stacking_everybody():
     X = _likert(rng.normal(3, 1, (len(lopsided), 4))).astype(float)
     tiny = charts.chart_silhouette(X, lopsided, fit=rng.random(len(lopsided)))
     assert tiny is not None and "6 people" in tiny["svg"]
+
+
+def test_two_segments_are_never_drawn_identically():
+    """Colour and shape both have eight values, so cycling them together fails silently.
+
+    Group 8 got exactly the colour AND the shape of group 0 — two segments drawn identically,
+    which is worse than either channel failing on its own because nothing on the chart hints that
+    anything is wrong. Measured before the fix: groups 0/8, 1/9, 2/10 and 3/11 were
+    indistinguishable in both channels at once, and `--kmax 10` reaches that.
+    """
+    seen = {}
+    for i in range(24):
+        pair = (sk.seg_colour(i), sk.seg_marker(i))
+        assert pair not in seen, f"group {i} is drawn exactly like group {seen[pair]}"
+        seen[pair] = i
+    # The ordinary case must be untouched: the first eight keep one colour and one shape each.
+    assert len({sk.seg_colour(i) for i in range(8)}) == 8
+    assert len({sk.seg_marker(i) for i in range(8)}) == 8
+
+
+def test_a_question_worded_like_a_colour_survives_the_charts():
+    """Theme tokens are swapped in by string replacement, which cannot tell data from markup.
+
+    A question worded "#2a78d6 is my favourite" came out of a chart reading
+    "var(--seg-0, #2a78d6) is my favourite" — the label is only text in the SVG, and the
+    replacement rewrote it. Respondent-supplied strings live in <text> elements, so those are
+    lifted out before the swaps run and put back afterwards.
+
+    The held strings are returned rather than parked on the module, because the server draws for
+    several people at once; the concurrent half of this test is what makes that more than a claim.
+    """
+    import concurrent.futures
+
+    frame = pd.DataFrame([[1.0, 4.0], [4.0, 1.0]],
+                         index=["Segment 0", "Segment 1"],
+                         columns=["#2a78d6 is my favourite", "plain question"])
+    chart = charts.chart_profiles(frame)
+    assert "#2a78d6 is my favourite" in chart["svg"], "a label was rewritten as a theme token"
+    assert "var(--seg-0," in chart["svg"], "theming stopped being applied to the marks"
+    assert "currentColor" in chart["svg"], "chrome stopped following the page"
+    assert "\x00text" not in chart["svg"], "a masking sentinel was left in the output"
+
+    def draw(i):
+        c = pd.DataFrame([[1.0, 4.0, 2.0], [4.0, 1.0, 3.0]],
+                         index=["Segment 0", "Segment 1"],
+                         # No underscores: labels render them as spaces, which would make this
+                         # probe fail for a reason unrelated to what it is testing.
+                         columns=[f"RUN{i}alpha", f"RUN{i}beta", f"RUN{i}gamma"])
+        svg = charts.chart_profiles(c)["svg"]
+        return (f"RUN{i}alpha" in svg,
+                [j for j in range(10) if j != i and f"RUN{j}alpha" in svg],
+                "\x00text" in svg)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(draw, range(10)))
+    assert all(mine for mine, _, _ in results), "a run lost its own labels"
+    assert all(not others for _, others, _ in results), "a run was given another run's labels"
+    assert all(not leftover for _, _, leftover in results), "a masking sentinel escaped"
