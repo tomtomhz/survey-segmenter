@@ -325,3 +325,7 @@ header .sp{flex:1}
 .iridge svg.chart,.ikchoice svg.chart{width:100%;height:auto;display:block}
 .iridge rect,.ikchoice rect{outline:none}
 .iridge rect:focus-visible,.ikchoice rect:focus-visible{stroke:var(--accent);stroke-width:2}
+.iprofiles,.igorge{display:flex;flex-direction:column;gap:8px}
+.iprofiles svg.chart,.igorge svg.chart{width:100%;height:auto;display:block}
+.iprofiles path,.igorge rect{outline:none}
+.iprofiles path:focus-visible,.igorge rect:focus-visible{stroke:var(--accent);stroke-width:2.5}

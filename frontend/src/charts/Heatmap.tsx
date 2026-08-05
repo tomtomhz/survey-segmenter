@@ -1,6 +1,7 @@
 import { useId, useMemo, useState } from 'react'
 
 import type { HeatmapSpec } from './spec'
+import { segColour, useDarkMode } from './theme'
 
 /**
  * The full grid, drawn in the browser so a cell can be interrogated.
@@ -18,6 +19,7 @@ import type { HeatmapSpec } from './spec'
 export function Heatmap({ spec, title }: { spec: HeatmapSpec; title: string }) {
   const [active, setActive] = useState<{ row: number; col: number } | null>(null)
   const captionId = useId()
+  const dark = useDarkMode()
 
   const { colourFor } = useMemo(() => ({
     // Diverging, anchored on the largest deviation in either direction so the two arms are
@@ -55,7 +57,7 @@ export function Heatmap({ spec, title }: { spec: HeatmapSpec; title: string }) {
               {spec.segments.map((s) => (
                 <th key={s.index} scope="col">
                   <span className="iheat-chip" aria-hidden="true"
-                        style={{ background: `var(--seg-${s.index}, ${s.colour})` }} />
+                        style={{ background: segColour(s, dark) }} />
                   {s.label}
                 </th>
               ))}

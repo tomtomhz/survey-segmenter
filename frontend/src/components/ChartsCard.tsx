@@ -5,7 +5,11 @@ import { SegmentMap } from '../charts/SegmentMap'
 import { Heatmap } from '../charts/Heatmap'
 import { FitRidges } from '../charts/FitRidges'
 import { KChoice } from '../charts/KChoice'
-import { usableSpec, usableHeatmap, usableFit, usableKChoice } from '../charts/spec'
+import { Profiles } from '../charts/Profiles'
+import { Gorge } from '../charts/Gorge'
+import {
+  usableSpec, usableHeatmap, usableFit, usableKChoice, usableProfiles, usableGorge,
+} from '../charts/spec'
 
 /**
  * The point of showing the charts is that a reader can disagree with the write-up: a wrong
@@ -83,7 +87,9 @@ export function ChartsCard({ charts }: { charts: Chart[] }) {
               const heat = usableHeatmap(chart.spec)
               const ridges = usableFit(chart.spec)
               const kchoice = usableKChoice(chart.spec)
-              const live = spec || heat || ridges || kchoice
+              const profiles = usableProfiles(chart.spec)
+              const gorge = usableGorge(chart.spec)
+              const live = spec || heat || ridges || kchoice || profiles || gorge
               // When a chart ships a spec, the interactive version is what appears on screen and
               // the static drawing stays in the document for print — the print stylesheet swaps
               // them. Without a spec (an older saved project, or a chart with too many marks to
@@ -109,6 +115,16 @@ export function ChartsCard({ charts }: { charts: Chart[] }) {
                   {kchoice && (
                     <div className="cwrap conly-screen">
                       <KChoice spec={kchoice} title={chart.title} />
+                    </div>
+                  )}
+                  {profiles && (
+                    <div className="cwrap conly-screen">
+                      <Profiles spec={profiles} title={chart.title} />
+                    </div>
+                  )}
+                  {gorge && (
+                    <div className="cwrap conly-screen">
+                      <Gorge spec={gorge} title={chart.title} />
                     </div>
                   )}
                   <div

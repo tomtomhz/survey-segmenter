@@ -103,7 +103,30 @@ export interface KChoiceSpec {
   series: { key: string; label: string; lead: boolean; values: (number | null)[] }[]
 }
 
-export type ChartSpec = SegmentMapSpec | HeatmapSpec | FitSpec | KChoiceSpec
+export interface ProfilesSpec {
+  version: number
+  kind: 'profiles'
+  items: string[]
+  segments: SegmentKey[]
+  /** values[segment][item] — the same array the dots were placed from. */
+  values: number[][]
+  /** "average" for ratings, "share" on the categorical path. */
+  measure: string
+  /** Questions left off because they separated the groups least and would not fit legibly. */
+  trimmed: number
+}
+
+export interface GorgeSpec {
+  version: number
+  kind: 'gorge'
+  edges: number[]
+  counts: number[]
+  median: number
+  people: number
+}
+
+export type ChartSpec =
+  | SegmentMapSpec | HeatmapSpec | FitSpec | KChoiceSpec | ProfilesSpec | GorgeSpec
 
 /**
  * A spec is only usable if it is the version this build understands. Anything else falls back to
@@ -166,4 +189,26 @@ export function usableKChoice(spec: unknown): KChoiceSpec | null {
   if (!Array.isArray(c.series) || !c.series.length) return null
   if (c.series.some((s) => !Array.isArray(s.values) || s.values.length !== c.ks!.length)) return null
   return c as KChoiceSpec
+}
+
+/** Every group must have a value for every question, or a dot lands on the wrong row. */
+export function usableProfiles(spec: unknown): ProfilesSpec | null {
+  if (!spec || typeof spec !== 'object') return null
+  const c = spec as Partial<ProfilesSpec>
+  if (c.version !== SUPPORTED_SPEC_VERSION || c.kind !== 'profiles') return null
+  if (!Array.isArray(c.items) || !c.items.length) return null
+  if (!Array.isArray(c.segments) || !c.segments.length) return null
+  if (!Array.isArray(c.values) || c.values.length !== c.segments.length) return null
+  if (c.values.some((row) => row.length !== c.items!.length)) return null
+  return c as ProfilesSpec
+}
+
+/** Counts must line up with the edges bounding them. */
+export function usableGorge(spec: unknown): GorgeSpec | null {
+  if (!spec || typeof spec !== 'object') return null
+  const c = spec as Partial<GorgeSpec>
+  if (c.version !== SUPPORTED_SPEC_VERSION || c.kind !== 'gorge') return null
+  if (!Array.isArray(c.edges) || !Array.isArray(c.counts)) return null
+  if (c.counts.length !== c.edges.length - 1 || !c.counts.length) return null
+  return c as GorgeSpec
 }

@@ -1010,7 +1010,16 @@ def chart_profiles(centroids, names=None, max_items=9, kind="means"):
             caption += (f" ({trimmed} more question{'' if trimmed == 1 else 's'} separated the "
                         "groups less and would not fit legibly here. The <strong>Full grid</strong> "
                         "tab shows every question with nothing left out.)")
-        return _finish(figure, "profiles", "What makes the groups different", caption)
+        spec = {
+            "kind": "profiles",
+            "items": [str(c) for c in keep],
+            "segments": _segment_key(k, names),
+            # values[segment][item], the same array the dots were placed from.
+            "values": [[round(float(v), 3) for v in row] for row in values],
+            "measure": "share" if kind == "shares" else "average",
+            "trimmed": int(trimmed),
+        }
+        return _finish(figure, "profiles", "What makes the groups different", caption, spec=spec)
 
 
 # There was a radar ("spider") chart here, showing each group as a polygon over the questions. It
@@ -1157,7 +1166,16 @@ def chart_gorge(shadow, names=None):
                    f"{stranded:.0%} are essentially on a boundary. " + verdict +
                    " Two humps with a dip between them — a gorge — is the signature of segments "
                    "that genuinely separate.")
-        return _finish(figure, "gorge", "Does anyone actually belong to one segment?", caption)
+        _counts, _edges = np.histogram(shadow, bins=np.linspace(0, 1, 41))
+        spec = {
+            "kind": "gorge",
+            "edges": [round(float(v), 4) for v in _edges],
+            "counts": [int(v) for v in _counts],
+            "median": round(float(np.median(shadow)), 4),
+            "people": int(len(shadow)),
+        }
+        return _finish(figure, "gorge", "Does anyone actually belong to one segment?", caption,
+                       spec=spec)
 
 
 def build_charts(seg, method, names=None, errors=None):

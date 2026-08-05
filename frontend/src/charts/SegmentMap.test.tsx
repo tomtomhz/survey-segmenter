@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { scaleLinear } from 'd3-scale'
 
@@ -119,12 +119,23 @@ describe('the interactive segment map', () => {
     expect(table.querySelectorAll('tbody tr').length).toBe(4)
   })
 
-  it('uses the theme variables so it follows light and dark like the static chart', () => {
-    render(<SegmentMap spec={spec()} title="The segment map" />)
-    const mark = document.querySelector('svg.chart .imap-mark') as SVGPathElement
-    expect(mark.getAttribute('fill')).toContain('var(--seg-0')
-    // The light hex stays as the fallback, so the chart is coloured even with no stylesheet.
-    expect(mark.getAttribute('fill')).toContain('#2a78d6')
+  it('follows the page into dark mode using the step the spec sent', async () => {
+    // Both steps travel in the spec, so the palette still has one home in charts.py — this only
+    // decides which of the two the component asks for. The previous version read var(--seg-N),
+    // which resolved only because the theme block Python injects into the STATIC svg is scoped to
+    // svg.chart and the interactive one carries that class too. It worked, and it depended on
+    // another renderer's stylesheet being in the document.
+    const { rerender } = render(<SegmentMap spec={spec()} title="The segment map" />)
+    const fill = () =>
+      (document.querySelector('svg.chart .imap-mark') as SVGPathElement).getAttribute('fill')
+
+    expect(fill()).toBe('#2a78d6')          // the light step, from the spec
+
+    document.documentElement.setAttribute('data-theme', 'dark')
+    rerender(<SegmentMap spec={spec()} title="The segment map" />)
+    await waitFor(() => expect(fill()).toBe('#3987e5'))   // the dark step, also from the spec
+
+    document.documentElement.removeAttribute('data-theme')
   })
 
   it('survives a single distinct answer pattern without dividing by zero', () => {

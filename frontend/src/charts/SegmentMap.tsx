@@ -4,6 +4,7 @@ import { scaleLinear } from 'd3-scale'
 
 import type { SegmentMapSpec } from './spec'
 import { markerPath } from './marks'
+import { segColour, useDarkMode } from './theme'
 
 /**
  * The segment map, drawn in the browser so it can be interrogated.
@@ -31,6 +32,7 @@ export function SegmentMap({ spec, title }: { spec: SegmentMapSpec; title: strin
   const [active, setActive] = useState<number | null>(null)
   const [showTable, setShowTable] = useState(false)
   const svgRef = useRef<SVGSVGElement | null>(null)
+  const dark = useDarkMode()
   const titleId = useId()
 
   // A viewBox rather than pixel sizes: the card is fluid and the chart should scale with it, the
@@ -99,11 +101,11 @@ export function SegmentMap({ spec, title }: { spec: SegmentMapSpec; title: strin
         className="imap-mark"
         d={markerPath(key.marker, sizes[i])}
         transform={`translate(${xs[i]} ${ys[i]})`}
-        fill={`var(--seg-${key.index}, ${key.colour})`}
+        fill={segColour(key, dark)}
         opacity={0.72}
       />
     )
-  }), [spec, byIndex, sizes, xs, ys])
+  }), [spec, byIndex, sizes, xs, ys, dark])
 
   function pointerMove(event: React.PointerEvent<SVGSVGElement>) {
     const svg = svgRef.current
@@ -163,7 +165,7 @@ export function SegmentMap({ spec, title }: { spec: SegmentMapSpec; title: strin
           const key = byIndex[r.segment]
           return key && r.path ? (
             <path key={`region-${r.segment}`} d={r.path}
-                  fill={`var(--seg-${key.index}, ${key.colour})`}
+                  fill={segColour(key, dark)}
                   opacity={Math.max(0.05, 0.13 - 0.012 * spec.segments.length)} />
           ) : null
         })}
@@ -177,10 +179,10 @@ export function SegmentMap({ spec, title }: { spec: SegmentMapSpec; title: strin
           const cy = yScale(c.y)
           return (
             <g key={c.segment} transform={`translate(${cx} ${cy})`}>
-              <circle r={11} fill="var(--chart-surface, #FBFAF3)"
-                      stroke={`var(--seg-${key.index}, ${key.colour})`} strokeWidth={2.6} />
+              <circle r={11} fill="var(--card)"
+                      stroke={segColour(key, dark)} strokeWidth={2.6} />
               <text textAnchor="middle" dominantBaseline="central" fontSize={11}
-                    fontWeight="700" fill={`var(--seg-${key.index}, ${key.colour})`}>
+                    fontWeight="700" fill={segColour(key, dark)}>
                 {c.segment}
               </text>
             </g>
@@ -213,7 +215,7 @@ export function SegmentMap({ spec, title }: { spec: SegmentMapSpec; title: strin
         {spec.segments.map((key) => (
           <li key={key.index}>
             <svg viewBox="-9 -9 18 18" aria-hidden="true" focusable="false">
-              <path d={markerPath(key.marker, 90)} fill={`var(--seg-${key.index}, ${key.colour})`} />
+              <path d={markerPath(key.marker, 90)} fill={segColour(key, dark)} />
             </svg>
             {key.label}
           </li>
@@ -224,7 +226,7 @@ export function SegmentMap({ spec, title }: { spec: SegmentMapSpec; title: strin
         {hovered ? (
           <>
             <span className="imap-swatch" aria-hidden="true"
-                  style={{ background: `var(--seg-${hovered.segment.index}, ${hovered.segment.colour})` }} />
+                  style={{ background: segColour(hovered.segment, dark) }} />
             <strong>{hovered.segment.label}</strong>
             {` — ${hovered.people.toLocaleString()} ${hovered.people === 1 ? 'person' : 'people'} `}
             {'answered exactly like this'}

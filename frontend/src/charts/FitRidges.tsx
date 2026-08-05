@@ -2,6 +2,7 @@ import { useId, useMemo, useState } from 'react'
 import { scaleLinear } from 'd3-scale'
 
 import type { FitSpec } from './spec'
+import { segColour, useDarkMode } from './theme'
 
 /**
  * How well each group's people fit it, one distribution per segment.
@@ -18,6 +19,7 @@ import type { FitSpec } from './spec'
 export function FitRidges({ spec, title }: { spec: FitSpec; title: string }) {
   const [active, setActive] = useState<{ row: number; bin: number } | null>(null)
   const titleId = useId()
+  const dark = useDarkMode()
 
   const width = 720
   const rowHeight = 74
@@ -84,7 +86,7 @@ export function FitRidges({ spec, title }: { spec: FitSpec; title: string }) {
                     y={base - tall}
                     width={Math.max(right - left - 1, 1)}
                     height={Math.max(tall, count > 0 ? 1 : 0)}
-                    fill={`var(--seg-${key?.index ?? 0}, ${key?.colour ?? '#2a78d6'})`}
+                    fill={segColour(key, dark)}
                     opacity={on ? 1 : 0.82}
                     tabIndex={0}
                     role="button"
