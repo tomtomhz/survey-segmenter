@@ -91,21 +91,36 @@ SEG_MARKERS = ("o", "s", "^", "D", "v", "P", "X", "*")
 # with a genuinely neutral middle so "no difference" reads as nothing. Never used for identity.
 DIVERGING = ("#2a78d6", "#f0efec", "#e34948")
 
+# The page behind the chart. Marks that overlap are separated by a ring in THIS colour rather than
+# in white, so the ring reads as a gap rather than as an outline — on a dark page a white ring
+# around every dot looks like a deliberate stroke, which is not what it is. Swapped for a CSS
+# variable on the way out exactly like the segment hues, so it follows the reader's theme.
+_SURFACE = "#FBFAF3"
+_SURFACE_DARK = "#222724"
+
+# The app's own accent, and deliberately NOT one of the identity slots — that was the mistake
+# this rework exists to fix, and the first attempt at this line repeated it by reaching for the
+# palette's violet. Emphasis is a different job from identity, so it gets a colour from outside
+# the set: the green the interface already uses for "this is the thing to look at".
+_METRIC_LEAD = "#46785C"
+_METRIC_LEAD_DARK = "#7FB48F"
+
 SEG_COLOURS = SEG_LIGHT       # the old name; everything reads it through seg_colour()
 
 # Injected into every chart. Both scopes are declared on purpose: the media query follows the
 # operating system, and the [data-theme] rules follow the reader's own toggle in the app, which
 # has to win in BOTH directions — hence the :not() guard letting an explicit light choice beat an
 # OS set to dark.
-_THEME_STYLE = ("<style>" + "".join(
-    f"--seg-{i}:{light};" for i, light in enumerate(SEG_LIGHT)).join(("svg.chart{", "}")) + "".join((
-        "@media (prefers-color-scheme:dark){:root:not([data-theme=light]) svg.chart{",
-        "".join(f"--seg-{i}:{dark};" for i, dark in enumerate(SEG_DARK)),
-        "}}",
-        ":root[data-theme=dark] svg.chart{",
-        "".join(f"--seg-{i}:{dark};" for i, dark in enumerate(SEG_DARK)),
-        "}",
-    )) + "</style>")
+_LIGHT_VARS = ("".join(f"--seg-{i}:{c};" for i, c in enumerate(SEG_LIGHT))
+               + f"--chart-surface:{_SURFACE};--chart-lead:{_METRIC_LEAD};")
+_DARK_VARS = ("".join(f"--seg-{i}:{c};" for i, c in enumerate(SEG_DARK))
+              + f"--chart-surface:{_SURFACE_DARK};--chart-lead:{_METRIC_LEAD_DARK};")
+_THEME_STYLE = ("<style>"
+                f"svg.chart{{{_LIGHT_VARS}}}"
+                "@media (prefers-color-scheme:dark){:root:not([data-theme=light]) svg.chart{"
+                f"{_DARK_VARS}}}}}"
+                f":root[data-theme=dark] svg.chart{{{_DARK_VARS}}}"
+                "</style>")
 
 # Everything that is chrome rather than data is drawn in this colour and rewritten as
 # `currentColor` when the SVG is emitted. It has to be a value matplotlib will not produce by
@@ -124,6 +139,23 @@ _COUNT_DOT_MAX = 460.0
 # values plotted are identical either way — and it exists because the patch count is what made an
 # uncapped chart slow, not the arithmetic.
 _BARS_MAX = 400
+
+# Marks are kept as vector up to these counts and rasterised above them. The threshold is a real
+# trade-off, not tidiness: only VECTOR marks carry the CSS variables, so only vector marks follow
+# the reader into dark mode. Rasterised marks bake the light palette into a bitmap, and measured
+# on the app's dark card that leaves the violet slot at 1.77:1 contrast.
+#
+# Measured SVG weight for the map, drawn once per distinct answer pattern:
+#     207 marks   32 KB rasterised    85 KB vector
+#     698 marks   72 KB              258 KB
+#   2,962 marks   90 KB            1,011 KB
+#  49,975 marks   91 KB           16,915 KB
+#
+# So vector below ~1,500 marks costs a few hundred KB and buys correct dark mode; above it the
+# file grows without bound. Ordinary survey work — a few hundred to a few thousand people on a
+# short questionnaire — sits comfortably under the line, which is exactly the case that matters.
+_VECTOR_MARKS_MAX = 1500
+_VECTOR_FILL_MAX = 3000
 
 # Text is laid out with DejaVu Sans — matplotlib ships it, so every machine and the packaged app
 # measure identically — and then the SVG is told to *render* with the page's own stack, so a chart
@@ -267,6 +299,10 @@ class _Figure:
         for slot, light in enumerate(SEG_LIGHT):
             for form in (light, light.upper()):
                 out = out.replace(form, f"var(--seg-{slot}, {light})")
+        for form in (_SURFACE, _SURFACE.upper(), _SURFACE.lower()):
+            out = out.replace(form, f"var(--chart-surface, {_SURFACE})")
+        for form in (_METRIC_LEAD, _METRIC_LEAD.upper(), _METRIC_LEAD.lower()):
+            out = out.replace(form, f"var(--chart-lead, {_METRIC_LEAD})")
         # Let it scale to its container rather than sitting at a fixed pixel width.
         out = out.replace("<svg ", '<svg class="chart" preserveAspectRatio="xMidYMid meet" ', 1)
         # The dark steps travel inside the chart rather than living in the app's stylesheet. A
@@ -415,7 +451,7 @@ def chart_segment_map(X, labels, names=None, seed=0):
                 # keeps working on a photocopy.
                 ax.scatter(spots[here, 0], spots[here, 1], s=area[here], c=seg_colour(c),
                            marker=seg_marker(c), alpha=0.62, linewidths=0,
-                           label=_label(names, c), rasterized=True)
+                           label=_label(names, c), rasterized=len(spots) > _VECTOR_MARKS_MAX)
         for c in live:
             # A plain white badge with the segment's colour as its ring, whatever shape that
             # segment's respondents wear. White text written straight onto the marker worked
@@ -423,7 +459,7 @@ def chart_segment_map(X, labels, names=None, seed=0):
             # is no solid centre to write on and the number became unreadable. The shape identity
             # is already carried by the hundreds of dots around it — the centre only has to be
             # findable and named.
-            ax.scatter(*cents[c], s=330, c="white", marker="o",
+            ax.scatter(*cents[c], s=330, c=_SURFACE, marker="o",
                        edgecolors=seg_colour(c), linewidths=2.6, zorder=6)
             ax.annotate(str(c), cents[c], color=seg_colour(c), fontsize=10, fontweight="bold",
                         ha="center", va="center", zorder=7)
@@ -566,7 +602,8 @@ def chart_silhouette(X, labels, names=None, max_rows=900, metric="euclidean", fi
                 # it made a 4.9 MB SVG for 50,000 people. The raster still contains every one of
                 # them — this bounds the file, it does not drop anybody.
                 ax.fill_betweenx(rung, 0, here, step="post", color=seg_colour(c), alpha=0.85,
-                                 linewidth=0, label=_label(names, c), rasterized=True)
+                                 linewidth=0, label=_label(names, c),
+                                 rasterized=len(sv) > _VECTOR_FILL_MAX)
             y += len(here) + max(4, len(sv) // 60)      # a gap so groups read as blocks
 
         ax.axvline(0, color=_INK, linewidth=1, alpha=0.5)
@@ -625,7 +662,6 @@ def chart_silhouette(X, labels, names=None, max_rows=900, metric="euclidean", fi
 #: drawn in ink. These lines are METRICS, not segments — colouring them from the identity palette
 #: made orange mean "Group 1" on four charts and "Separation (silhouette)" on this one.
 _METRIC_INK = _INK
-_METRIC_LEAD = "#4a3aa7"
 _METRIC_MARKS = ("s", "^", "D", "v")
 
 
@@ -745,9 +781,32 @@ def chart_profiles(centroids, names=None, max_items=9, kind="means"):
         for j, row in enumerate(values.T):
             ax.plot([np.nanmin(row), np.nanmax(row)], [y[j], y[j]], color=_INK, alpha=0.22,
                     linewidth=2.5, solid_capstyle="round", zorder=1)
+        # Nudge apart, vertically, any groups that answered a question almost identically. Two
+        # groups landing on the same value would otherwise draw one dot on top of another and the
+        # chart would silently show five groups where there are six. The offset is along the
+        # category axis, where position carries no meaning — the value each dot reports is
+        # untouched, which is the difference between separating marks and jittering data.
+        offsets = np.zeros_like(values)
+        if k > 1 and np.isfinite(values).any():
+            reach = float(np.nanmax(values) - np.nanmin(values)) or 1.0
+            for j in range(values.shape[1]):
+                order = np.argsort(values[:, j])
+                lane, previous = 0, -np.inf
+                for i in order:
+                    if values[i, j] - previous < reach * 0.045:
+                        lane += 1
+                    else:
+                        lane = 0
+                    offsets[i, j] = lane
+                    previous = values[i, j]
+            # Centre each question's stack on its own row so the rule still runs through it.
+            offsets -= offsets.mean(0)
+            offsets *= 0.13
+
         for i in range(k):
-            ax.scatter(values[i], y, s=118, color=seg_colour(i), marker=seg_marker(i),
-                       label=_label(names, i), zorder=3, edgecolors="white", linewidths=1.2)
+            ax.scatter(values[i], y + offsets[i], s=118, color=seg_colour(i),
+                       marker=seg_marker(i), label=_label(names, i), zorder=3,
+                       edgecolors=_SURFACE, linewidths=1.4)
         ax.set_yticks(y)
         ax.set_yticklabels([_short(c, 26) for c in keep])
         ax.set_ylim(len(keep) - 0.5, -0.5)

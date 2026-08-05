@@ -3328,3 +3328,102 @@ def test_the_per_person_fit_chart_covers_everyone_and_stays_quick():
     # when it has fallen back to a sample rather than silently implying full coverage.
     fallback = charts.chart_silhouette(Xs, labels, fit=None)
     assert fallback is not None and "random" in fallback["caption"]
+
+
+def test_colour_does_exactly_one_job_per_chart():
+    """The palette rework, pinned.
+
+    Colour here does four jobs — which segment somebody is in, whether a value is above or below
+    average, how much of something there is, and plain chrome — and the charts used to do all of
+    them with one set of hues. Orange meant "Group 1" on four charts, "Separation (silhouette)" on
+    the choice-of-k chart and "above average" on the heatmap, so a reader who learned one was
+    misled by the next.
+    """
+    # Identity and polarity must not share hues, or "above average" and "Group 1" look alike.
+    assert not (set(charts.SEG_LIGHT) & {charts.DIVERGING[1]})
+    assert charts.DIVERGING[1] not in charts.SEG_LIGHT, "the diverging midpoint must read as nothing"
+    assert len(set(charts.SEG_LIGHT)) == len(charts.SEG_LIGHT) == len(charts.SEG_DARK)
+    assert len(charts.SEG_MARKERS) == len(charts.SEG_LIGHT), "every slot needs its own shape"
+    assert len(set(charts.SEG_MARKERS)) == len(charts.SEG_MARKERS)
+
+    rng = np.random.default_rng(0)
+    n = 400
+    centres = np.array([[5, 1, 5, 1], [1, 5, 1, 5], [3, 3, 5, 5]], float)
+    truth = rng.integers(0, 3, n)
+    X = _likert(centres[truth] + rng.normal(0, 0.7, (n, 4))).astype(float)
+    labels = sk._km(X, 3, 10, 0).labels_
+
+    # The whole-sample gorge must not wear a segment's colour: it describes everybody, and in
+    # Group 0's green it read as a chart about Group 0.
+    shadow = sk.shadow_values(X, sk.segment_centres(X, labels))[0]
+    gorge = charts.chart_gorge(shadow)
+    for hue in charts.SEG_LIGHT:
+        assert f"var(--seg-{charts.SEG_LIGHT.index(hue)}" not in gorge["svg"], (
+            "the gorge histogram is wearing a segment colour")
+
+    # The choice-of-k lines are metrics, not segments, and must not borrow identity hues either.
+    diag = pd.DataFrame({"k": [2, 3, 4], "prediction_strength": [0.9, 0.95, 0.6],
+                         "stability_ARI": [0.8, 0.85, 0.5], "silhouette": [0.5, 0.55, 0.3]})
+    kchart = charts.chart_k_choice(diag, 3)
+    assert "var(--seg-" not in kchart["svg"], "the k chart is using the segment palette"
+    assert charts._METRIC_LEAD not in charts.SEG_LIGHT, (
+        "the emphasis colour is one of the identity slots — the very collision being removed")
+    assert "var(--chart-lead" in kchart["svg"], "the emphasis colour must follow the theme too"
+    assert "decides" in kchart["svg"], "the deciding criterion should be named as such"
+
+
+def test_segments_are_told_apart_by_shape_as_well_as_colour():
+    """Required, not decorative.
+
+    The segment map is a scatter, so every pair of colours is on screen at once. Measured on the
+    eight-slot palette in that "all pairs" case: worst CVD separation ΔE 3.2 (green against
+    orange, protanopia) and worst normal-vision ΔE 7.1 (red against orange) — far below the floor
+    of 15, meaning two segments a reader with full colour vision cannot tell apart. Only the first
+    three slots clear all-pairs on colour alone, so shape carries the rest. It also survives a
+    photocopier, which colour does not.
+    """
+    rng = np.random.default_rng(0)
+    n = 900
+    centres = rng.integers(1, 6, (6, 5)).astype(float)
+    truth = rng.integers(0, 6, n)
+    X = _likert(centres[truth] + rng.normal(0, 0.7, (n, 5))).astype(float)
+    labels = sk._km(X, 6, 10, 0).labels_
+    chart = charts.chart_segment_map(X, labels)
+
+    # matplotlib emits each distinct marker shape as its own path in <defs>; six groups must not
+    # be drawn with one shape repeated.
+    assert chart["svg"].count("<path id=") >= 6, "the map is drawing every group with one shape"
+    assert len({sk.seg_marker(i) for i in range(6)}) == 6
+
+
+def test_charts_carry_their_own_dark_mode():
+    """A chart is downloaded, pasted into a document and printed, so its theming travels with it.
+
+    Segment hues ship as CSS variables with the light value as the fallback, and each SVG carries
+    the dark steps itself. Two scopes are declared on purpose: the media query follows the
+    operating system and the [data-theme] rules follow the reader's own toggle, which has to win
+    in both directions.
+    """
+    rng = np.random.default_rng(0)
+    X = _likert(np.array([[5, 1, 5], [1, 5, 1], [3, 3, 5]], float)[
+        rng.integers(0, 3, 300)] + rng.normal(0, 0.6, (300, 3))).astype(float)
+    chart = charts.chart_segment_map(X, sk._km(X, 3, 10, 0).labels_)
+    svg = chart["svg"]
+
+    assert "prefers-color-scheme:dark" in svg and "[data-theme=dark]" in svg
+    assert ":root:not([data-theme=light])" in svg, "an explicit light choice must beat OS dark"
+    for slot in range(3):
+        assert f"--seg-{slot}:{charts.SEG_LIGHT[slot]}" in svg
+        assert f"--seg-{slot}:{charts.SEG_DARK[slot]}" in svg
+        # The light value stays as the var()'s fallback, so a chart opened outside the app — in a
+        # document, a mail client, a printed page — is coloured rather than black.
+        assert f"var(--seg-{slot}, {charts.SEG_LIGHT[slot]})" in svg
+    assert "--chart-surface" in svg, "separator rings need the page colour, not hard-coded white"
+
+    # var() resolves in a CSS declaration but NOT in an SVG presentation attribute, so every
+    # reference has to land inside style="…". If matplotlib ever emits `fill="…"` instead, the
+    # colours silently stop following the theme.
+    for hit in re.finditer(r"var\(--seg-\d", svg):
+        prefix = svg[max(0, hit.start() - 90):hit.start()]
+        assert "style=" in prefix.rsplit(">", 1)[-1], (
+            "a themed colour landed in a presentation attribute, where var() does not apply")
