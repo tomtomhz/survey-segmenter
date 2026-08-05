@@ -140,6 +140,14 @@ bump `SPEC_VERSION` so an older interface falls back to the static drawing inste
 it. A chart too large to stay responsive ships no spec on purpose (`INTERACTIVE_MAX_POINTS`), and
 there is always a correct static picture behind it.
 
+**Interactive charts take their colours from the spec, never from CSS variables.** Both the light
+and the dark step travel per segment, and `charts/theme.ts` decides which one the page wants. The
+previous arrangement read `var(--seg-N)`, which resolved only because the theme block Python
+injects into the *static* SVG is scoped to `svg.chart` and the interactive SVG carries that class
+too. It worked; it also meant every interactive chart's colours depended on the other renderer's
+stylesheet being in the document. Do not reintroduce that — and note the palette still has one home
+in `charts.py`, which is why the steps are sent rather than restated in TypeScript.
+
 **Colour does exactly one job per chart, and the palette is validated by a script, not by eye.**
 Four jobs — segment identity, above/below average, magnitude, and plain chrome — each get their
 own encoding and they do not overlap. They used to share one palette, so orange meant "Group 1" on

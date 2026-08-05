@@ -18,8 +18,8 @@ this says where it stands, what was decided and why, and what to do next.
 |---|---|
 | Repo | `github.com/tomtomhz/survey-segmenter` — **private**, MIT, owner `tomtomhz` |
 | CI | Python 3.9 / 3.11 / 3.12 + a clean-install job, green |
-| Tests | 146 Python (`pytest`) + 91 frontend (`cd frontend && npm test`) |
-| Shipped app | **v1.4.0 release**: macOS `.app` (82 MB) and Windows `.exe`, built and smoke-tested by the **Desktop app** workflow. Never in git history. The team's copy lives in `~/Desktop/Survey Segmenter (app for the team)/`. |
+| Tests | 146 Python (`pytest`) + 99 frontend (`cd frontend && npm test`) |
+| Shipped app | **v1.4.1 release**: macOS `.app` (82 MB) and Windows `.exe`, built and smoke-tested by the **Desktop app** workflow. Never in git history. The team's copy lives in `~/Desktop/Survey Segmenter (app for the team)/`. |
 | Local path | `~/dev/survey-segmenter` — **moved out of iCloud Drive**, see below |
 
 ```bash
