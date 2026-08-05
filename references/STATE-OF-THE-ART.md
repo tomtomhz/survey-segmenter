@@ -97,6 +97,36 @@ run through the same scikit-learn functions as the numeric path with nothing but
 `metric="manhattan"` — rather than a second family of hand-written Gower versions that would need
 their own tests and would drift.
 
+## Showing the data, not a version of it
+
+The segment map is the one chart that can falsify the whole result, so it is held to the same
+standard as the statistics. Three things were wrong with it and are measured here:
+
+| | Was | Now |
+|---|---|---|
+| Respondents drawn on the map | a random 1,200 | **all of them** |
+| Respondents on the per-person fit chart | a random 900 | **all of them** |
+| Visible on a 5-question survey, n=3,000 | 422 of 3,000 dots (**14%**) | all 3,000, as 422 dots sized by count |
+
+Rating answers come in whole steps, so respondents land on a finite grid and stack invisibly.
+Measured: 3,000 people answering five 1-5 questions occupy 422 distinct positions; with twelve
+questions it is 2,962, so this is a short-survey problem and short surveys are the common case.
+Each dot is therefore drawn once per distinct answer pattern with **area proportional to how many
+people share it**, plus a size key.
+
+**Jitter is rejected on purpose.** It is the usual remedy for discrete data, and Wilke's
+*Fundamentals of Data Visualization* states the cost plainly — jittering too much ends up "placing
+points in locations that are not representative of the underlying dataset". A chart whose only job
+is to let somebody check the answer must not invent coordinates to make itself readable.
+
+The decision-region shading is drawn in two dimensions while the grouping happened in as many
+dimensions as there are questions. Rather than assume those agree, the caption reports how often
+the picture's own rule reproduces the real assignment: 99.5-100% on well-separated survey data,
+and it drops — correctly warned about in the caption — on data where the projection is a poor
+shadow, e.g. 89% on pure noise where the two directions carry only 21% of the variation each.
+
+Per-axis variance share is on the axes themselves, not only in the prose.
+
 ## Choosing k, and refusing to
 
 The number of groups is not chosen by an elbow. It is a weighted panel, and the weighting is the

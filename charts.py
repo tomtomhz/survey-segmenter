@@ -56,6 +56,19 @@ SEG_COLOURS = ("#46785C", "#D55E00", "#0072B2", "#CC79A7", "#E69F00",
 # itself and that appears nowhere in the palette above.
 _INK = "#010203"
 
+# Marker AREA in points^2 for the segment map's count-weighted dots: the low end is a single
+# respondent, the high end whatever the busiest answer pattern holds. Area rather than radius
+# because area is how people read "how many" (Cleveland; Wilke), and a floor rather than a pure
+# proportion because one person sitting alone still has to be visible beside a stack of hundreds.
+_COUNT_DOT_MIN = 16.0
+_COUNT_DOT_MAX = 460.0
+
+# Above this many people in one group the per-respondent fit chart switches from drawing a
+# rectangle each to filling the same outline as a single polygon. Purely a drawing decision — the
+# values plotted are identical either way — and it exists because the patch count is what made an
+# uncapped chart slow, not the arithmetic.
+_BARS_MAX = 400
+
 # Text is laid out with DejaVu Sans — matplotlib ships it, so every machine and the packaged app
 # measure identically — and then the SVG is told to *render* with the page's own stack, so a chart
 # looks like part of the interface rather than a pasted-in figure. Metrics come from DejaVu either
@@ -132,7 +145,7 @@ class _Figure:
     exhaust memory over a day of use.
     """
 
-    def legend_below(self, ax, ncol):
+    def legend_below(self, ax, ncol, handles=None, labels=None):
         """Put the key under the whole figure rather than under the axes.
 
         Anchoring it to the axes means the offset is in axes-height fractions, so the same number
@@ -140,7 +153,8 @@ class _Figure:
         place it removes the guesswork — and stops the radar's bottom spoke label landing on top
         of the key.
         """
-        handles, labels = ax.get_legend_handles_labels()
+        if handles is None or labels is None:
+            handles, labels = ax.get_legend_handles_labels()
         if handles:
             self.fig.legend(handles, labels, loc="outside lower center", ncol=ncol, fontsize=10,
                             frameon=False, handletextpad=0.5, columnspacing=1.6)
@@ -222,39 +236,69 @@ def pca_2d(X):
     A = np.asarray(X, float)
     A = A - A.mean(0)
     if A.shape[1] == 1:                    # one item: spread it out so the points are visible
-        return np.column_stack([A[:, 0], np.zeros(len(A))]), 1.0
+        return np.column_stack([A[:, 0], np.zeros(len(A))]), 1.0, np.array([1.0, 0.0])
     U, S, _ = np.linalg.svd(A, full_matrices=False)
     var = S ** 2
     total = float(var.sum())
     coords = U[:, :2] * S[:2]
-    return coords, (float(var[:2].sum() / total) if total > 0 else 0.0)
+    kept = float(var[:2].sum() / total) if total > 0 else 0.0
+    # Per-axis as well as combined: the two directions rarely carry equal weight, and a reader
+    # judging whether a horizontal separation is meaningful needs to know what that axis is worth
+    # on its own, not just what the pair are worth together.
+    each = (var[:2] / total) if total > 0 else np.zeros(2)
+    return coords, kept, np.pad(np.asarray(each, float), (0, 2 - len(each)))
 
 
-def chart_segment_map(X, labels, names=None, max_points=1200, seed=0):
+def chart_segment_map(X, labels, names=None, seed=0):
     """The one chart that can falsify the whole result.
 
-    Every respondent is a dot, coloured by the group they were put in. Real segments show as
+    Every respondent is on it, coloured by the group they were put in. Real segments show as
     separated clumps; a segmentation imposed on structureless data shows as one cloud sliced into
     pie wedges — instantly obvious here and invisible in any table of fit statistics.
 
+    **Every respondent means every respondent.** Two things used to stop that being true, and both
+    bit hardest on exactly the short questionnaires this tool is usually pointed at:
+
+    1.  It drew a random 1,200 and admitted so in small print. A sample cannot falsify anything.
+    2.  Rating answers are discrete, so respondents land on a *finite grid* of positions and stack
+        invisibly on top of one another. Measured: 3,000 people answering five 1-5 questions
+        occupy 422 distinct positions, so a plain scatter shows 14% of the data and hides the
+        rest without saying so. With twelve questions it is 99% and the problem disappears — this
+        is a short-survey problem, and short surveys are the common case.
+
+    So each dot is drawn once per distinct answer pattern, with its **area proportional to how
+    many people share it**. That is exact: no jitter, no invented positions. Jitter is the usual
+    remedy and it is rejected here deliberately — Wilke states the danger plainly in *Fundamentals
+    of Data Visualization*, that jittering too much "end[s] up placing points in locations that
+    are not representative of the underlying dataset", and a chart whose whole job is to let
+    somebody check the answer must not invent coordinates to do it.
+
     The shaded regions behind the dots are the decision boundaries: which group a new person would
     be assigned to if they landed at that spot. They make the pie-slice failure unmistakable,
-    because imposed groups produce boundaries that cut straight through a single dense cloud.
+    because imposed groups produce boundaries that cut straight through a single dense cloud. They
+    are drawn in two dimensions while the grouping happened in as many dimensions as there are
+    questions, so the caption reports how often the picture's own rule reproduces the real
+    assignment instead of quietly assuming it does. Measured on ordinary survey data that is
+    99.5-100%, but it is a property of the data, not a guarantee.
     """
     X = np.asarray(X, float)
     labels = np.asarray(labels)
-    coords, kept = pca_2d(X)
+    coords, kept, spread = pca_2d(X)
     k = int(labels.max()) + 1 if len(labels) else 0
     if k <= 0 or len(coords) == 0:
         return None
 
-    # Centroids from ALL respondents, even when the scatter itself is thinned for file size.
     cents = np.array([coords[labels == c].mean(0) if (labels == c).any() else [np.nan, np.nan]
                       for c in range(k)])
-    idx = np.arange(len(coords))
-    thinned = len(idx) > max_points
-    if thinned:
-        idx = np.random.default_rng(seed).choice(len(coords), max_points, replace=False)
+
+    # Collapse respondents sitting at exactly the same spot into one marker carrying the count.
+    # Rounding first is what makes "exactly" reliable: two identical answer patterns can differ in
+    # the last bit or two after the projection's arithmetic, and would otherwise be drawn as two
+    # touching dots that read as one slightly darker one.
+    spots, first, counts = np.unique(np.round(coords, 9), axis=0,
+                                     return_index=True, return_counts=True)
+    spot_labels = labels[first]
+    stacked = int(counts.max())
 
     with _Figure() as figure:
         ax = figure.fig.add_subplot(111)
@@ -276,11 +320,16 @@ def chart_segment_map(X, labels, names=None, max_points=1200, seed=0):
                               "segments", [seg_colour(c) for c in range(k)], N=k),
                           vmin=-0.5, vmax=k - 0.5, rasterized=True)
 
+        # Area proportional to the number of people at that spot: the perceptually correct
+        # encoding for a count, and the reason a lone respondent stays visible next to a stack of
+        # two hundred rather than being scaled into nothing.
+        area = _COUNT_DOT_MIN + (_COUNT_DOT_MAX - _COUNT_DOT_MIN) * (
+            (counts - 1) / (stacked - 1) if stacked > 1 else np.zeros(len(counts)))
         for c in range(k):
-            here = idx[labels[idx] == c]
-            if len(here):
-                ax.scatter(coords[here, 0], coords[here, 1], s=22, c=seg_colour(c),
-                           alpha=0.62, linewidths=0, label=_label(names, c))
+            here = spot_labels == c
+            if here.any():
+                ax.scatter(spots[here, 0], spots[here, 1], s=area[here], c=seg_colour(c),
+                           alpha=0.62, linewidths=0, label=_label(names, c), rasterized=True)
         for c in live:
             ax.scatter(*cents[c], s=190, c=seg_colour(c), edgecolors="white", linewidths=2,
                        zorder=5)
@@ -289,12 +338,24 @@ def chart_segment_map(X, labels, names=None, max_points=1200, seed=0):
 
         ax.set_xlim(lo[0], hi[0])
         ax.set_ylim(lo[1], hi[1])
-        ax.set_xlabel("Direction 1 →")
-        ax.set_ylabel("← Direction 2")
+        # The share of the variation each direction carries belongs on the axis it describes, not
+        # only in the caption: somebody reading the picture on its own has to be able to see how
+        # much of the real spread they are actually looking at.
+        ax.set_xlabel(f"Direction 1 — {spread[0]:.0%} of the variation →")
+        ax.set_ylabel(f"← Direction 2 — {spread[1]:.0%}")
         ax.set_xticks([])
         ax.set_yticks([])
         ax.grid(False)
-        figure.legend_below(ax, ncol=min(k, 5))
+        handles, texts = ax.get_legend_handles_labels()
+        if stacked > 1:
+            # Without a key, a big dot reads as "important" rather than "many". Sizes are the
+            # real extremes in this data, so the reader can calibrate against something true.
+            from matplotlib.lines import Line2D
+            for count, size in ((1, _COUNT_DOT_MIN), (stacked, _COUNT_DOT_MAX)):
+                handles.append(Line2D([], [], marker="o", linestyle="none", color=_INK,
+                                      alpha=0.45, markersize=float(np.sqrt(size))))
+                texts.append(f"{count:,} {'person' if count == 1 else 'people'}")
+        figure.legend_below(ax, ncol=min(len(texts), 5), handles=handles, labels=texts)
 
         pct = int(round(kept * 100))
         if kept >= 0.7:
@@ -309,42 +370,85 @@ def chart_segment_map(X, labels, names=None, max_points=1200, seed=0):
                      "is a poor likeness of your data. Overlap here is weak evidence either way "
                      "— lean on the stability numbers instead.")
 
-        caption = ("Every dot is one respondent, placed so people who answered alike sit close "
-                   "together, and coloured by the group they were assigned to. Big numbered dots "
-                   "are the group centres, and the faint shaded regions show which group a new "
-                   "person landing there would be put into. <strong>What you want to see:</strong> "
-                   "colours forming their own clumps that the shaded regions follow. "
-                   "<strong>What is a warning sign:</strong> one continuous cloud with the "
-                   "boundaries cut across it like slices of a pie &mdash; that means the groups "
-                   "were imposed on the data rather than found in it. " + trust)
-        if thinned:
-            caption += (f" (Showing a random {max_points:,} of {len(coords):,} respondents so the "
-                        "chart stays quick to draw; the group centres use everyone.)")
+        # How often the picture's own rule — nearest centre, in these two dimensions — reproduces
+        # the assignment actually made using every question. Stated rather than assumed, because
+        # the shading claims to show where a new person would land and that claim is only true to
+        # the extent this number is high.
+        faithful = 1.0
+        if len(live) > 1:
+            d2 = np.stack([((coords - cents[c]) ** 2).sum(1) for c in live])
+            faithful = float((np.array(live)[d2.argmin(0)] == labels).mean())
+
+        counted = (f"All {len(coords):,} respondents are shown. Rating answers only come in whole "
+                   f"steps, so people who answered identically sit on exactly the same spot: "
+                   f"these {len(coords):,} people occupy {len(spots):,} distinct positions, and a "
+                   f"dot's area is how many of them share it (the busiest holds {stacked:,}). "
+                   "Nothing is sampled and no dot has been nudged to make it visible."
+                   if stacked > 1 else
+                   f"All {len(coords):,} respondents are shown, each on their own spot &mdash; "
+                   "nothing is sampled.")
+
+        caption = ("Every respondent is on this chart, coloured by the group they were assigned "
+                   "to. Big numbered dots are the group centres, and the faint shaded regions "
+                   "show which group a new person landing there would be put into. "
+                   "<strong>What you want to see:</strong> colours forming their own clumps that "
+                   "the shaded regions follow. <strong>What is a warning sign:</strong> one "
+                   "continuous cloud with the boundaries cut across it like slices of a pie "
+                   "&mdash; that means the groups were imposed on the data rather than found in "
+                   "it. " + counted + " " + trust)
+        if faithful < 0.95:
+            caption += (f" One caution about the shading: the groups were formed using all your "
+                        f"questions, and this is a flat drawing of that. Judging by position "
+                        f"alone here would put {(1 - faithful):.0%} of your respondents in a "
+                        "different group from the one they are actually in, so read the coloured "
+                        "regions as a rough guide rather than as the real boundary.")
 
         return _finish(figure, "map", "The segment map — do these groups actually separate?",
                        caption)
 
 
-def chart_silhouette(X, labels, names=None, max_rows=900, metric="euclidean"):
+def chart_silhouette(X, labels, names=None, max_rows=900, metric="euclidean", fit=None):
     """How well each individual person fits the group they were put in.
 
-    The conventional silhouette plot: one bar per respondent, sorted within group. A negative bar
-    is someone who sits closer to a different group than their own.
-    """
-    from sklearn.metrics import silhouette_samples
+    The conventional silhouette plot: one bar per respondent, sorted within group. A low bar is
+    somebody sitting near the boundary, about equally at home in a different group.
 
-    X = np.asarray(X, float)
+    `fit` is the per-respondent score the pipeline already computed for every single person — one
+    minus Leisch's shadow value, the same number that goes into the `fit` column of the exported
+    file. Prefer it, for two reasons. It covers **everyone**: the fallback below is scikit-learn's
+    silhouette, which needs every pairwise distance, so it had to be capped at a random 900
+    respondents and this chart then quietly described a sample of the study rather than the study.
+    And it is the same number the reader can look up per person in the CSV, so the picture and the
+    file cannot disagree.
+
+    The fallback is kept for the latent-class path, which has probabilities rather than centres and
+    so has no shadow value to use.
+    """
     labels = np.asarray(labels)
     k = int(labels.max()) + 1 if len(labels) else 0
     if k < 2 or len(np.unique(labels)) < 2:
         return None
-    rows = np.arange(len(X))
-    if len(rows) > max_rows:
-        rows = np.sort(np.random.default_rng(0).choice(len(X), max_rows, replace=False))
-    try:
-        sv = silhouette_samples(X[rows], labels[rows], metric=metric)
-    except Exception:
-        return None
+
+    if fit is not None and len(np.asarray(fit)) == len(labels):
+        sv = np.asarray(fit, float)
+        rows = np.arange(len(labels))
+        keep = np.isfinite(sv)
+        rows, sv = rows[keep], sv[keep]
+        if not len(sv):
+            return None
+        sampled = 0
+    else:
+        from sklearn.metrics import silhouette_samples
+
+        X = np.asarray(X, float)
+        rows = np.arange(len(X))
+        if len(rows) > max_rows:
+            rows = np.sort(np.random.default_rng(0).choice(len(X), max_rows, replace=False))
+        try:
+            sv = silhouette_samples(X[rows], labels[rows], metric=metric)
+        except Exception:
+            return None
+        sampled = len(X) - len(rows)
     mean = float(np.mean(sv))
 
     with _Figure(height=4.6) as figure:
@@ -354,8 +458,21 @@ def chart_silhouette(X, labels, names=None, max_rows=900, metric="euclidean"):
             here = np.sort(sv[labels[rows] == c])
             if not len(here):
                 continue
-            ax.barh(np.arange(y, y + len(here)), here, height=1.0, color=seg_colour(c),
-                    alpha=0.85, linewidth=0, label=_label(names, c))
+            rung = np.arange(y, y + len(here))
+            if len(here) <= _BARS_MAX:
+                ax.barh(rung, here, height=1.0, color=seg_colour(c), alpha=0.85, linewidth=0,
+                        label=_label(names, c))
+            else:
+                # One rectangle per respondent is 50,000 patches on a large study, which took 22
+                # seconds to draw and produced a picture indistinguishable from this one: past a
+                # few hundred people each bar is well under a pixel tall, so the outline IS the
+                # chart. Same respondents, same values, one polygon. Sampling instead would have
+                # been the easy fix and would have gone back to describing part of the study.
+                # Rasterised, because the polygon has one vertex per respondent: left as vector
+                # it made a 4.9 MB SVG for 50,000 people. The raster still contains every one of
+                # them — this bounds the file, it does not drop anybody.
+                ax.fill_betweenx(rung, 0, here, step="post", color=seg_colour(c), alpha=0.85,
+                                 linewidth=0, label=_label(names, c), rasterized=True)
             y += len(here) + max(4, len(sv) // 60)      # a gap so groups read as blocks
 
         ax.axvline(0, color=_INK, linewidth=1, alpha=0.5)
@@ -372,11 +489,24 @@ def chart_silhouette(X, labels, names=None, max_rows=900, metric="euclidean"):
         ax.set_xlabel("how well each person fits their group →")
         figure.legend_below(ax, ncol=min(k, 5))
 
-        n_neg = int((sv < 0).sum())
-        misfits = ("No respondent is actually misfiled — everyone sits closer to their own group "
-                   "than to any other." if n_neg == 0 else
-                   f"{n_neg} of {len(sv):,} respondents ({n_neg / len(sv):.0%}) sit closer to a "
-                   "different group than their own.")
+        # A silhouette can go negative (closer to another group); a fit score bottoms out at 0
+        # (exactly between two). Count whichever this is, and say which.
+        stranded = int((sv < 0).sum()) if sampled or fit is None else int((sv < 0.15).sum())
+        if stranded == 0:
+            misfits = ("No respondent is actually misfiled — everyone sits closer to their own "
+                       "group than to any other.")
+        elif fit is not None and not sampled:
+            misfits = (f"{stranded} of {len(sv):,} respondents ({stranded / len(sv):.0%}) sit "
+                       "almost exactly between two groups — they could belong to either, so "
+                       "filter on the `fit` column before spending money on a list.")
+        else:
+            misfits = (f"{stranded} of {len(sv):,} respondents ({stranded / len(sv):.0%}) sit "
+                       "closer to a different group than their own.")
+        misfits += (f" Every one of the {len(sv):,} respondents is drawn here."
+                    if not sampled else
+                    f" (Drawn from a random {len(sv):,} respondents — measuring this the exact "
+                    f"way needs every pair of respondents compared, which is not affordable for "
+                    f"all {len(sv) + sampled:,} of them.)")
         # The count of misfits alone reads reassuringly on data with no structure: a partition of
         # pure noise can have almost no NEGATIVE scores while every score sits near zero, which
         # means the groups barely separate. The average is what decides that, on Kaufman &
@@ -735,7 +865,13 @@ def build_charts(seg, method, names=None, errors=None):
 
     kind = "shares" if method == "lca" else "means"
     attempt("segment map", lambda: chart_segment_map(X, labels, names))
-    attempt("per-person fit", lambda: chart_silhouette(X, labels, names, metric=metric))
+    # 1 - shadow is the `fit` column of the exported file, computed for every respondent. Passing
+    # it means this chart covers everyone and cannot disagree with the CSV. The latent-class path
+    # has no shadow value, so it falls back to the sampled silhouette inside the chart.
+    _shadow = getattr(seg, "shadow", None)
+    _fit = None if _shadow is None else 1.0 - np.asarray(_shadow, float)
+    attempt("per-person fit",
+            lambda: chart_silhouette(X, labels, names, metric=metric, fit=_fit))
     attempt("choice of k", lambda: chart_k_choice(seg.diagnostics, int(seg.recommended_k)))
     if centroids is not None:
         attempt("group profiles", lambda: chart_profiles(centroids, names, kind=kind))

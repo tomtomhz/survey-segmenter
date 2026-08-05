@@ -24,6 +24,7 @@ import pytest
 # rather than relying on the working directory pytest happened to be invoked from.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import segment_kmeans as sk
+import charts
 import kprototypes as kp
 import webapp
 from sklearn.metrics import adjusted_rand_score
@@ -2179,13 +2180,38 @@ def test_the_segment_map_reports_how_much_of_the_data_it_is_actually_showing():
 
 def test_charts_never_draw_an_individual_respondent_by_name():
     """Every respondent is a dot on the segment map. Their id must not travel with the dot — the
-    charts are the part of the report most likely to be pasted into a deck or shared onward."""
+    charts are the part of the report most likely to be pasted into a deck or shared onward.
+
+    Embedded raster data is stripped before searching, and that is a correction rather than a
+    loosening. Charts rasterise the dense artists — the scatter, the heatmap's mesh, the fill on a
+    large study — and a base64 blob is arbitrary alphanumeric text, so a short id like "R4" turns
+    up inside it by pure chance. This test used to search the raw SVG and passed on luck; adding a
+    second rasterised artist was enough to produce 16 "hits", none of them real.
+
+    Nothing is given up by stripping it. A leaked id could only arrive as a label, and matplotlib
+    writes labels as real `<text>` elements (`svg.fonttype: none`) which survive the strip. No
+    rasterised artist in this file draws text at all.
+    """
     df = _three_group_survey()
     r = sk.run_analysis(df.to_csv(index=False).encode(),
                         cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
-    everything = "".join(c["svg"] for c in r["charts"])
+    markup = "".join(re.sub(r"data:image/[a-z]+;base64,[^\"']*", "", c["svg"])
+                     for c in r["charts"])
+    assert "<text" in markup, "stripping removed the labels too, so this test proves nothing"
     for rid in df["respondent_id"]:
-        assert rid not in everything
+        assert rid not in markup
+
+    # And the strip must not be hiding a real leak: an id planted into a chart label has to be
+    # caught. Question wording is the one respondent-adjacent string that legitimately reaches a
+    # chart, so use it to prove the search still works.
+    # No underscore: chart labels render underscores as spaces, so an underscored probe would
+    # fail for a reason that has nothing to do with what is being tested.
+    planted = df.rename(columns={"q1": "R7secret"})
+    r2 = sk.run_analysis(planted.to_csv(index=False).encode(),
+                         cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+    visible = "".join(re.sub(r"data:image/[a-z]+;base64,[^\"']*", "", c["svg"])
+                      for c in r2["charts"])
+    assert "R7secret" in visible, "a string drawn as a label was not detectable after stripping"
 
 
 def test_a_hostile_column_name_cannot_inject_markup_into_a_chart():
@@ -3207,3 +3233,91 @@ def test_asking_for_more_groups_than_the_answers_can_support_settles_immediately
     model = kp.KPrototypes(3, s, n_init=8, random_state=0).fit(kp.encode(data, s))
     assert adjusted_rand_score(truth, model.labels_) > 0.75
     assert (np.bincount(model.labels_, minlength=3) > 0).all(), "a real segment was left empty"
+
+
+def test_the_segment_map_shows_every_respondent_and_says_how_many_share_a_spot():
+    """The chart that exists to let somebody check the answer must not be showing a sample.
+
+    Two things used to stop it being the whole study, and both were invisible to the reader:
+
+    1.  It drew a random 1,200 respondents.
+    2.  Rating answers come in whole steps, so people who answered identically land on exactly
+        the same coordinates and hide under one another. Measured: 3,000 people answering five
+        1-5 questions occupy 422 distinct positions, so a plain scatter showed 14% of the data.
+
+    Fixed by drawing one dot per distinct answer pattern with its area proportional to how many
+    people share it. No jitter, deliberately — Wilke's *Fundamentals of Data Visualization* warns
+    that jittering too much places points "in locations that are not representative of the
+    underlying dataset", and this chart cannot invent coordinates to make itself readable.
+    """
+    rng = np.random.default_rng(0)
+    n = 3000
+    centres = np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1]], float)
+    truth = rng.integers(0, 3, n)
+    X = _likert(centres[truth] + rng.normal(0, 0.8, (n, 5))).astype(float)
+    lo, hi = X.min(0), X.max(0)
+    Xs = (X - lo) / np.where(hi > lo, hi - lo, 1)
+    labels = sk._km(Xs, 3, 10, 0).labels_
+
+    # The premise: this data really does hide most of itself under a plain scatter.
+    coords, _, _ = charts.pca_2d(Xs)
+    distinct = len(np.unique(np.round(coords, 9), axis=0))
+    assert distinct < n / 2, "pick data where respondents actually collide, or this proves nothing"
+
+    chart = charts.chart_segment_map(Xs, labels)
+    caption = chart["caption"]
+    assert f"All {n:,} respondents are shown" in caption
+    assert f"{distinct:,} distinct positions" in caption
+    assert "Nothing is sampled" in caption
+    assert "random" not in caption, "the map is describing a sample again"
+
+    # Every respondent must be accounted for by exactly one dot.
+    spots, counts = np.unique(np.round(coords, 9), axis=0, return_counts=True)
+    assert counts.sum() == n and len(spots) == distinct
+
+    # The size key has to be there, or a big dot reads as "important" rather than "many".
+    assert "1 person" in chart["svg"] and f"{int(counts.max()):,} people" in chart["svg"]
+    # And the share of variation belongs on the axes, not only in the prose.
+    assert re.search(r"Direction 1 — \d+% of the variation", chart["svg"])
+
+    # Continuous inputs (MaxDiff utilities) have no collisions; the chart must degrade to a
+    # plain scatter rather than claiming stacking that is not there.
+    smooth = rng.normal(0, 1, (400, 4))
+    plain = charts.chart_segment_map(smooth, sk._km(smooth, 3, 10, 0).labels_)
+    assert "distinct positions" not in plain["caption"]
+    assert "All 400 respondents are shown" in plain["caption"]
+
+
+def test_the_per_person_fit_chart_covers_everyone_and_stays_quick():
+    """It used to draw a random 900 people, because a silhouette needs every pairwise distance.
+
+    The pipeline already computes a per-respondent score for everybody — one minus Leisch's shadow
+    value, the same number in the `fit` column of the exported file — so the chart uses that and
+    covers the whole study. Drawing it then became the bottleneck instead: one rectangle per
+    respondent is 50,000 patches, which took 22 seconds and produced a picture identical to
+    filling the same outline once. Measured after: 0.2s and 20 KB at n = 50,000.
+    """
+    import time
+
+    rng = np.random.default_rng(0)
+    n = 5000
+    centres = np.array([[5, 1, 5, 1], [1, 5, 1, 5], [3, 3, 5, 5]], float)
+    truth = rng.integers(0, 3, n)
+    X = _likert(centres[truth] + rng.normal(0, 0.8, (n, 4))).astype(float)
+    lo, hi = X.min(0), X.max(0)
+    Xs = (X - lo) / np.where(hi > lo, hi - lo, 1)
+    labels = sk._km(Xs, 3, 10, 0).labels_
+    fit = 1.0 - sk.shadow_values(Xs, sk.segment_centres(Xs, labels))[0]
+
+    started = time.monotonic()
+    chart = charts.chart_silhouette(Xs, labels, fit=fit)
+    elapsed = time.monotonic() - started
+    assert f"Every one of the {n:,} respondents is drawn here" in chart["caption"]
+    assert "random" not in chart["caption"], "the fit chart is describing a sample again"
+    assert elapsed < 10, f"drawing every respondent took {elapsed:.1f}s"
+    assert len(chart["svg"]) < 400_000, "the fill was left as vector and the file exploded"
+
+    # Without per-person scores — the latent-class path — it still has to work, and must admit
+    # when it has fallen back to a sample rather than silently implying full coverage.
+    fallback = charts.chart_silhouette(Xs, labels, fit=None)
+    assert fallback is not None and "random" in fallback["caption"]
