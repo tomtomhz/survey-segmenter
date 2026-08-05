@@ -1194,8 +1194,47 @@ def _fraction_phrase(share):
     return f"about 1 in {d} ({pct}%)"
 
 
+def how_k_was_chosen(signals, chosen, k_min, k_max, unit="group"):
+    """One sentence saying the number was searched for, not assumed.
+
+    The tool tries every number in the range and scores each on nine criteria, but the report only
+    said so several sections down, under a heading a marketer has no reason to open. The person
+    who commissioned this asked whether the tool could "figure out the best k" — it already did,
+    and had been doing it silently. A finding nobody knows about is not a feature.
+
+    Naming the RUNNER-UP is the part that carries real information: "3 groups, and 4 was the next
+    best" is a different situation from "3 groups, and nothing else came close", and it is the
+    honest answer to the question every client asks — you said three, what if it were four?
+    """
+    if not signals:
+        return ""
+    votes = {}
+    for k in signals.values():
+        if k:
+            votes[int(k)] = votes.get(int(k), 0) + 1
+    total = sum(votes.values())
+    if not total:
+        return ""
+    mine = votes.get(int(chosen), 0)
+    rivals = sorted(((v, k) for k, v in votes.items() if k != int(chosen)), reverse=True)
+    line = (f"**I tried every number of {_plural(unit)} from {k_min} to {k_max}** and scored each "
+            f"one on {total} independent criteria; {mine} of them picked {chosen}")
+    if not rivals:
+        return line + ", and nothing else was chosen by any of them.\n"
+    count, runner = rivals[0]
+    if count >= mine:
+        return (line + f", and {count} picked {runner}. The two are close, so treat the number "
+                "itself as a judgement call and read the stability checks below before "
+                "committing to it.\n")
+    # "the number these criteria agree on" rather than "the clear answer": this sentence reports a
+    # vote, not a verdict. On structureless data a number still wins the vote, and calling that
+    # clear would contradict the red light two lines above it.
+    return (line + f" and the next nearest was {runner} with {count}, so {chosen} is the number "
+            "these criteria agree on most.\n")
+
+
 def executive_summary(n_resp, names, shares, wants, min_jaccard, repro, unit="group",
-                      k_agreement=None, cross_method=None):
+                      k_agreement=None, cross_method=None, k_choice=""):
     """The plain-language box at the top of every report: how many groups, who they are, how much
     to trust it (a green/amber/red confidence light built from the stability numbers), and what to
     do next. Written for someone who will never read the word 'eta-squared'.
@@ -1245,6 +1284,7 @@ def executive_summary(n_resp, names, shares, wants, min_jaccard, repro, unit="gr
                                               "as tentative and gather more data before betting on them.")
     L = ["## In plain language (read this first)\n",
          f"**Confidence: {light} {label}.** In plain terms, {meaning}\n",
+         k_choice or None,
          f"We looked at **{n_resp} people** and found **{len(names)} {_plural(unit)}** "
          "(a working number, not the only possibility):\n" if k_contested else
          f"We looked at **{n_resp} people** and found **{len(names)} {_plural(unit)}**:\n"]
@@ -1256,7 +1296,9 @@ def executive_summary(n_resp, names, shares, wants, min_jaccard, repro, unit="gr
     if label != "High":
         L.append(f"\n> Because confidence is {label}, treat these {_plural(unit)} as a direction to test "
                  "with a few interviews, not a settled fact.")
-    return "\n".join(L) + "\n"
+    # Filtered, because an optional line is carried as None rather than as an empty string that
+    # would leave a blank paragraph in the middle of the box.
+    return "\n".join(x for x in L if x is not None) + "\n"
 
 
 def _varsel_section(varsel, rec_k):
@@ -1504,7 +1546,7 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
                 var_importance, consensus_agreement, cfg, typing=None, varsel=None,
                 k_agreement=None, ward_ari=None, distinct_share=None,
                 single_cluster=False, gap_one=None, gap_two=None, neighbours=None,
-                median_shadow=None, persistence=None):
+                median_shadow=None, persistence=None, signals=None):
     _method = getattr(cfg, "method", "kmeans")
     method_name = {"gmm": "a Gaussian mixture / latent-class model ("
                           + cfg.gmm_covariance + " covariance)",
@@ -1530,6 +1572,7 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
     L = ["# Segmentation report\n",
          executive_summary(int(sizes["n"].sum()), _names, _shares, _wants,
                            min(jaccard.values()), split_half, unit="group", k_agreement=k_agreement,
+                           k_choice=how_k_was_chosen(signals, rec_k, cfg.k_min, cfg.k_max),
                            # The weaker of the two independent paradigms: a mixture model, which
                            # unlike k-means can represent a cluster's breadth, and Ward, which
                            # builds bottom-up rather than around centroids. If both put people
@@ -3476,7 +3519,8 @@ class Segmenter:
                                             float(np.median(self.shadow))
                                             if getattr(self, 'shadow', None) is not None
                                             and len(self.shadow) else None,
-                                            getattr(self, 'persistence', None))
+                                            getattr(self, 'persistence', None),
+                                            getattr(self, 'signals', None))
         if demographics is not None and (not isinstance(demographics, pd.DataFrame) or not demographics.empty):
             self.report_markdown += "\n\n" + self._profile_external(demographics, id_col)
         if outdir:

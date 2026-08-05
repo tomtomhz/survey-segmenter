@@ -3546,3 +3546,46 @@ def test_a_question_worded_like_a_colour_survives_the_charts():
     assert all(mine for mine, _, _ in results), "a run lost its own labels"
     assert all(not others for _, others, _ in results), "a run was given another run's labels"
     assert all(not leftover for _, _, leftover in results), "a masking sentinel escaped"
+
+
+def test_the_report_says_the_number_of_groups_was_searched_for():
+    """The tool has always chosen k by a nine-criterion panel and never said so where anyone reads.
+
+    The person who commissioned it asked whether it could "figure out the best k" — it already
+    did, several sections below a heading a marketer has no reason to open. A finding nobody knows
+    about is not a feature.
+
+    The runner-up is the part that carries information: "3 groups, and 4 was next" is a different
+    situation from "3 groups, and nothing else came close", and it is the honest answer to the
+    question every client asks — you said three, what if it were four?
+    """
+    rng = np.random.default_rng(0)
+    centres = np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1]], float)
+    df = pd.DataFrame(_likert(centres[rng.integers(0, 3, 500)] + rng.normal(0, 0.7, (500, 5))),
+                      columns=[f"q{i+1}" for i in range(5)])
+    df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=8, **FAST))
+    plain = r["digest"].split("## ")[1]           # the plain-language box, not a later section
+    assert "I tried every number of groups from 2 to 8" in plain
+    assert "independent criteria" in plain
+    assert str(r["k"]) in plain
+
+    # It reports a vote, not a verdict. On structureless data some number still wins, and calling
+    # that "the clear answer" would contradict the red light directly above it.
+    noise = pd.DataFrame(_likert(rng.normal(3, 1.1, (500, 5))),
+                         columns=[f"q{i+1}" for i in range(5)])
+    noise.insert(0, "respondent_id", [f"P{i}" for i in range(len(noise))])
+    rn = sk.run_analysis(noise.to_csv(index=False).encode(),
+                         cfg=sk.SegmentationConfig(k_min=2, k_max=8, **FAST))
+    assert rn["confidence"] == "low"
+    assert "clear answer" not in rn["digest"]
+    assert "these criteria agree on most" in rn["digest"]
+
+    # The sentence itself, on inputs the pipeline would not normally produce.
+    assert sk.how_k_was_chosen({}, 3, 2, 8) == ""
+    assert sk.how_k_was_chosen({"a": None}, 3, 2, 8) == ""
+    only = sk.how_k_was_chosen({"a": 3, "b": 3}, 3, 2, 8)
+    assert "nothing else was chosen by any of them" in only
+    tied = sk.how_k_was_chosen({"a": 3, "b": 4, "c": 4}, 3, 2, 8)
+    assert "judgement call" in tied, "a rival with more votes must not read as settled"
