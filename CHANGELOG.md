@@ -3,6 +3,27 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.4.1] — 2026-08-05
+
+### The remaining two charts became interactive
+
+All six now answer questions, rather than four of them — which was an inconsistency a reader
+notices immediately.
+
+- **What differs** settles what the static dot plot raises and cannot answer: two marks that nearly
+  touch, is that a real difference? Pointing at one reports the group, its value and the spread
+  across the whole row, and says outright when a question separates nobody.
+- **Do they separate** turns "looks a bit bimodal" into a number — how many respondents sit in a
+  band, and what share of the study that is.
+
+### Fixed
+
+- Interactive charts took their segment colours from a stylesheet the *static* renderer injects
+  into a different element. It worked, by coincidence of a shared CSS class, and would have broken
+  silently the day the static drawing was dropped for charts that have a spec. Both colour steps
+  already travel in the spec, so each chart now asks for the one matching the page. The palette
+  still has a single home in `charts.py`.
+
 ## [1.4.0] — 2026-08-05
 
 ### The charts can be asked questions
