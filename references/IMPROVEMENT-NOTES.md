@@ -157,6 +157,13 @@ piece of work, not a switch to flip.
 
 ---
 
+## Tried and rejected on the evidence
+
+- **Sparse k-means** (Witten & Tibshirani 2010) for variable weighting. Built, measured, not
+  adopted: it inflates the silhouette on pure noise from 0.12 to 0.39, its weights concentrate
+  identically on real structure and on noise, and it does not beat the eta-squared already
+  reported. See `STATE-OF-THE-ART.md` and `references/sparse_kmeans.py`.
+
 ## Deliberately not proposing
 
 - **Kernel, fuzzy, possibilistic, intuitionistic, metaheuristic and deep variants.** Roughly half

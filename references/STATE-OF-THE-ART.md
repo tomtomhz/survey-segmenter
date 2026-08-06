@@ -279,6 +279,28 @@ are worth it.
    attempting: merging may be the honest answer, and "improving" it risks trading the confidence
    property, which is the more valuable one.
 
+## Built, measured, and not adopted: sparse k-means
+
+Every question counts equally when respondents are grouped, and questions that separate nobody drag
+membership accuracy down — a real problem with a standard answer, Witten & Tibshirani's *A Framework
+for Feature Selection in Clustering* (JASA, 2010). It was implemented properly, measured against
+this tool's own conditions, and rejected. Reproduce with `python3 references/sparse_kmeans.py`.
+
+| What was asked | What was measured |
+|---|---|
+| Does it group people better? | On ordinary conditions, no: plain k-means already recovers the planted groups at ARI 1.00 and so does this. A gain appears only when noise questions outnumber real ones and the groups are weak — +0.13 at two real against ten noise |
+| Is it safe as the clustering method? | **No.** On pure noise it lifts the silhouette from 0.12 to 0.39 at six questions and from 0.06 to 0.43 at twelve. It picks whichever questions best split the noise and weights them up, so structureless data comes out looking separated |
+| Can its weights tell real from noise? | **No.** Share of weight on the top three questions: 99% on real structure, 96% on pure noise |
+| Does it beat what is already reported? | No. At ranking every real question above every noise question, eta-squared scored 5/5 across four conditions — and so did this |
+
+The stability gates did still catch the inflated case (split-half ARI 0.26-0.45 against 1.00 for
+real structure), so nothing would have escaped to a user. That is not a reason to ship it: a
+headline separation number that flatters noise should not exist and be contained downstream.
+
+A correctly implemented published method that solves a problem this tool does not have, using a
+capability it already owns, at the cost of a statistic that lies about noise. The implementation is
+kept under `references/` so the finding can be rechecked, and deliberately not shipped.
+
 ## What is not worth adopting
 
 The library is heavy on variants — kernel, fuzzy, possibilistic, metaheuristic, deep. For a tool
