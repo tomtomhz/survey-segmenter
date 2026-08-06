@@ -2943,12 +2943,28 @@ _DEMO_WORDS = {"gender", "sex", "age", "school", "university", "college", "count
                "citizenship", "programme", "program", "major", "cohort", "campus", "faculty",
                "department", "ethnicity", "income", "region", "hometown", "domestic",
                "international", "nationality",
+               # Everyday English background traits. 'education' was missing while the Swedish
+               # 'utbildning' below was present, so a Swedish survey's education column was set
+               # aside correctly and an English one was clustered on as though it were a rating —
+               # found on the Big Five inventory, where a 1-5 education code sat among 25 six-point
+               # items and became the 26th "question". A numeric demographic code is
+               # indistinguishable from a rating scale by its values alone; only the name betrays
+               # it, so the name list has to carry both languages for every entry.
+               "education", "educational", "employment", "employed", "occupation", "job",
+               "profession", "industry", "sector", "employer", "seniority", "tenure",
+               "marital", "household", "dependents", "salary", "wage", "earnings",
+               "postcode", "postal", "zip", "city", "town", "state", "province", "county",
+               "municipality", "language", "race", "degree", "qualification", "diploma",
+               "birthyear", "dob",
                # Nordic equivalents — Swedish-language surveys are common, and a mis-detected 'Kön' or
                # 'Universitet' would define the segments instead of describing them.
                "kön", "kjønn", "ålder", "alder", "universitet", "högskola", "hogskola",
                "lärosäte", "larosate", "land", "hemland", "nationalitet", "medborgarskap",
                "stad", "ort", "studieort", "kommun", "utbildning", "fakultet", "institution",
-               "årskurs", "arskurs", "termin", "inkomst", "examen", "studieprogram"}
+               "årskurs", "arskurs", "termin", "inkomst", "examen", "studieprogram",
+               "utbildningsnivå", "utbildningsniva", "sysselsättning", "sysselsattning", "yrke",
+               "civilstånd", "civilstand", "hushåll", "hushall", "lön", "lon", "språk", "sprak",
+               "modersmål", "modersmal", "postnummer", "födelseår", "fodelsear", "bransch"}
 _DEMO_PHRASES = ("study year", "year of study", "class year", "study programme", "study program")
 # A survey weight (e.g. post-stratification / design weight). Cluster UNWEIGHTED, but project the
 # segment SIZES to the population with these weights (studies often pool strata with weights).
@@ -3011,6 +3027,19 @@ def classify_columns(df, id_col=None):
             plan["skipped"].append(c); plan["notes"].append(f"'{c}': skipped (date, note, or free-text column)"); continue
         if nun <= 1:
             plan["skipped"].append(c); plan["notes"].append(f"'{c}': skipped (everyone gave the same answer)"); continue
+        # A row counter or a second identifier column is bookkeeping, not an answer. Clustering on
+        # one silently injects a fake gradient, so set it aside before the numeric branch below.
+        #
+        # This runs BEFORE the demographic name check because it is structural evidence and that
+        # one is only a name: a column running 1, 2, 3, ... n is bookkeeping whatever it is called,
+        # and the real file that prompted this rule had its counter named 'City_n'. Once 'city'
+        # joined the demographic vocabulary, a name match would otherwise have claimed it first and
+        # the counter would have been profiled as though it were a background trait.
+        if _looks_like_index(s) or _looks_like_id(s, name):
+            index_like.append(c)
+            plan["skipped"].append(c)
+            plan["notes"].append(f"'{c}': skipped (a row number or record id, not an answer)")
+            continue
         # A demographic column is a SHORT label ('Gender', 'Home country'), not a full sentence.
         # Requiring few substantive words stops an attitude question like "Campus politics puts me
         # off an app" from being mistaken for a demographic just because it mentions "campus".
@@ -3027,13 +3056,6 @@ def classify_columns(df, id_col=None):
                                  "groups afterwards, not to form them). If it should shape the "
                                  "groups instead, tick it under 'Group people on different "
                                  "questions'"); continue
-        # A row counter or a second identifier column is bookkeeping, not an answer. Clustering on
-        # one silently injects a fake gradient, so set it aside before the numeric branch below.
-        if _looks_like_index(s) or _looks_like_id(s, name):
-            index_like.append(c)
-            plan["skipped"].append(c)
-            plan["notes"].append(f"'{c}': skipped (a row number or record id, not an answer)")
-            continue
         if pd.api.types.is_numeric_dtype(s):
             plan["continuous"].append(c); plan["notes"].append(f"'{c}': number ratings, used as-is"); continue
         rec = _try_likert(s)

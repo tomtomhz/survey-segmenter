@@ -3980,3 +3980,50 @@ def test_response_styles_do_not_become_the_segments():
         "clearly about what people think")
     assert r["confidence"] != "high" or r["k"] == 3, (
         "merged the blurred segments and still reported high confidence")
+
+
+def test_demographics_are_recognised_in_both_languages():
+    """A numeric demographic code is indistinguishable from a rating scale by its values.
+
+    Education coded 1-5 looks exactly like a six-point Likert item, so only the column NAME can
+    tell them apart — which makes the name list load-bearing. It had drifted: the Swedish
+    'utbildning' was present and the English 'education' was not, so a Swedish survey's education
+    column was set aside correctly while an English one was clustered on. Found on the Big Five
+    inventory (psych::bfi), where a 1-5 education code sat among 25 six-point personality items
+    and silently became the 26th question.
+
+    Every pair below is one concept in both languages. A word recognised in one language and not
+    the other is the bug this test exists for.
+    """
+    pairs = [("Education", "Utbildning"), ("Gender", "Kön"), ("Age", "Ålder"),
+             ("Occupation", "Yrke"), ("Household size", "Hushåll"), ("Language", "Språk"),
+             ("City", "Stad"), ("Income", "Inkomst"), ("Postcode", "Postnummer"),
+             ("University", "Universitet"), ("Marital status", "Civilstånd")]
+    missed = [name for pair in pairs for name in pair if not sk._looks_demographic(name.lower())]
+    assert not missed, f"not recognised as background traits: {missed}"
+
+    # And the guard that keeps attitude questions out still holds: a rating item is a sentence,
+    # not a label, however many demographic words it happens to contain.
+    for question in ["Campus politics puts me off using an app like this",
+                     "My university should do more about student income inequality"]:
+        substantive = [w for w in re.findall(sk._WORD_RE, question.lower())
+                       if w not in sk._LABEL_STOP]
+        assert len(substantive) > 3, f"guard would misread a question as a demographic: {question}"
+
+
+def test_a_numeric_demographic_does_not_join_the_rating_grid():
+    """End to end: the education column must describe the segments, not help form them."""
+    rng = np.random.default_rng(4)
+    n = 300
+    centres = {0: [5, 1, 5, 1], 1: [1, 5, 1, 5], 2: [3, 3, 5, 5]}
+    who = rng.integers(0, 3, n)
+    rows = []
+    for i in range(n):
+        base = centres[who[i]]
+        rows.append([f"R{i}"] + [int(np.clip(round(b + rng.normal(0, 0.6)), 1, 5)) for b in base]
+                    + [int(rng.integers(1, 6))])          # education 1-5, unrelated to attitude
+    df = pd.DataFrame(rows, columns=["respondent_id", "q1", "q2", "q3", "q4", "education"])
+
+    _, _, _, items, plan = sk.auto_prepare(df)
+    assert "education" not in items, "education was used to form the groups"
+    assert "education" in plan["demographics"], "education was not kept for profiling either"
