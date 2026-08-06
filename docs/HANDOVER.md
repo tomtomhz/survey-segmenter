@@ -12,6 +12,32 @@ this says where it stands, what was decided and why, and what to do next.
 
 ---
 
+## Session state — 2026-08-06
+
+**Four commits sit on `main` after the v1.5.0 release**, and one of them matters enough to name:
+`Build from the declared dependencies` fixed a defect where **any CI-built app silently shipped
+without the dip test**. The v1.5.0 archive attached to the GitHub release is sound because it was
+built locally on a machine that already had `diptest`; a CI-built one before that commit would not
+have been. Cut a 1.5.1 before circulating anything built by CI.
+
+The four, oldest first:
+
+1. `Make the packaged smoke test check capabilities, not just that it runs` — the build now fails
+   if the dip test did not run or any chart lacks its spec.
+2. `Build from the declared dependencies, not from a second list of them` — the fix above found
+   this on its first CI run, on both platforms.
+3. `Record the Windows verification and the two-lists lesson` — docs.
+4. `Build sparse k-means, measure it, and do not adopt it` — see below.
+
+**Sparse k-means was built, measured and rejected.** It is in `references/sparse_kmeans.py`, not in
+the package, with a runnable reproduction. Do not reinstate it without reading
+`STATE-OF-THE-ART.md` first: it lifts the silhouette on *pure noise* from 0.12 to 0.39, and adds
+nothing over the eta-squared already reported (both ranked real questions above noise ones 5/5).
+That closes the last substantial item on the improvement list.
+
+**Nothing substantial is outstanding.** The remaining known gaps are all "blocked on something
+other than code" — see *Known limitations* below.
+
 ## Where it stands
 
 | | |
