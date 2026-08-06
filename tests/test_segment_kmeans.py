@@ -9,6 +9,7 @@ The two tests that matter most:
 A segmentation tool that fails either of those is worse than useless, because it will mislead.
 """
 import io
+import time
 import json
 import re
 import contextlib
@@ -4273,3 +4274,54 @@ def test_the_sampling_note_names_only_columns_that_are_there(monkeypatch):
         note = r["digest"].split("estimated on a sample")[1][:400]
         assert "consensus_PAC" not in note, "the note names a column that is not in the table"
         assert "silhouette" in note
+
+
+def test_encoding_an_answer_scale_does_not_depend_on_how_many_levels_it_has():
+    """`encode` maps each answer to its nearest known level. It did that with
+
+        np.abs(col[:, None] - known[None, :]).argmin(1)
+
+    which allocates one number per respondent PER LEVEL. On a five-point scale that is nothing.
+    On a column of 48,842 distinct values — which is what a continuous measurement looks like once
+    something has typed it as ordinal — it is 19 GB, and measured on the UCI adult file this one
+    line was the entire 11 GB peak of a run.
+
+    Two things are pinned here: that the replacement returns exactly what the scan returned,
+    including its tie-breaking, and that its cost no longer scales with the number of levels. The
+    size below would allocate about 13 GB the old way.
+    """
+    rng = np.random.default_rng(0)
+
+    def nearest_level_scan(X, spec):
+        """What the code used to do, kept as the definition of the right answer."""
+        Xe = np.array(X, float, copy=True)
+        for j, table in spec.ord_ranks.items():
+            known = np.array(sorted(table), float)
+            ranks = np.array([table[float(v)] for v in known], float)
+            Xe[:, j] = ranks[np.abs(Xe[:, j][:, None] - known[None, :]).argmin(1)]
+        for j, levels in spec.nom_levels.items():
+            Xe[~np.isin(Xe[:, j], levels), j] = kp.UNSEEN
+        return Xe
+
+    for _ in range(60):
+        n, p = int(rng.integers(5, 80)), int(rng.integers(1, 4))
+        levels = int(rng.integers(1, 8))
+        X = rng.integers(1, levels + 1, size=(n, p)).astype(float)
+        kinds = [kp.ORDINAL if rng.random() < 0.7 else kp.NOMINAL
+                 for _ in range(p)]
+        spec = kp.fit_spec(X, kinds)
+        # Values on levels, between them, and exactly midway — the tie case the scan resolved
+        # downwards, which the replacement has to resolve the same way.
+        probe = X + rng.normal(0, 0.4, X.shape)
+        probe = np.where(rng.random(X.shape) < 0.25, X + 0.5, probe)
+        assert np.allclose(nearest_level_scan(probe, spec), kp.encode(probe, spec),
+                           equal_nan=True), "the fast path disagrees with the scan it replaced"
+
+    n = levels = 40_000
+    wide = rng.choice(np.arange(levels, dtype=float), size=(n, 1))
+    spec = kp.fit_spec(wide, [kp.ORDINAL])
+    started = time.time()
+    out = kp.encode(wide, spec)
+    assert out.shape == wide.shape
+    assert time.time() - started < 30, (
+        "encoding is scaling with the number of levels again — the pairwise scan is back")

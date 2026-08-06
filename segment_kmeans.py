@@ -542,6 +542,16 @@ def _geometry(X, cfg):
 # of them may do is report a sampled number as though it covered the whole study.
 MAX_PAIRWISE_N = 6000
 
+# The working set for the k-selection panel and the validation estimates. Above this many
+# respondents those are computed from a random sample of this size; the final fit, every
+# respondent's segment, the profiles, the charts and the exports always use the whole file.
+#
+# 12,000 rather than less because the quantities estimated are proportions and rand indices whose
+# standard error is already small at a few thousand, and rather than more because the panel
+# performs well over a thousand clusterings of whatever it is handed — which is what turned 48,842
+# respondents into 11 GB and two minutes, through no single allocation but a thousand small ones.
+MAX_SEARCH_N = 12000
+
 
 def _pairwise_sample(n, cfg):
     """Row indices for a diagnostic that needs every pair, or None meaning 'use everybody'."""
@@ -3722,25 +3732,47 @@ class Segmenter:
         print(f"Segmenting {X.shape[0]} respondents on {X.shape[1]} items "
               f"({_how}). Running the diagnostic panel...\n")
 
-        self.hopkins = hopkins_statistic(X, np.random.default_rng(cfg.random_state + 7), cfg=cfg)
+        # THE WORKING SET FOR ESTIMATES. The panel that chooses k is made entirely of resampling
+        # estimates -- the gap statistic against 20 reference datasets, replication stability over
+        # 30 resamples, prediction strength over 10 splits, consensus over 50, bootstrap Jaccard
+        # over 100 -- which at seven candidate values of k is well over a thousand clusterings of
+        # the whole file. Measured on 48,842 respondents that climbed to 11 GB, and not through
+        # any single allocation: instrumenting every stage showed no call raising the high-water
+        # mark by more than 0.29 GB. It is a thousand fits each leaving a little behind.
+        #
+        # So the estimates run on a bounded random sample and the ANSWER covers everybody: the
+        # final fit, every respondent's segment, the profiles, the exports and the charts all use
+        # the full file. Estimating a resampling statistic from 12,000 people rather than 48,842
+        # is what those statistics are for; what would not be acceptable is a segmentation that
+        # quietly described a sample, and that is not what this does.
+        self.search_sample = None
+        if len(X) > MAX_SEARCH_N:
+            self.search_sample = np.random.default_rng(cfg.random_state + 91).choice(
+                len(X), MAX_SEARCH_N, replace=False)
+            print(f"NOTE: {len(X):,} respondents. The checks that choose the number of segments "
+                  f"are estimated on a random {MAX_SEARCH_N:,} of them; the segmentation itself, "
+                  "and every person's group, uses everybody.\n")
+        Xs = X[self.search_sample] if self.search_sample is not None else X
+
+        self.hopkins = hopkins_statistic(Xs, np.random.default_rng(cfg.random_state + 7), cfg=cfg)
         # A second, independent read on the same question. It uses the SAME projection the segment
         # map draws, so a reader comparing the number with the picture is looking at one thing.
         # See clusterability.py for why this is the dip on a principal component rather than on
         # pairwise distances, which is the form the literature recommends and which whole-number
         # survey answers break.
         try:
-            _coords, _kept, _ = _charts.pca_2d(_geometry(X, cfg)[0])
-            self.dip = clusterability.pca_dip(X, _coords[:, 0])
+            _coords, _kept, _ = _charts.pca_2d(_geometry(Xs, cfg)[0])
+            self.dip = clusterability.pca_dip(Xs, _coords[:, 0])
         except Exception as e:
             self.dip = {"skipped": f"could not be computed ({type(e).__name__})"}
         self.tendency = clusterability.agreement(self.hopkins, self.dip)
         # The one test in the panel that can return "this is a single group". See
         # supports_single_cluster for why the k>=2 search would otherwise never ask.
         self.single_cluster, self.gap_one, self.gap_two = supports_single_cluster(
-            X, cfg.gap_B, np.random.default_rng(cfg.random_state + 8), cfg.n_init_search, cfg)
+            Xs, cfg.gap_B, np.random.default_rng(cfg.random_state + 8), cfg.n_init_search, cfg)
         print(f"Cluster-tendency (Hopkins) = {self.hopkins:.2f} — {hopkins_reading(self.hopkins)}.\n")
 
-        self.diagnostics = selection_diagnostics(X, cfg)
+        self.diagnostics = selection_diagnostics(Xs, cfg)
         rec_k, rationale, self.signals = recommend_k(self.diagnostics, cfg)
         self.recommended_k = force_k or rec_k
         if force_k:
@@ -3767,12 +3799,17 @@ class Segmenter:
                 if cfg.use_consensus_final:
                     self.labels = cons_labels
                     print("Adopted the consensus ensemble partition as the final segmentation.\n")
-        self.split_half = split_half_replication(X, self.recommended_k, cfg)
+        self.split_half = split_half_replication(Xs, self.recommended_k, cfg)
         sil_overall = _silhouette(X, self.labels, cfg)
-        self.jaccard = clusterboot_jaccard(X, self.labels, self.recommended_k, cfg)
-        self.mb_agreement = model_based_agreement(X, self.recommended_k, self.labels, cfg,
+        # The remaining resampling checks run on the same working set, with the FINAL labels
+        # carried across so they judge the segmentation that was actually produced rather than one
+        # refitted to the sample. Bootstrap Jaccard alone is 100 clusterings, and it was being
+        # given all 48,842 respondents to resample.
+        _lab_s = self.labels[self.search_sample] if self.search_sample is not None else self.labels
+        self.jaccard = clusterboot_jaccard(Xs, _lab_s, self.recommended_k, cfg)
+        self.mb_agreement = model_based_agreement(Xs, self.recommended_k, _lab_s, cfg,
                                                   np.random.default_rng(cfg.random_state + 8))
-        self.ward_ari = ward_agreement(X, self.labels, self.recommended_k, cfg)
+        self.ward_ari = ward_agreement(Xs, _lab_s, self.recommended_k, cfg)
         self.var_importance = variable_importance(X_raw, self.labels, cfg)
         # Typing tool: the exportable rule for classifying new respondents, plus a leakage-free
         # cross-validated estimate of how reliably the segments can be reproduced out-of-sample.

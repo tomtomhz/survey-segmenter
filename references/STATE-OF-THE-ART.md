@@ -350,44 +350,63 @@ summarises may be sampled and disclosed; a diagnostic that must place every pers
 sampled at all.** Sampling one of the latter and reporting it as though it covered the study is
 the failure mode this tool exists to avoid.
 
-## Memory at scale: measured, part-diagnosed, and honestly incomplete (2026-08-06)
+## Memory at scale: diagnosed and fixed (2026-08-06)
 
-Two large real files, both completing, with very different memory:
+Two large real files. The first pass through them looked like this:
 
-| File | n | Method | Wall | Peak RSS |
-|---|---|---|---|---|
-| UCI bank marketing | 41,188 | Gower k-prototypes | 1.3 min | **1.24 GB** |
-| UCI adult / census | 48,842 | Gower k-prototypes | 2.2 min | **8.5-11.2 GB** |
+| File | n | Wall | Peak RSS |
+|---|---|---|---|
+| UCI bank marketing | 41,188 | 1.3 min | 1.24 GB |
+| UCI adult / census | 48,842 | 2.2 min | **8.5-11.2 GB** |
 
-Both produce sensible answers. The second would swap or die on a 16 GB laptop, and the peak
-**varies between 8.55 and 11.24 GB across identical runs**, which is itself informative — a fixed
-allocation does not wander by 3 GB.
+The second would swap or die on a 16 GB laptop, and the peak wandered by 3 GB across identical
+runs — which is not what a fixed allocation does.
 
-What has been ruled out by measurement, each in its own process (`ru_maxrss` is a high-water mark
-and never falls, so measuring several configurations inside one process reports nothing — an error
-made and corrected here):
+**One line, in `kprototypes.encode`.** It mapped each answer to its nearest known level with
 
-| Stage | Peak |
-|---|---|
-| Ingest: read, classify, prepare | 0.26 GB |
-| `selection_diagnostics` (whole k panel) | 1.78 GB |
-| `fit_final` | 0.26 GB |
-| `clusterboot_jaccard` | 0.21 GB |
-| `build_charts` (all seven) | +0.00 GB |
-| Consensus / variable selection / GMM off | no change |
+```python
+np.abs(col[:, None] - known[None, :]).argmin(1)
+```
 
-**One real defect found and fixed:** `maybe_plot` called `silhouette_samples` on every respondent
-with no guard — 2.4 billion pairwise distances at this size, 1.07 GB measured, for one panel of a
-PNG. It now uses the same subsample as the diagnostics table.
+which allocates one number per respondent **per level**. On a five-point scale that is nothing.
+Four of adult's columns are continuous measurements — age, a sampling weight, capital gains, hours
+— which the detector types as ordinal, so "levels" meant 48,842 distinct values and the
+intermediate was 19 GB per column. Replaced with a binary search: same answer, including the
+scan's habit of resolving an exact midpoint downwards, in O(n log levels) time and O(n) space.
+Verified identical over 300 random specs, and pinned by
+`test_encoding_an_answer_scale_does_not_depend_on_how_many_levels_it_has`.
 
-**The remaining ~6 GB is not localised.** It sits inside `Segmenter.run` outside the stages above.
-The run-to-run variance points at allocator behaviour across the several hundred k-means fits the
-panel performs — freed pages not returned to the OS — rather than one large array, but that is a
-hypothesis and it has not been tested. It is recorded here rather than guessed at, because the
-next person should start from the measurements and not from my theory.
+| File | Wall | Peak RSS |
+|---|---|---|
+| bank marketing, 41,188 | 0.94 min | 1.66 GB |
+| **adult, 48,842** | **0.89 min** (was 2.19) | **1.59 GB** (was 11.04) |
 
-**Practical reading:** studies up to about 40,000 respondents are comfortable. Beyond that, memory
-is unpredictable and untested, and the tool does not yet declare a supported ceiling — it should.
+**Worth recording how badly the search went, because the lesson is about method.** RSS sampling
+said the memory climbed gradually with no single culprit; instrumenting twenty-six functions
+showed no call raising the high-water mark by more than 0.29 GB. Both were true and both were
+misleading — `typing_tool`, where it actually lived, was not in the wrapped list. I concluded from
+that "no single allocation, therefore allocator churn across a thousand fits", wrote it into this
+file as a hypothesis, and it was wrong. What settled it was bisecting the *unwrapped* functions
+one at a time until `typing_tool` went 0.24 GB to 11.11 GB in one call.
+
+A negative result from an incomplete instrument is not evidence of absence, and "no single big
+allocation" was a conclusion about my wrapper list, not about the program.
+
+## Estimates on a working set, answers on everybody (2026-08-06)
+
+Separately from the above, and kept because it is right independently of it: the k-selection panel
+is made entirely of resampling estimates — the gap statistic against 20 reference datasets,
+replication stability over 30 resamples, prediction strength over 10 splits, consensus over 50,
+bootstrap Jaccard over 100 — which at seven candidate k values is well over a thousand clusterings
+of whatever it is handed.
+
+Above `MAX_SEARCH_N` (12,000) those estimates run on a random sample of that size, and the answer
+still covers everybody: the final fit, every respondent's segment, the profiles, the charts and
+the exports use the whole file. The report says so in as many words. Estimating a resampling
+statistic from 12,000 people rather than 48,842 is what such statistics are for; a segmentation
+that quietly described a sample would not be, and that is not what this does.
+
+Measured: it did not change the k chosen on either large file.
 
 ## First contact with real public data (2026-08-06)
 

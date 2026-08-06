@@ -210,8 +210,22 @@ def encode(X, spec):
         known = np.array(sorted(table), float)
         ranks = np.array([table[float(v)] for v in known], float)
         col = Xe[:, j]
-        idx = np.abs(col[:, None] - known[None, :]).argmin(1)
-        Xe[:, j] = ranks[idx]
+        # Nearest known level, by binary search. This was
+        #     np.abs(col[:, None] - known[None, :]).argmin(1)
+        # which allocates one number per respondent PER LEVEL. Harmless on a five-point scale;
+        # 19 GB on a column holding 48,842 distinct values, which is what a continuous measurement
+        # looks like once something has typed it as ordinal. Measured on the UCI adult file, this
+        # single line accounted for the whole 11 GB peak of a run.
+        #
+        # `known` is sorted, so searchsorted gives the insertion point and the answer is whichever
+        # neighbour is nearer — the same level the scan picked, keeping its habit of taking the
+        # lower one when a value falls exactly between two, in O(n log levels) time and O(n) space.
+        if len(known) == 1:
+            Xe[:, j] = ranks[0]
+            continue
+        pos = np.clip(np.searchsorted(known, col), 1, len(known) - 1)
+        take_left = np.abs(col - known[pos - 1]) <= np.abs(col - known[pos])
+        Xe[:, j] = ranks[np.where(take_left, pos - 1, pos)]
     for j, levels in spec.nom_levels.items():
         # A pick-any answer has no nearest neighbour to fall back on, so anything unrecognised
         # becomes its own level rather than being forced onto whichever code sorts closest.
