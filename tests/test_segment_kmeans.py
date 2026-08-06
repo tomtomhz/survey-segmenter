@@ -4370,3 +4370,33 @@ def test_an_answer_list_does_not_grow_with_the_number_of_respondents():
     assert "product_description" in plan_big["skipped"], \
         "accepted as a question purely because the study got bigger"
     assert "which_brand" in plan_big["categorical"], "a real question was dropped in a big study"
+
+
+def test_a_column_flattened_by_its_outliers_is_called_out():
+    """Range scaling divides by max minus min, so a couple of extreme values can flatten a column.
+
+    Measured on the UCI online retail file: a returned order of -80,995 against a median quantity
+    of 3 put **100% of 541,909 respondents inside 2% of the scale**. The segmentation then has
+    almost no geometry — k-means cannot separate points that are all but coincident, so it spends
+    every restart hitting its iteration limit (20 minutes on three columns) and what it returns
+    describes the outliers rather than the people.
+
+    Said, not silently corrected: whether those extremes are errors or the most interesting rows
+    in the file is the reader's call, and `--scaling robust` is named for them.
+    """
+    rng = np.random.default_rng(21)
+    n = 600
+    ordinary = rng.integers(1, 6, n).astype(float)
+    flattened = ordinary.copy()
+    flattened[0], flattened[1] = -80_000, 80_000          # two returns, as in the real file
+    df = pd.DataFrame({"respondent_id": [f"R{i}" for i in range(n)],
+                       "q1": ordinary, "q2": rng.integers(1, 6, n), "quantity": flattened})
+    notes = sk.classify_columns(df)["notes"]
+
+    flagged = [n_ for n_ in notes if "within 1%" in n_]
+    assert any("quantity" in n_ for n_ in flagged), (
+        "a column where two values set the whole range was presented as an ordinary answer scale")
+    assert not any("'q1'" in n_ or "'q2'" in n_ for n_ in flagged), \
+        "an ordinary 1-5 answer scale was flagged as flattened"
+    note = next(n_ for n_ in flagged if "quantity" in n_)
+    assert "robust" in note, f"the note does not name the remedy: {note}"

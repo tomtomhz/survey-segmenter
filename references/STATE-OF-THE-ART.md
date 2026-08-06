@@ -413,6 +413,26 @@ every pair simply differs) it did not finish in half an hour. The ceiling is now
 which real option lists — brands, universities, countries — sit well inside, and the columns are
 set aside with a note naming the override rather than dropped in silence.
 
+## A column its own outliers have flattened (2026-08-06)
+
+Range scaling divides by max minus min, so two extreme values can flatten a whole column. On the
+UCI online retail file a returned order of -80,995 against a median quantity of 3 put **100% of
+541,909 respondents inside 2% of the scale**.
+
+That is not only slow — k-means cannot separate points that are all but coincident, so it spends
+every restart hitting its iteration limit, which is why three numeric columns took 20 minutes when
+55 columns of covertype took three — it is wrong. Whatever comes back describes the two outliers
+rather than the half million people.
+
+Detected and stated, not silently corrected. `--scaling robust` divides by the interquartile range
+instead and exists for exactly this, but whether those extremes are data-entry errors or the most
+interesting rows in the file is a judgement about the study. The note names the remedy and leaves
+the choice.
+
+Fires correctly beyond the case that prompted it: `capital_loss` in the adult file (zero for
+about 95% of people) and `pdays` in bank marketing (999 for most) are both genuinely degenerate,
+and both are now called out rather than quietly contributing nothing.
+
 ## Estimates on a working set, answers on everybody (2026-08-06)
 
 Separately from the above, and kept because it is right independently of it: the k-selection panel

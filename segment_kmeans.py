@@ -3259,6 +3259,30 @@ def classify_columns(df, id_col=None):
                     "people on different questions' to profile the groups by it instead.")
             else:
                 plan["notes"].append(f"'{c}': number ratings, used as-is")
+            # A couple of extreme values can flatten a whole column. Range scaling divides by
+            # max - min, so a return of -80,995 against a median of 3 puts every ordinary
+            # respondent inside 2% of the scale — measured on the UCI online retail file, where
+            # 100% of 541,909 people landed in that band. The segmentation then has almost no
+            # geometry to work with: k-means cannot separate points that are all but coincident,
+            # spends every restart hitting its iteration limit (20 minutes on three columns), and
+            # what it does return describes the outliers rather than the people.
+            #
+            # Said, not silently corrected. --scaling robust exists for this and divides by the
+            # interquartile range instead, but which is right depends on whether those extremes
+            # are errors or the most interesting rows in the file, and that is the reader's call.
+            _v = pd.to_numeric(s, errors="coerce").to_numpy(float)
+            _v = _v[np.isfinite(_v)]
+            if len(_v) > 20:
+                _span = float(_v.max() - _v.min())
+                if _span > 0:
+                    _crowded = float(np.mean(np.abs((_v - _v.min()) / _span
+                                                    - (np.median(_v) - _v.min()) / _span) < 0.01))
+                    if _crowded > 0.95:
+                        plan["notes"].append(
+                            f"'{c}': {_crowded:.0%} of answers sit within 1% of the same value "
+                            "once the column is scaled, because a few extreme values set its "
+                            "range. Groups built on it will describe those extremes rather than "
+                            "the people. Consider removing the outliers, or --scaling robust.")
             continue
         rec = _try_likert(s)
         if rec is not None:
