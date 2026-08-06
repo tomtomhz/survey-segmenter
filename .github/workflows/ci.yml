@@ -35,8 +35,11 @@ jobs:
           # on an import rather than testing anything. No API key is used or needed.
           pip install ".[ai,excel,dev]"
 
+      # Every .py in the repo, found rather than listed. The named list had already gone stale --
+      # clusterability.py was never in it and so was never linted -- which is the same defect that
+      # kept a module out of the wheel twice and diptest out of every CI-built app.
       - name: Lint
-        run: pyflakes segment_kmeans.py webapp.py charts.py kprototypes.py ai_interpret.py maxdiff.py run_app.py build_app.py tests/
+        run: pyflakes $(git ls-files '*.py')
 
       - name: Test
         run: pytest -q

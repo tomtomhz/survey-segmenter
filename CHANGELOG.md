@@ -3,6 +3,46 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.5.2] — 2026-08-06
+
+### Fixed
+
+- **The tool could recommend the wrong number of segments and then report the real ones as
+  noise.** Found by reading a report end to end on a 400-person file with three planted segments.
+  It recommended two, called the result a *constructive* segmentation — the method inventing
+  groups where there are none — and rated confidence Moderate. Three segments were sitting in the
+  data: at k=3 the solution reproduced at 0.995 and predicted held-out respondents at 0.968,
+  against 0.658 and 0.593 for the two it chose. It had recovered the answer and then argued
+  itself out of it. Measured against the planted truth, the recovered segmentation scores 0.992
+  where the old one scored 0.618.
+
+  Two independent faults, either alone enough to lose it:
+
+  - The **replication-stability signal** used "the largest k that clears the cutoff". That is
+    Tibshirani & Walther's rule for prediction strength, where it is correct, and it had been
+    carried across to stability, where it is not: 0.778 and 0.995 both clear 0.75, so a signal
+    weighted double went to the visibly worse solution. Each k is now compared against the best
+    using its own measured standard error, so a k that is genuinely less stable drops out while
+    one that cannot be told apart stays in. This needed no tuning constant.
+  - The **tie-break** then went to the smaller k on parsimony grounds, over a k holding *both*
+    doubled criteria. Parsimony now breaks what those criteria leave level, rather than
+    overruling them.
+
+- **`--force-k` did nothing on the default path.** It was wired into each explicit `--method`
+  path and omitted from the automatic one, which is the default. The run finished, the report
+  never mentioned an override, and the number in it was the tool's own — so the reader believed
+  they were looking at the answer they asked for.
+
+- The plain-language line explaining the choice **counted a flat headcount of criteria while the
+  decision was weighted**, so it reported "5 of them picked 2" for a k that both of the criteria
+  this tool trusts most had argued against. It now reports the tally that actually decided, and
+  the weights live in one place instead of two that can disagree.
+
+- CI linted a **hand-written list of Python files** that had gone stale: `clusterability.py` was
+  never in it and so was never linted. It now lints what is in the repository. That is the fourth
+  time a hand-kept second list has broken something here — after two modules missing from the
+  wheel and `diptest` missing from every CI-built app.
+
 ## [1.5.1] — 2026-08-06
 
 ### Fixed

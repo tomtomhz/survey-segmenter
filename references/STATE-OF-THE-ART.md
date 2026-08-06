@@ -218,6 +218,42 @@ The weakness is real and worth stating plainly: **overlapping segments get merge
 mind-sets genuinely shade into one another, expect this tool to report one group and tell you the
 evidence is directional.
 
+### How the two reproducibility signals read the table (corrected 2026-08-06)
+
+The two highest-weighted signals answer their question differently, and conflating them cost a
+whole segmentation before anyone noticed.
+
+**Prediction strength** takes *the largest k that clears 0.80*. That is Tibshirani & Walther's
+published rule and it is right: prediction strength falls away as k passes the real structure, so
+the largest k still above the line is the finest split the data supports.
+
+**Replication stability has no such rule**, and the same "largest above the cutoff" logic had been
+carried across to it. It does not hold there. Measured on a file with three planted segments,
+stability ran 0.995 at k=3 and 0.778 at k=4; both clear 0.75, so the rule handed a doubled signal
+to the visibly worse answer. That tied the vote, parsimony took k=2, and three real segments were
+reported as a *constructive* segmentation — the method inventing groups where there are none.
+Measured against the planted truth: 0.618 as it stood, 0.992 once corrected.
+
+Each k is now compared against the best **using its own standard error**: it stays in contention
+while the gap to the best is no larger than the uncertainty of its own estimate. This needs no
+tuning constant, and two alternatives that look equally principled both fail on measured data —
+
+- *A band drawn around the best* collapses whenever the best k scores a standard error of exactly
+  zero, which happens readily at k=2 when every resample agrees. On an unequal 80/15/5 split that
+  alone excluded k=3 and lost the 5% segment.
+- *Taking the smallest k within the band* double-counts parsimony, because the vote already breaks
+  ties toward the smaller solution.
+
+The tie-break was the second half of the same fault: it went to the smaller k unconditionally,
+including over a k holding **both** doubled criteria. Parsimony now breaks only what those
+criteria leave level.
+
+Both are pinned by tests built on the measured diagnostics table that exposed them
+(`test_the_stability_signal_backs_the_k_that_is_actually_stable`,
+`test_a_tie_is_broken_by_the_criteria_the_method_leans_on`). Re-measured across the battery above,
+the correction recovered a planted k=5 that was previously reported as k=2, and changed no case
+that was already right.
+
 ## Verified against the library
 
 Only one file would open (`The Hundred-Page Machine Learning Book`, Burkov). It corroborates the

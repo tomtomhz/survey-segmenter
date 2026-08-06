@@ -387,6 +387,21 @@ Every one of these cost real time. They are listed so you do not repeat them.
   dip test did not run or if any chart arrives without its data, because both of those degrade
   silently — the app starts, analyses, and quietly does less. That check found a real defect on
   its first CI run, on both platforms at once.
+- **A second hand-kept list of the same thing is the bug.** Four separate failures here have had
+  this exact shape: `py-modules` missing `kprototypes`, then missing `clusterability`;
+  `build_app.py` duplicating the dependency list and so shipping every CI-built app without the
+  dip test; CI linting a named file list that never included `clusterability.py`. Each was
+  invisible on the machine doing the work. Derive the list — `git ls-files`, the project's own
+  declaration — or add a test that fails when the two disagree.
+- **Read the output as the reader, not as the author.** The k-selection defect in v1.5.2 was
+  sitting in plain sight in every report: the table showed 0.995 against 0.658 on the criterion
+  the prose called decisive, and the recommendation went the other way. Every test passed, because
+  the tests asked whether the pipeline ran, not whether the report argued with itself. Generate a
+  report on data whose answer you know, and read it end to end.
+- **A rule borrowed from a paper is only right in the paper's setting.** "Largest k above the
+  cutoff" is Tibshirani & Walther's rule for prediction strength, and it was silently reused for
+  replication stability, where it has no such justification. Check that a borrowed rule's argument
+  still holds for the quantity you are applying it to.
 
 ---
 

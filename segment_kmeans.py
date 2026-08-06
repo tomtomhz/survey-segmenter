@@ -169,7 +169,7 @@ for _m in ("divide by zero encountered in matmul", "overflow encountered in matm
            "invalid value encountered in matmul"):
     warnings.filterwarnings("ignore", message=_m, category=RuntimeWarning)
 
-__version__ = "1.5.1"    # keep in sync with pyproject.toml
+__version__ = "1.5.2"    # keep in sync with pyproject.toml
 
 # Optional "ask Claude about your segments" add-on. Imported here (not lazily) so the packaged app
 # bundles it; wrapped so a missing file/SDK never stops the core segmentation tool from loading.
@@ -944,6 +944,18 @@ def _gap_choice(diag):
     return int(d.loc[d["gap"].idxmax(), "k"])
 
 
+def signal_weights(cfg):
+    """How much each criterion counts. Kept in one place because the report explains this vote in
+    prose, and a second hand-kept copy of the numbers is how the explanation and the decision
+    drift apart — the report once said "5 of them picked 2" about a tally that had not decided
+    anything. When the chosen model IS the Gaussian mixture, the model-based criteria (BIC, ICL)
+    are the primary basis for the number of components, so they count double too."""
+    mb_w = 2 if getattr(cfg, "method", "kmeans") == "gmm" else 1
+    return {"prediction strength": 2, "global stability": 2, "consensus PAC": 2,
+            "silhouette": 1, "Calinski-Harabasz": 1, "Davies-Bouldin": 1, "gap": 1,
+            "GMM BIC (model-based)": mb_w, "GMM ICL (model-based)": mb_w, "elbow (weak)": 0}
+
+
 def recommend_k(diag, cfg):
     """Consensus that weights STABILITY and prediction strength above internal fit indices,
     because a stable, replicable solution is what survives — the market-segmentation view."""
@@ -974,10 +986,43 @@ def recommend_k(diag, cfg):
     ps_ok = diag[diag["prediction_strength"] >= cfg.ps_cutoff]
     signals["prediction strength"] = int(ps_ok["k"].max()) if len(ps_ok) \
         else int(diag.loc[diag["prediction_strength"].idxmax(), "k"])
-    # Global stability: largest k that is still "stable"; else the most stable k
-    stab_ok = diag[diag["stability_ARI"] >= cfg.stability_cutoff]
-    signals["global stability"] = int(stab_ok["k"].max()) if len(stab_ok) \
-        else int(diag.loc[diag["stability_ARI"].idxmax(), "k"])
+    # Global stability. This used to read "the largest k that still clears the cutoff", borrowed
+    # from the prediction-strength rule below — where it is Tibshirani & Walther's published
+    # advice and correct. Applied to stability it is not: measured on a file with three planted
+    # segments, stability ran 0.995 at k=3 and 0.778 at k=4, and "largest above 0.75" handed this
+    # signal — one of the two the whole method leans on — to the visibly worse answer, which was
+    # enough to tie the vote and lose the segmentation.
+    #
+    # A one-standard-error rule instead (after Hastie, Tibshirani & Friedman, ESL 7.10): keep the
+    # k values whose stability cannot be told apart from the best — within one standard error of
+    # it — and take the largest of those. That keeps the original intent, the largest k the
+    # evidence still supports, while refusing the jump to a k that is measurably worse. The
+    # standard error comes from the resampling that produced the estimate, so a noisy measurement
+    # widens the band by itself rather than by a constant somebody guessed.
+    #
+    # Taking the SMALLEST of that band instead looks equally principled and is not: the vote
+    # already breaks ties toward the smaller solution, so preferring it here too counts parsimony
+    # twice, and measured on an unequal 80/15/5 split that lost the 5% segment entirely.
+    # Each k is compared against the best using ITS OWN standard error, rather than a single band
+    # drawn around the best. Two reasons, both measured. A band around the best collapses to
+    # nothing whenever the best k scores a standard error of exactly zero — every resample agreed,
+    # which happens readily at k=2 — and then no other k can ever qualify. And the width that
+    # matters is the uncertainty of the k being judged: a solution whose stability is itself
+    # measured loosely has not been shown to be worse, while one measured tightly has.
+    #
+    # On the three files this was calibrated against it needs no tuning constant. k=4 at
+    # 0.778 +/- 0.075 against a best of 0.995 is 0.217 away, far outside its own error, and drops
+    # out. k=3 at 0.940 +/- 0.135 against 1.000, and k=3 at 0.897 +/- 0.200 against 1.000, are
+    # both well inside theirs and stay in — which is right, since each is the same structure split
+    # one level finer.
+    _stab = diag["stability_ARI"]
+    _best_i = _stab.idxmax()
+    _best = float(_stab.max())
+    _sd = diag["stability_ARI_sd"] if "stability_ARI_sd" in diag else _stab * 0.0
+    _sd = _sd.fillna(0.0)
+    _within = diag[(_stab >= cfg.stability_cutoff) & ((_best - _stab) <= _sd)]
+    signals["global stability"] = int(_within["k"].max()) if len(_within) \
+        else int(diag.loc[_best_i, "k"])
     if "gmm_BIC" in diag and diag["gmm_BIC"].notna().any():
         signals["GMM BIC (model-based)"] = int(diag.loc[diag["gmm_BIC"].idxmin(), "k"])
     if "gmm_ICL" in diag and diag["gmm_ICL"].notna().any():
@@ -988,16 +1033,25 @@ def recommend_k(diag, cfg):
     # Weighted vote: stability signals and prediction strength count double. When the chosen
     # model IS the Gaussian mixture, the model-based criteria (BIC, ICL) are the primary basis
     # for the number of components, so they count double too.
-    mb_w = 2 if getattr(cfg, "method", "kmeans") == "gmm" else 1
-    weights = {"prediction strength": 2, "global stability": 2, "consensus PAC": 2,
-               "silhouette": 1, "Calinski-Harabasz": 1, "Davies-Bouldin": 1, "gap": 1,
-               "GMM BIC (model-based)": mb_w, "GMM ICL (model-based)": mb_w, "elbow (weak)": 0}
+    weights = signal_weights(cfg)
     tally = {}
     for name, k in signals.items():
         tally[k] = tally.get(k, 0) + weights.get(name, 1)
     best_score = max(tally.values())
     winners = sorted([k for k, s in tally.items() if s == best_score])
-    pick = winners[0]   # ties -> smaller, more interpretable k (Dolnicar: parsimony)
+    # Ties used to go to the smaller k unconditionally, on parsimony grounds. That silently
+    # outranked the priority this function is built around: measured on three planted segments,
+    # k=2 and k=3 tied at 5, and k=3 held BOTH doubled criteria (prediction strength 0.97 against
+    # 0.59, consensus PAC 0.003 against 0.353) while k=2 held only the separation indices. The
+    # parsimony rule took k=2 — a solution whose prediction strength does not even clear the 0.80
+    # cutoff this report quotes — and the segmentation was then written up as constructed noise.
+    # So on a tie, the heavily-weighted criteria break it, and parsimony breaks what remains.
+    if len(winners) > 1:
+        heavy = {n for n, w in weights.items() if w >= 2}
+        backing = {k: sum(1 for n, s in signals.items() if s == k and n in heavy) for k in winners}
+        most = max(backing.values())
+        winners = [k for k in winners if backing[k] == most]
+    pick = winners[0]   # still smaller, more interpretable k (Dolnicar: parsimony)
 
     ruled_out = ""
     if excluded:
@@ -1195,7 +1249,7 @@ def _fraction_phrase(share):
     return f"about 1 in {d} ({pct}%)"
 
 
-def how_k_was_chosen(signals, chosen, k_min, k_max, unit="group"):
+def how_k_was_chosen(signals, chosen, k_min, k_max, unit="group", cfg=None):
     """One sentence saying the number was searched for, not assumed.
 
     The tool tries every number in the range and scores each on nine criteria, but the report only
@@ -1209,22 +1263,27 @@ def how_k_was_chosen(signals, chosen, k_min, k_max, unit="group"):
     """
     if not signals:
         return ""
-    votes = {}
-    for k in signals.values():
+    # Count the vote the way the decision counted it. A flat headcount reads as an explanation of
+    # a weighted decision and is not one: it once reported "5 of them picked 2" for a k that the
+    # two criteria this tool trusts most had both argued against.
+    w = signal_weights(cfg) if cfg is not None else {}
+    votes, criteria = {}, 0
+    for name, k in signals.items():
         if k:
-            votes[int(k)] = votes.get(int(k), 0) + 1
-    total = sum(votes.values())
-    if not total:
+            votes[int(k)] = votes.get(int(k), 0) + w.get(name, 1)
+            criteria += 1
+    if not sum(votes.values()):
         return ""
     mine = votes.get(int(chosen), 0)
     rivals = sorted(((v, k) for k, v in votes.items() if k != int(chosen)), reverse=True)
     line = (f"**I tried every number of {_plural(unit)} from {k_min} to {k_max}** and scored each "
-            f"one on {total} independent criteria; {mine} of them picked {chosen}")
+            f"one on {criteria} independent criteria, counting the ones that measure whether the "
+            f"answer reproduces twice over; {chosen} scored {mine}")
     if not rivals:
         return line + ", and nothing else was chosen by any of them.\n"
     count, runner = rivals[0]
     if count >= mine:
-        return (line + f", and {count} picked {runner}. The two are close, so treat the number "
+        return (line + f" and {runner} scored {count}. The two are close, so treat the number "
                 "itself as a judgement call and read the stability checks below before "
                 "committing to it.\n")
     # "the number these criteria agree on" rather than "the clear answer": this sentence reports a
@@ -1599,7 +1658,8 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
     L = ["# Segmentation report\n",
          executive_summary(int(sizes["n"].sum()), _names, _shares, _wants,
                            min(jaccard.values()), split_half, unit="group", k_agreement=k_agreement,
-                           k_choice=how_k_was_chosen(signals, rec_k, cfg.k_min, cfg.k_max),
+                           k_choice=how_k_was_chosen(signals, rec_k, cfg.k_min, cfg.k_max,
+                                                     cfg=cfg),
                            # The weaker of the two independent paradigms: a mixture model, which
                            # unlike k-means can represent a cluster's breadth, and Ward, which
                            # builds bottom-up rather than around centroids. If both put people
@@ -3229,13 +3289,20 @@ def run_auto(path, args, parser):
     weights = df[plan["weight"]].to_numpy() if plan["weight"] else None
     cfg = SegmentationConfig(method=method, random_state=args.seed,
                              var_kinds=plan.get("kinds"), level_labels=plan.get("level_labels"))
+    # --force-k has to be forwarded here, not only on the explicit-method paths below. This is the
+    # DEFAULT path, so for as long as it was missing the flag did nothing at all for almost every
+    # user: the run completed, the report never mentioned the override, and the number in it was
+    # the one the tool had picked by itself. An ignored flag that reports success is worse than an
+    # unimplemented one, because the user believes the answer they are reading is the one they
+    # asked for.
+    force_k = getattr(args, "force_k", None)
     try:
         if method == "lca":
             LatentClassSegmenter(cfg).run(clean, id_col=id_col, item_cols=items, outdir=outdir,
-                                          demographics=demo_df, weights=weights)
+                                          demographics=demo_df, weights=weights, force_k=force_k)
         else:
             Segmenter(cfg).run(clean, id_col=id_col, item_cols=items, outdir=outdir,
-                               demographics=demo_df, weights=weights)
+                               demographics=demo_df, weights=weights, force_k=force_k)
     except ValueError as e:
         _friendly_fail(parser, _explain_run_error(str(e)))
     report = "latent_class_report" if method == "lca" else "segmentation_report"

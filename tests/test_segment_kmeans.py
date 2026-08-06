@@ -3802,3 +3802,126 @@ def test_the_packaged_build_installs_from_the_declared_dependencies():
         assert f'"{package}"' not in named, (
             f"{package} is named directly in build_app.py; it belongs in pyproject.toml so there "
             "is one list rather than two that can disagree")
+
+
+# The measured k-selection table from a 400-respondent file with three planted segments, kept
+# verbatim so the case that exposed these defects cannot quietly come back. Columns are the ones
+# recommend_k reads; the numbers are what the search actually produced.
+_THREE_SEGMENT_DIAGNOSTICS = [
+    # k  inertia   sil     CH       DB     share   gap   gap_se  stab  stab_sd   PS    PS_sd    BIC       ICL      PAC
+    (2, 264.302, 0.327, 252.512, 1.190, 0.420, 0.811, 0.014, 0.658, 0.274, 0.593, 0.099, 295.480, 300.668, 0.353),
+    (3, 198.594, 0.297, 233.285, 1.327, 0.272, 1.017, 0.013, 0.995, 0.005, 0.968, 0.021, 559.368, 567.658, 0.003),
+    (4, 191.797, 0.201, 165.307, 2.167, 0.145, 0.991, 0.018, 0.778, 0.075, 0.512, 0.034, 934.412, 949.250, 0.193),
+    (5, 186.034, 0.121, 130.557, 2.765, 0.125, 0.981, 0.015, 0.603, 0.085, 0.487, 0.030, 1345.150, 1391.240, 0.229),
+]
+_DIAG_COLUMNS = ["k", "inertia", "silhouette", "calinski_harabasz", "davies_bouldin",
+                 "min_segment_share", "gap", "gap_se", "stability_ARI", "stability_ARI_sd",
+                 "prediction_strength", "prediction_strength_sd", "gmm_BIC", "gmm_ICL",
+                 "consensus_PAC"]
+
+
+def _tally(signals, cfg):
+    weights = sk.signal_weights(cfg)
+    out = {}
+    for name, k in signals.items():
+        out[k] = out.get(k, 0) + weights.get(name, 1)
+    return out
+
+
+def test_the_stability_signal_backs_the_k_that_is_actually_stable():
+    """"Largest k above the cutoff" is Tibshirani & Walther's rule for prediction strength, where
+    it is right. It was also being applied to replication stability, where it is not.
+
+    On the file below, stability ran 0.995 at k=3 and 0.778 at k=4. The old rule read both as
+    "above 0.75" and handed the signal — one of the two the whole method leans on — to k=4, which
+    was enough to tie the vote and lose the segmentation. The one-standard-error rule keeps only
+    the k values that cannot be told apart from the best.
+    """
+    diag = pd.DataFrame(_THREE_SEGMENT_DIAGNOSTICS, columns=_DIAG_COLUMNS)
+    cfg = sk.SegmentationConfig()
+    _, _, signals = sk.recommend_k(diag, cfg)
+
+    assert signals["global stability"] == 3, (
+        f"stability voted for k={signals['global stability']} when k=3 scored 0.995 and the "
+        "runner-up 0.778 — a signal weighted double must not go to a visibly worse solution")
+
+
+def test_the_number_of_groups_survives_the_criteria_that_matter_most():
+    """End of the same story: the recommendation itself.
+
+    k=3 held both doubled criteria (prediction strength 0.968 against 0.593 — k=2 does not even
+    clear the 0.80 cutoff the report quotes — and consensus PAC 0.003 against 0.353). k=2 held the
+    separation indices. The vote tied and parsimony took k=2, and the three real segments were
+    then written up as constructed noise.
+    """
+    diag = pd.DataFrame(_THREE_SEGMENT_DIAGNOSTICS, columns=_DIAG_COLUMNS)
+    cfg = sk.SegmentationConfig()
+    pick, _, signals = sk.recommend_k(diag, cfg)
+
+    assert pick == 3, f"recommended k={pick} on a file whose structure is plainly three segments"
+    assert signals["prediction strength"] == 3 and signals["consensus PAC"] == 3
+
+
+def test_a_tie_is_broken_by_the_criteria_the_method_leans_on():
+    """Parsimony breaks what the weighted criteria leave tied, not the other way round.
+
+    Constructed so the weighted vote lands exactly level at 5 each, with the larger k holding both
+    doubled criteria and the smaller holding only one. Choosing the smaller here would contradict
+    the priority the function is built around and states in its own report.
+    """
+    rows = [
+        (2, 300.0, 0.40, 300.0, 1.50, 0.45, 0.90, 0.01, 0.90, 0.02, 0.60, 0.05, 300.0, 305.0, 0.30),
+        (3, 250.0, 0.30, 200.0, 1.00, 0.30, 0.85, 0.01, 0.70, 0.02, 0.95, 0.02, 500.0, 505.0, 0.01),
+        (4, 245.0, 0.20, 150.0, 2.00, 0.20, 0.95, 0.01, 0.60, 0.02, 0.50, 0.03, 200.0, 205.0, 0.20),
+    ]
+    cfg = sk.SegmentationConfig()
+    pick, _, signals = sk.recommend_k(pd.DataFrame(rows, columns=_DIAG_COLUMNS), cfg)
+
+    tally = _tally(signals, cfg)
+    assert tally[2] == tally[3], (
+        f"this table is meant to tie 2 against 3; it scored {tally} — retune it, the tie-break "
+        "is what is under test")
+    assert pick == 3, "the tie went to parsimony over both of the doubled criteria"
+
+
+def test_the_headline_counts_the_vote_that_actually_decided():
+    """The plain-language line explains a weighted decision, so it has to report the weighted
+    tally. Counting heads instead produced "5 of them picked 2" for a k that both of the criteria
+    this tool trusts most had argued against — an explanation that was not one."""
+    diag = pd.DataFrame(_THREE_SEGMENT_DIAGNOSTICS, columns=_DIAG_COLUMNS)
+    cfg = sk.SegmentationConfig()
+    pick, _, signals = sk.recommend_k(diag, cfg)
+    line = sk.how_k_was_chosen(signals, pick, cfg.k_min, cfg.k_max, cfg=cfg)
+
+    tally = _tally(signals, cfg)
+    assert f"{pick} scored {tally[pick]}" in line, line
+    runner = max((v, k) for k, v in tally.items() if k != pick)[1]
+    assert str(tally[runner]) in line, f"the runner-up's weighted score is missing from: {line}"
+
+
+def test_forcing_the_number_of_groups_works_on_the_path_everyone_uses(tmp_path):
+    """--force-k was wired into every explicit --method path and left out of the automatic one,
+    which is the default. So for almost every user the flag did nothing at all: the run finished,
+    the report never mentioned an override, and the number in it was the tool's own. An ignored
+    flag that reports success is worse than one that is missing, because the reader believes the
+    answer is the one they asked for.
+    """
+    import argparse
+    rng = np.random.default_rng(5)
+    rows = []
+    for i in range(180):
+        base = {0: [5, 1, 5, 2], 1: [1, 5, 2, 4], 2: [3, 3, 4, 5]}[i % 3]
+        rows.append([f"R{i}"] + [int(np.clip(round(b + rng.normal(0, 0.7)), 1, 5)) for b in base])
+    df = pd.DataFrame(rows, columns=["respondent_id", "q1", "q2", "q3", "q4"])
+
+    outdir = tmp_path / "forced"
+    args = argparse.Namespace(id_col="respondent_id", outdir=str(outdir), seed=42, force_k=5)
+    with contextlib.redirect_stdout(io.StringIO()):
+        sk.run_auto(df, args, argparse.ArgumentParser())
+
+    assignments = pd.read_csv(outdir / "segment_assignments.csv")
+    assert assignments["segment"].nunique() == 5, (
+        f"asked for 5 groups on the default path and got "
+        f"{assignments['segment'].nunique()} — the flag was ignored")
+    report = (outdir / "segmentation_report.md").read_text()
+    assert "force_k" in report, "the report does not say the number was overridden"
