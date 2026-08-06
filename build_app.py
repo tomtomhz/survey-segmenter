@@ -19,12 +19,19 @@ import sys
 import tempfile
 from pathlib import Path
 
-# Make sure the tool's own dependencies and PyInstaller are available in this environment.
-# `anthropic` (+pydantic) powers the optional "ask Claude about your segments" chat; it is bundled
-# so the app has it out of the box (the user still supplies their own API key in Settings).
-subprocess.run([sys.executable, "-m", "pip", "install", "--user",
-                "numpy", "pandas", "scipy", "scikit-learn", "matplotlib", "openpyxl",
-                "anthropic", "pyinstaller"],
+# Install what the app needs FROM THE PROJECT'S OWN DECLARATION, not from a list repeated here.
+#
+# This used to name the dependencies again — numpy, pandas, scipy and the rest — and a second list
+# maintained by memory goes stale the same way the first one did. It had: `diptest` was added to
+# pyproject.toml and not here, so every build made on a machine that did not already happen to have
+# it produced an app whose second cluster-tendency test silently never ran. Both CI runners were in
+# exactly that state, which is how the check below caught it.
+#
+# `.[excel,ai]` pulls the extras that are bundled deliberately: spreadsheet reading, and the
+# optional "ask Claude about your segments" chat, which ships present so the app has it out of the
+# box (the user still supplies their own key in Settings). PyInstaller is a build tool rather than
+# a dependency of the app, so it stays separate.
+subprocess.run([sys.executable, "-m", "pip", "install", "--user", ".[excel,ai]", "pyinstaller"],
                check=True)
 
 # Always analyse from scratch. PyInstaller caches its analysis in build/, and a cache written while

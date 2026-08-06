@@ -3781,3 +3781,24 @@ def test_every_module_is_actually_shipped_in_the_wheel():
         "of this project would be missing them")
     stale = declared - present
     assert not stale, f"{sorted(stale)} are declared but no longer exist"
+
+
+def test_the_packaged_build_installs_from_the_declared_dependencies():
+    """build_app.py used to repeat the dependency list, and a second list goes stale too.
+
+    It had already: `diptest` was added to pyproject.toml and not to the copy in build_app.py, so
+    every build on a machine that did not happen to have it produced an app whose second
+    cluster-tendency test silently never ran. Both CI runners were in that state.
+
+    A list can be checked; not having one cannot go wrong. This pins that the build installs the
+    project itself rather than naming packages again.
+    """
+    build = (Path(__file__).resolve().parent.parent / "build_app.py").read_text()
+    install = re.search(r'"pip", "install",(.*?)\]', build, re.S)
+    assert install, "the build no longer installs anything, which cannot be right"
+    named = install.group(1)
+    assert '".[' in named, "the build should install the project, not a repeated list of packages"
+    for package in ("numpy", "pandas", "scipy", "scikit-learn", "matplotlib", "diptest"):
+        assert f'"{package}"' not in named, (
+            f"{package} is named directly in build_app.py; it belongs in pyproject.toml so there "
+            "is one list rather than two that can disagree")
