@@ -3,6 +3,28 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.5.1] — 2026-08-06
+
+### Fixed
+
+- **A build made anywhere but this machine shipped without the second cluster-tendency test.**
+  `build_app.py` carried its own copy of the dependency list, so a package added to
+  `pyproject.toml` and not to that copy was simply absent — the app then started, analysed, drew
+  its charts and quietly skipped the check. Both CI runners were in exactly that state. The build
+  now installs the project itself, so there is one list rather than two that can disagree.
+  (The v1.5.0 archive attached to its release is unaffected: it was built on a machine that already
+  had the package.)
+- The packaged smoke test now **fails the build** if the dip test did not run, or if any chart
+  arrives without the data behind it. Both of those degrade silently — the app starts and does
+  less — which is the failure this project keeps meeting and the hardest kind to notice on a
+  platform nobody is watching.
+
+### Verified
+
+- **Windows**, properly, for the first time: the actual built binary runs, the compiled dip
+  extension works, and all six charts carry their data. Previously the Windows job proved only
+  that a build completed.
+
 ## [1.5.0] — 2026-08-06
 
 ### A second opinion on whether there is anything to segment
