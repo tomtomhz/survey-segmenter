@@ -357,6 +357,36 @@ stability band described above. The pattern is consistent enough to be worth nam
 project, rules that look principled in the abstract fail about as often as they succeed, and the
 only reliable filter is measuring them against data whose answer is known.
 
+## The export formats the tools actually write (2026-08-06)
+
+Research datasets arrive tidy. The files a survey platform exports do not, and that is what the
+app is pointed at. Four formats, same 240 respondents written four ways:
+
+| Format | Before | After |
+|---|---|---|
+| Qualtrics (3 header rows) | **242 rows**, every column text, routed to latent class — 1-5 scales treated as unordered | 240 rows, k-means, ARI 1.000 against the clean file |
+| SurveyMonkey (2 header rows) | **241 rows**, same contamination | 240 rows, k-means, ARI 1.000 |
+| Swedish Excel (`;` + decimal comma) | 240 rows, but the 0-10 satisfaction score **silently dropped** | kept as a number, ARI 1.000 |
+| Clean CSV | correct | unchanged |
+
+Every one of these failed silently. The Qualtrics case is the worst: two metadata rows became
+respondents, the question wording turned every rating column into text, and the survey was then
+analysed as if its scales were unordered categories — with no error and an ordinary-looking
+report. A professional tool's default export was the input most likely to be wrong.
+
+**Header rows are recognised by being non-numeric where the answers below them are numeric.** A
+respondent's answer parses like the answers under it; a question's wording does not. On an
+all-categorical survey no column is "otherwise numeric", so nothing matches and nothing is
+dropped — the rule is safe by construction rather than by tuning, and
+`test_header_stripping_never_eats_a_real_respondent` holds it to that, including for a respondent
+who skipped every question.
+
+**Decimal commas** are converted only for whole columns where every value is digits-comma-digits.
+Had the file been comma-delimited such a value could not have survived in one cell, so this cannot
+misread a comma-joined multi-select answer.
+
+Encoding, BOM, `;`/tab sniffing and `.xlsx` were already handled and needed no change.
+
 ## Predicted, measured, and did not happen: response-style segments (2026-08-06)
 
 The textbook failure of survey segmentation is that clustering raw Likert answers recovers **how

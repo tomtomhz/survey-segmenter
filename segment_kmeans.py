@@ -286,19 +286,99 @@ def _scale_apply(arr, params):
 # =====================================================================================
 # Data loading and preparation
 # =====================================================================================
+_DECIMAL_COMMA = re.compile(r"^-?\d+,\d+$")
+
+
+def _strip_metadata_rows(df):
+    """Drop the extra header rows that professional survey tools put above the data.
+
+    Qualtrics exports three header rows — short name, full question text, and a JSON blob like
+    {"ImportId": "QID1"} — and pandas keeps only the first as the header, so the other two arrive
+    as respondents. SurveyMonkey does the same with two. Measured on a 240-person export: the file
+    read as 242 rows, every column came out as text because the question wording contaminated it,
+    and the survey was then routed to latent class analysis and its rating scales treated as
+    unordered categories. No error at any point.
+
+    A row is a header remnant if it is non-numeric in columns that are otherwise numeric — a
+    respondent's answer parses like the answers below it, and a question's wording does not. On a
+    genuinely categorical survey no column is "otherwise numeric", nothing qualifies, and nothing
+    is dropped; that is what makes this safe rather than clever.
+    """
+    if len(df) < 4:
+        return df, 0
+    head = df.head(3)
+    body = df.iloc[3:]
+    # Columns the body agrees are numeric. Blank cells are not evidence either way.
+    numeric_cols = []
+    for c in df.columns:
+        vals = body[c].dropna()
+        if len(vals) and pd.to_numeric(vals, errors="coerce").notna().mean() >= 0.8:
+            numeric_cols.append(c)
+    if not numeric_cols:
+        return df, 0
+    drop = 0
+    for i in range(min(3, len(head))):
+        row = head.iloc[i]
+        offending = [c for c in numeric_cols
+                     if pd.notna(row[c]) and pd.isna(pd.to_numeric(pd.Series([row[c]]),
+                                                                   errors="coerce").iloc[0])]
+        if len(offending) < max(1, len(numeric_cols) // 2):
+            break                       # this row answers like a respondent; stop here
+        drop = i + 1
+    if not drop:
+        return df, 0
+    out = df.iloc[drop:].reset_index(drop=True)
+    # Re-type each column now the wording is gone: it was read as text only because of the rows
+    # just removed. Written out explicitly rather than with to_numeric(errors="ignore"), which
+    # pandas deprecates and will RAISE on in a later version — a read path that starts throwing on
+    # a routine dependency bump is the silent-breakage pattern this project keeps meeting.
+    for c in out.columns:
+        converted = pd.to_numeric(out[c], errors="coerce")
+        if converted.notna().sum() == out[c].notna().sum():
+            out[c] = converted
+    return out, drop
+
+
+def _fix_decimal_commas(df):
+    """Swedish/German Excel writes 4,5 for four-and-a-half. Such a column arrives as text and is
+    then dropped from the rating grid — measured on a Swedish export whose 0-10 satisfaction score
+    vanished from the analysis without comment.
+
+    Only whole columns are converted, and only when every value is digits-comma-digits. If the file
+    had been comma-delimited such a value could not have survived as one cell, so this cannot
+    misread a comma-separated multi-select answer.
+    """
+    for c in df.columns:
+        s = df[c]
+        if s.dtype != object:
+            continue
+        vals = s.dropna().astype(str)
+        if len(vals) and vals.str.match(_DECIMAL_COMMA).all():
+            df[c] = pd.to_numeric(vals.str.replace(",", ".", regex=False)
+                                  .reindex(s.index), errors="coerce")
+    return df
+
+
 def _read_table(source):
     """Read a survey export ROBUSTLY, the way real exports actually arrive. Handles comma OR
     semicolon delimiters (European / Excel exports, e.g. Swedish locale), UTF-8, UTF-8-with-BOM,
     and Latin-1 (so aao survive), and .xlsx/.xls if openpyxl is available. Accepts a path, raw
     bytes, a file-like object, or an existing DataFrame."""
     if isinstance(source, pd.DataFrame):
-        return source.copy()
+        return source.copy()      # the caller has already decided what this contains
+
+    def _clean(df):
+        """Strip the tools' extra header rows and repair decimal commas. Both otherwise degrade
+        the analysis without a word: see the two helpers above."""
+        df, _ = _strip_metadata_rows(df)
+        return _fix_decimal_commas(df)
+
     is_excel = ((isinstance(source, str) and source.lower().endswith((".xlsx", ".xls")))
                 or (isinstance(source, (bytes, bytearray)) and bytes(source[:2]) == b"PK"))
     if is_excel:
         try:
-            return pd.read_excel(io.BytesIO(source) if isinstance(source, (bytes, bytearray))
-                                 else source)
+            return _clean(pd.read_excel(io.BytesIO(source)
+                                        if isinstance(source, (bytes, bytearray)) else source))
         except ImportError:
             raise ValueError("_NEED_OPENPYXL")
     def _buf():
@@ -312,13 +392,13 @@ def _read_table(source):
         try:
             df = pd.read_csv(_buf(), sep=None, engine="python", encoding=enc)   # sep=None sniffs , ; \t
             if df.shape[1] >= 1 and len(df):
-                return df
+                return _clean(df)
         except read_errors:
             continue
     try:                                            # last resort: plain comma, skip unparsable lines
         df = pd.read_csv(_buf(), encoding="latin-1", on_bad_lines="skip")
         if df.shape[1] >= 1 and len(df):
-            return df
+            return _clean(df)
     except read_errors:
         pass
     raise ValueError("_BAD_FILE")                   # empty, binary, or not a table at all

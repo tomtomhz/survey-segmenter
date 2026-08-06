@@ -4065,3 +4065,109 @@ def test_a_number_too_big_to_be_an_answer_is_flagged():
     for real in ("nps", "slider", "q1"):
         assert not any(real in n_ and "far larger" in n_ for n_ in plan["notes"]), \
             f"'{real}' is a normal answer scale and must not be flagged"
+
+
+def _export_body(n=200, seed=3):
+    """The same 200 respondents, to be written out in each tool's format."""
+    rng = np.random.default_rng(seed)
+    centres = {0: [5, 1, 5, 1, 4], 1: [1, 5, 1, 5, 2], 2: [3, 3, 5, 5, 1]}
+    who = rng.integers(0, 3, n)
+    rows = [[int(np.clip(round(b + rng.normal(0, 0.6)), 1, 5)) for b in centres[w]] for w in who]
+    df = pd.DataFrame(rows, columns=[f"Q{i+1}" for i in range(5)])
+    df.insert(0, "ResponseId", [f"R_{i:05d}" for i in range(n)])
+    return df, who
+
+
+QUESTION_TEXT = ["I compare prices before buying", "Quality matters more than cost",
+                 "I wait for a sale", "I like trying new brands", "Recommendations sway me"]
+
+
+def test_a_qualtrics_export_is_read_as_answers_not_as_question_wording(tmp_path):
+    """Qualtrics writes THREE header rows: short name, full question text, and a JSON blob like
+    {"ImportId": "QID1"}. pandas keeps the first as the header, so the other two arrive as
+    respondents.
+
+    Measured on a 240-person export before this: the file read as 242 rows, every column came out
+    as text because the question wording contaminated it, and the survey was routed to latent
+    class analysis with its 1-5 scales treated as unordered categories. Nothing raised, and the
+    report looked ordinary. SurveyMonkey does the same with two rows.
+    """
+    df, who = _export_body()
+    path = tmp_path / "qualtrics.csv"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(",".join(df.columns) + "\n")
+        f.write(",".join(["Response ID"] + [f'"{q}"' for q in QUESTION_TEXT]) + "\n")
+        f.write(",".join(json.dumps({"ImportId": c}).replace(",", ";") for c in df.columns) + "\n")
+        df.to_csv(f, header=False, index=False)
+
+    got = sk._read_table(str(path))
+    assert len(got) == len(df), f"read {len(got)} rows from a {len(df)}-person export"
+
+    _, method, _, items, _ = sk.auto_prepare(got)
+    assert method == "kmeans", f"rating scales were routed to '{method}' as if unordered"
+    assert len(items) == 5
+
+    r = sk.run_analysis(path.read_bytes(), cfg=sk.SegmentationConfig(k_min=2, k_max=5, **FAST))
+    labels = pd.read_csv(io.StringIO(r["files"]["segment_assignments.csv"]))["segment"]
+    assert adjusted_rand_score(who, labels) > 0.9, "the planted segments did not survive the export"
+
+
+def test_a_surveymonkey_export_loses_neither_a_row_nor_a_respondent(tmp_path):
+    """Two header rows rather than three, and the second is a sub-label under each question."""
+    df, _ = _export_body()
+    path = tmp_path / "surveymonkey.csv"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(",".join(["Respondent ID"] + [f'"{q}"' for q in QUESTION_TEXT]) + "\n")
+        f.write(",".join([""] + ["Response"] * 5) + "\n")
+        df.to_csv(f, header=False, index=False)
+
+    got = sk._read_table(str(path))
+    assert len(got) == len(df), f"read {len(got)} rows from a {len(df)}-person export"
+    assert sk.auto_prepare(got)[1] == "kmeans"
+
+
+def test_a_swedish_excel_export_keeps_its_decimal_scores(tmp_path):
+    """Swedish and German Excel write 4,5 for four-and-a-half and separate fields with ';'.
+
+    The delimiter was already handled; the decimal comma was not. Such a column arrived as text
+    and was then quietly dropped from the rating grid — measured on an export whose 0-10
+    satisfaction score vanished from the analysis without a word.
+    """
+    df, _ = _export_body()
+    rng = np.random.default_rng(11)
+    df["Nöjdhet (0-10)"] = np.round(rng.uniform(0, 10, len(df)), 1)
+    path = tmp_path / "swedish.csv"
+    path.write_text(df.to_csv(sep=";", index=False, decimal=","), encoding="utf-8-sig")
+
+    got = sk._read_table(str(path))
+    assert len(got) == len(df)
+    assert pd.api.types.is_numeric_dtype(got["Nöjdhet (0-10)"]), \
+        "the satisfaction score came back as text and will be dropped from the grid"
+    assert abs(float(got["Nöjdhet (0-10)"].mean()) - float(df["Nöjdhet (0-10)"].mean())) < 0.01
+    assert "Nöjdhet (0-10)" in sk.auto_prepare(got)[3], "the score is not among the questions"
+
+
+def test_header_stripping_never_eats_a_real_respondent(tmp_path):
+    """The dangerous direction. Header rows are recognised by being non-numeric where the answers
+    below them are numeric, so an all-categorical survey offers nothing to match and must come
+    back whole — as must a numeric survey whose first respondent is perfectly ordinary.
+    """
+    words = ["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"]
+    rng = np.random.default_rng(2)
+    text_only = pd.DataFrame({"respondent_id": [f"R{i}" for i in range(60)],
+                              "q1": rng.choice(words, 60), "q2": rng.choice(words, 60),
+                              "q3": rng.choice(words, 60)})
+    p1 = tmp_path / "text.csv"; text_only.to_csv(p1, index=False)
+    assert len(sk._read_table(str(p1))) == 60, "an all-text survey lost rows to header stripping"
+
+    numeric, _ = _export_body(n=60)
+    p2 = tmp_path / "numeric.csv"; numeric.to_csv(p2, index=False)
+    got = sk._read_table(str(p2))
+    assert len(got) == 60, "a clean numeric export lost rows"
+    assert got.iloc[0]["ResponseId"] == numeric.iloc[0]["ResponseId"], "the first respondent was eaten"
+
+    # A blank first response is a respondent, not a header row.
+    gappy = numeric.copy()
+    gappy.loc[0, ["Q1", "Q2", "Q3", "Q4", "Q5"]] = np.nan
+    p3 = tmp_path / "gappy.csv"; gappy.to_csv(p3, index=False)
+    assert len(sk._read_table(str(p3))) == 60, "a respondent who skipped every question was dropped"
