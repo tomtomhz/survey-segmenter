@@ -1481,9 +1481,9 @@ def executive_summary(n_resp, names, shares, wants, min_jaccard, repro, unit="gr
     L = ["## In plain language (read this first)\n",
          f"**Confidence: {light} {label}.** In plain terms, {meaning}\n",
          k_choice or None,
-         f"We looked at **{n_resp} people** and found **{len(names)} {_plural(unit)}** "
+         f"We looked at **{n_resp:,} people** and found **{len(names)} {_plural(unit)}** "
          "(a working number, not the only possibility):\n" if k_contested else
-         f"We looked at **{n_resp} people** and found **{len(names)} {_plural(unit)}**:\n"]
+         f"We looked at **{n_resp:,} people** and found **{len(names)} {_plural(unit)}**:\n"]
     for i in sorted(range(len(names)), key=lambda i: -shares[i]):
         L.append(f"- **{names[i]}** ({_fraction_phrase(shares[i])} of people) stand out for: {wants[i]}.")
     L.append(f"\n**What to do next.** Start with the biggest, most distinct {unit}. Give the "
@@ -3139,6 +3139,10 @@ _DEMO_WORDS = {"gender", "sex", "age", "school", "university", "college", "count
                "civilstånd", "civilstand", "hushåll", "hushall", "lön", "lon", "språk", "sprak",
                "modersmål", "modersmal", "postnummer", "födelseår", "fodelsear", "bransch"}
 _DEMO_PHRASES = ("study year", "year of study", "class year", "study programme", "study program")
+# The most options a real question offers. Beyond this a text column is an identifier, a date or
+# free text, whatever the study's size — 'which brand', 'which university', 'which country' all sit
+# well inside it, while an invoice number does not.
+_NOMINAL_LEVELS_MAX = 100
 # The largest value any response scale plausibly reaches. Sliders run to 100, NPS to 10, Likert to
 # 7; ages and years sit below this too, so nothing a respondent actually answers is excluded. Above
 # it the number is a measurement or an amount attached to the person, and worth a second look.
@@ -3267,10 +3271,24 @@ def classify_columns(df, id_col=None):
                                  f"columns ({', '.join(opts[:4])}"
                                  + (", ..." if len(opts) > 4 else "") + ")")
             continue
-        if 2 <= nun <= max(12, int(0.25 * len(s))):
+        # The ceiling on how many options a question may offer is ABSOLUTE, not a share of the
+        # sample. It used to be a quarter of the respondents, which grows with the study: on a
+        # 541,909-row file that permitted 135,477 "answer options", so invoice numbers with 25,900
+        # distinct values and free-text product descriptions with 4,223 were all clustered on as
+        # though they were pick-any answers. That run had not finished after half an hour, and
+        # could not have said anything if it had — Gower scores two nominal answers as identical
+        # or not, and with thousands of levels almost every pair simply differs.
+        #
+        # An answer list does not get longer because more people were surveyed.
+        if 2 <= nun <= min(max(12, int(0.25 * len(s))), _NOMINAL_LEVELS_MAX):
             plan["categorical"].append(c); plan["notes"].append(f"'{c}': multiple-choice answers")
         else:
-            plan["skipped"].append(c); plan["notes"].append(f"'{c}': skipped ({nun} different answers, looks like free text)")
+            plan["skipped"].append(c)
+            plan["notes"].append(
+                f"'{c}': skipped — {nun:,} different answers is more than a question offers, so "
+                "this looks like an identifier, a date or free text. Grouping people on it would "
+                "put almost everybody in a group of their own. If it really is a question, tick "
+                "it under 'Group people on different questions'.")
     # If the file had no named id, a row counter is a perfect one — keep it to label the results,
     # while still never grouping people on it.
     if plan["id"] is None and index_like:

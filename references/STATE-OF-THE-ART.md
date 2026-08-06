@@ -392,6 +392,27 @@ one at a time until `typing_tool` went 0.24 GB to 11.11 GB in one call.
 A negative result from an incomplete instrument is not evidence of absence, and "no single big
 allocation" was a conclusion about my wrapper list, not about the program.
 
+## How big a study it handles (2026-08-06)
+
+| File | n | Columns | Method | Wall | Peak RSS |
+|---|---|---|---|---|---|
+| UCI bank marketing | 41,188 | 21 mixed | Gower k-prototypes | 0.94 min | 1.66 GB |
+| UCI adult / census | 48,842 | 16 mixed | Gower k-prototypes | 0.89 min | 1.59 GB |
+| **UCI covertype** | **581,012** | 55 numeric | k-means | **3.2 min** | **3.71 GB** |
+
+All 581,012 respondents were assigned, the headline says 581,012 people, the segment sizes sum to
+581,012, and the report names the 168,787,181,566 pairs the two sampled columns would otherwise
+have needed. Nothing is quietly describing a subset.
+
+**An answer list does not grow with the number of respondents.** The cap on how many options a
+question may offer was a quarter of the sample, which on the 541,909-row UCI online retail file
+permitted 135,477 "options" — so invoice numbers (25,900 distinct), stock codes (4,070) and
+free-text product descriptions (4,223) were all clustered on as pick-any answers. Beyond making no
+sense (Gower scores two nominal answers as identical or not, so with thousands of levels nearly
+every pair simply differs) it did not finish in half an hour. The ceiling is now absolute at 100,
+which real option lists — brands, universities, countries — sit well inside, and the columns are
+set aside with a note naming the override rather than dropped in silence.
+
 ## Estimates on a working set, answers on everybody (2026-08-06)
 
 Separately from the above, and kept because it is right independently of it: the k-selection panel

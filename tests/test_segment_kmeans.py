@@ -4325,3 +4325,48 @@ def test_encoding_an_answer_scale_does_not_depend_on_how_many_levels_it_has():
     assert out.shape == wide.shape
     assert time.time() - started < 30, (
         "encoding is scaling with the number of levels again — the pairwise scan is back")
+
+
+def test_an_answer_list_does_not_grow_with_the_number_of_respondents():
+    """How many options a question may offer used to be capped at a quarter of the sample.
+
+    That grows with the study, which is backwards: on the 541,909-row UCI online retail file it
+    permitted 135,477 "answer options", so invoice numbers (25,900 distinct), stock codes (4,070)
+    and free-text product descriptions (4,223) were all clustered on as pick-any answers. The run
+    had not finished after half an hour, and could not have said anything if it had — Gower scores
+    two nominal answers as identical or not, so with thousands of levels nearly every pair simply
+    differs.
+
+    The ceiling is absolute now. Real option lists — brands, universities, countries — sit well
+    inside it.
+    """
+    rng = np.random.default_rng(12)
+    n = 4000
+    df = pd.DataFrame({
+        "respondent_id": [f"R{i}" for i in range(n)],
+        "q1": rng.integers(1, 6, n),
+        "q2": rng.integers(1, 6, n),
+        "which_brand": rng.choice([f"Brand {i}" for i in range(20)], n),
+        "home_country": rng.choice([f"Country {i}" for i in range(38)], n),
+        "product_description": rng.choice([f"Item {i}" for i in range(3000)], n),
+    })
+    plan = sk.classify_columns(df)
+
+    assert "which_brand" in plan["categorical"], "a 20-option question was refused"
+    assert "home_country" in plan["categorical"] or "home_country" in plan["demographics"], \
+        "a 38-country question was refused"
+    assert "product_description" in plan["skipped"], (
+        "3,000 distinct values were accepted as a question's options — the cap is scaling with "
+        "the sample again")
+    note = next(n_ for n_ in plan["notes"] if "product_description" in n_)
+    # Not every one of the 3,000 possible values lands in 4,000 draws, so the note is checked
+    # against how many distinct values are actually present.
+    assert f"{df['product_description'].nunique():,}" in note and "identifier" in note, note
+
+    # The cap must not depend on how many people answered: same columns, a much bigger study.
+    big = pd.concat([df] * 10, ignore_index=True)
+    big["respondent_id"] = [f"R{i}" for i in range(len(big))]
+    plan_big = sk.classify_columns(big)
+    assert "product_description" in plan_big["skipped"], \
+        "accepted as a question purely because the study got bigger"
+    assert "which_brand" in plan_big["categorical"], "a real question was dropped in a big study"
