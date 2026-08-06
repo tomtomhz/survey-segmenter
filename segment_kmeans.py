@@ -1974,7 +1974,7 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
     return "\n".join(x for x in L if x is not None)
 
 
-def maybe_plot(diag, X, labels, rec_k, outdir):
+def maybe_plot(diag, X, labels, rec_k, outdir, cfg=None):
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -1993,7 +1993,17 @@ def maybe_plot(diag, X, labels, rec_k, outdir):
         ax2 = ax[1, 0].twinx(); ax2.plot(diag["k"], diag["gmm_BIC"], "d-", c="firebrick", label="GMM BIC")
         ax2.set_ylabel("GMM BIC (lower=better)", color="firebrick")
     ax[1, 0].axvline(rec_k, ls="--", c="grey"); ax[1, 0].set(title="Separation & model-based BIC", xlabel="k")
-    sv = silhouette_samples(X, labels); y = 10
+    # Every-pair again, and the last unguarded instance: measured at 48,842 respondents this one
+    # call cost 1.07 GB on its own, for a panel in a PNG. Same subsample as the diagnostics table,
+    # so the picture and the number it illustrates are computed on the same people, and the title
+    # says when it is a sample.
+    _take = _pairwise_sample(len(X), cfg) if cfg is not None else None
+    if _take is not None:
+        sv = silhouette_samples(np.asarray(X)[_take], np.asarray(labels)[_take])
+        labels = np.asarray(labels)[_take]
+    else:
+        sv = silhouette_samples(X, labels)
+    y = 10
     for c in np.unique(labels):
         vals = np.sort(sv[labels == c]); ax[1, 1].fill_betweenx(np.arange(y, y + len(vals)), 0, vals); y += len(vals) + 10
     ax[1, 1].axvline(sv.mean(), ls="--", c="red"); ax[1, 1].set(title=f"Silhouette by segment (k={rec_k})", xlabel="silhouette")
@@ -3892,7 +3902,8 @@ class Segmenter:
         # Typing rule: the portable classifier for NEW respondents.
         # Apply with: --classify new.csv --rule typing_rule.json
         (outdir / "typing_rule.json").write_text(json.dumps(self.typing_rule_dict(), indent=2))
-        fig = maybe_plot(self.diagnostics, X, self.labels, self.recommended_k, outdir)
+        fig = maybe_plot(self.diagnostics, X, self.labels, self.recommended_k, outdir,
+                         self.cfg)
         # Reproducibility manifest: everything needed to reproduce this exact run.
         import sklearn
         manifest = {

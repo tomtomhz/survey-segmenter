@@ -350,6 +350,45 @@ summarises may be sampled and disclosed; a diagnostic that must place every pers
 sampled at all.** Sampling one of the latter and reporting it as though it covered the study is
 the failure mode this tool exists to avoid.
 
+## Memory at scale: measured, part-diagnosed, and honestly incomplete (2026-08-06)
+
+Two large real files, both completing, with very different memory:
+
+| File | n | Method | Wall | Peak RSS |
+|---|---|---|---|---|
+| UCI bank marketing | 41,188 | Gower k-prototypes | 1.3 min | **1.24 GB** |
+| UCI adult / census | 48,842 | Gower k-prototypes | 2.2 min | **8.5-11.2 GB** |
+
+Both produce sensible answers. The second would swap or die on a 16 GB laptop, and the peak
+**varies between 8.55 and 11.24 GB across identical runs**, which is itself informative — a fixed
+allocation does not wander by 3 GB.
+
+What has been ruled out by measurement, each in its own process (`ru_maxrss` is a high-water mark
+and never falls, so measuring several configurations inside one process reports nothing — an error
+made and corrected here):
+
+| Stage | Peak |
+|---|---|
+| Ingest: read, classify, prepare | 0.26 GB |
+| `selection_diagnostics` (whole k panel) | 1.78 GB |
+| `fit_final` | 0.26 GB |
+| `clusterboot_jaccard` | 0.21 GB |
+| `build_charts` (all seven) | +0.00 GB |
+| Consensus / variable selection / GMM off | no change |
+
+**One real defect found and fixed:** `maybe_plot` called `silhouette_samples` on every respondent
+with no guard — 2.4 billion pairwise distances at this size, 1.07 GB measured, for one panel of a
+PNG. It now uses the same subsample as the diagnostics table.
+
+**The remaining ~6 GB is not localised.** It sits inside `Segmenter.run` outside the stages above.
+The run-to-run variance points at allocator behaviour across the several hundred k-means fits the
+panel performs — freed pages not returned to the OS — rather than one large array, but that is a
+hypothesis and it has not been tested. It is recorded here rather than guessed at, because the
+next person should start from the measurements and not from my theory.
+
+**Practical reading:** studies up to about 40,000 respondents are comfortable. Beyond that, memory
+is unpredictable and untested, and the tool does not yet declare a supported ceiling — it should.
+
 ## First contact with real public data (2026-08-06)
 
 Every validation before this one used data I generated, from rounded Gaussians around planted
