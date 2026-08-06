@@ -289,6 +289,75 @@ def _scale_apply(arr, params):
 _DECIMAL_COMMA = re.compile(r"^-?\d+,\d+$")
 
 
+def _skip_preamble_lines(text):
+    """Drop title and spacer lines above the column names of a CSV.
+
+    A spreadsheet exported with "Customer Survey — Q1 2026 Results" on the first line breaks the
+    delimiter sniffer before it breaks anything else: the sniffer looks at that line, decides the
+    file is space-separated, and returns seven columns called Customer, Survey, Q1, 2026...
+    (`_promote_header_below_a_title` catches the Excel form of this, where the columns come back
+    as "Unnamed: 1"; a CSV never gets that far.)
+
+    Real rows agree with each other about how many separators they contain; a sentence does not.
+    So the separator is whichever candidate has the most consistent count across the file, and any
+    leading line that disagrees with that count is preamble.
+    """
+    lines = text.splitlines()
+    if len(lines) < 4:
+        return text
+    body = [ln for ln in lines if ln.strip()][:200]
+    best_sep, best_count, best_agree = None, 0, 0.0
+    for sep in (",", ";", "\t", "|"):
+        counts = [ln.count(sep) for ln in body]
+        common = max(set(counts), key=counts.count)
+        if common == 0:
+            continue
+        agree = counts.count(common) / len(counts)
+        if agree > best_agree or (agree == best_agree and common > best_count):
+            best_sep, best_count, best_agree = sep, common, agree
+    if best_sep is None or best_agree < 0.8:
+        return text                       # no consistent shape to compare against; leave it alone
+    for i, ln in enumerate(lines[:5]):
+        if ln.count(best_sep) == best_count and ln.strip():
+            return "\n".join(lines[i:]) if i else text
+    return text
+
+
+def _promote_header_below_a_title(df):
+    """Find the real header when somebody has typed a title above it.
+
+    A spreadsheet that opens "Customer Survey — Q1 2026 Results" in A1 and puts the column names
+    on row 3 is completely ordinary, and pandas takes that title as the header: one named column
+    and the rest called "Unnamed: 1", "Unnamed: 2"... Measured on such a file, every real column
+    name became data, the whole sheet read as text, and the survey was routed down the categorical
+    path — 302 rows where there were 300 respondents, and no complaint anywhere.
+
+    A row of column names is recognisable: it fills nearly every column, and its entries are
+    distinct — titles and blank spacer rows are neither. Only the first few rows are considered,
+    and only when the header is mostly "Unnamed", so an ordinary file is never touched.
+    """
+    cols = [str(c) for c in df.columns]
+    unnamed = sum(c.startswith("Unnamed:") or c.strip() == "" for c in cols)
+    if not len(cols) or unnamed <= len(cols) / 2 or len(df) < 3:
+        return df
+    for i in range(min(4, len(df) - 1)):
+        row = df.iloc[i]
+        filled = row.dropna()
+        if len(filled) < 0.8 * len(cols):
+            continue                                   # a title or a spacer, not the header
+        names = [str(v).strip() for v in row]
+        if len(set(names)) < len(names):
+            continue                                   # column names do not repeat
+        out = df.iloc[i + 1:].reset_index(drop=True)
+        out.columns = names
+        for c in out.columns:                          # re-type: it was text only because of this
+            converted = pd.to_numeric(out[c], errors="coerce")
+            if converted.notna().sum() == out[c].notna().sum():
+                out[c] = converted
+        return out
+    return df
+
+
 def _strip_metadata_rows(df):
     """Drop the extra header rows that professional survey tools put above the data.
 
@@ -372,8 +441,9 @@ def _read_table(source):
         return source.copy()      # the caller has already decided what this contains
 
     def _clean(df):
-        """Strip the tools' extra header rows and repair decimal commas. Both otherwise degrade
-        the analysis without a word: see the two helpers above."""
+        """Find the real header, drop the tools' extra header rows, and repair decimal commas.
+        Each of the three otherwise degrades the analysis without a word: see the helpers above."""
+        df = _promote_header_below_a_title(df)
         df, _ = _strip_metadata_rows(df)
         return _fix_decimal_commas(df)
 
@@ -392,9 +462,18 @@ def _read_table(source):
             source.seek(0)
         return source
     read_errors = (UnicodeDecodeError, pd.errors.ParserError, pd.errors.EmptyDataError, csv.Error)
-    for enc in ("utf-8-sig", "latin-1"):            # utf-8-sig also decodes plain UTF-8
+    # utf-16 sits between them deliberately. It is what Excel's "Unicode Text (*.txt)" export
+    # writes, and latin-1 decodes ANY byte without complaining — so with utf-16 missing, such a
+    # file came back as a single column named 'ÿþr' full of mojibake, and the run failed later
+    # with "no questions found" rather than anything about encodings.
+    for enc in ("utf-8-sig", "utf-16", "latin-1"):     # utf-8-sig also decodes plain UTF-8
         try:
-            df = pd.read_csv(_buf(), sep=None, engine="python", encoding=enc)   # sep=None sniffs , ; \t
+            raw = _buf()
+            data = raw.read() if hasattr(raw, "read") else Path(str(source)).read_bytes()
+            if isinstance(data, bytes):
+                data = data.decode(enc)
+            # Strip any title or spacer lines first: they mislead the delimiter sniffer below.
+            df = pd.read_csv(io.StringIO(_skip_preamble_lines(data)), sep=None, engine="python")
             if df.shape[1] >= 1 and len(df):
                 return _clean(df)
         except read_errors:
@@ -1430,7 +1509,7 @@ def how_k_was_chosen(signals, chosen, k_min, k_max, unit="group", cfg=None):
 
 
 def executive_summary(n_resp, names, shares, wants, min_jaccard, repro, unit="group",
-                      k_agreement=None, cross_method=None, k_choice=""):
+                      k_agreement=None, cross_method=None, k_choice="", n_items=None):
     """The plain-language box at the top of every report: how many groups, who they are, how much
     to trust it (a green/amber/red confidence light built from the stability numbers), and what to
     do next. Written for someone who will never read the word 'eta-squared'.
@@ -1457,11 +1536,29 @@ def executive_summary(n_resp, names, shares, wants, min_jaccard, repro, unit="gr
     # partition agreed with a Gaussian mixture at only 0.43 and with Ward at 0.47 — about half the
     # memberships in dispute — and the report said High.
     methods_disagree = cross_method is not None and cross_method < 0.6
-    if min_jaccard >= 0.75 and repro >= 0.6 and not k_contested and not methods_disagree:
+    # More questions than the sample can support. With many questions and few people, distances
+    # between respondents concentrate: everybody ends up roughly equidistant, real structure is
+    # diluted across the questions that carry none, and — the dangerous part — what survives is
+    # extremely REPRODUCIBLE, because noise reproduces. Every criterion this light is built from
+    # then agrees on an answer that is wrong.
+    #
+    # Measured on 150 respondents answering 400 questions where only 60 carried a three-group
+    # signal: the tool found two groups at an Adjusted Rand Index of 0.635 against the truth, and
+    # called it High confidence on two runs out of three. That is the one thing this report is not
+    # allowed to do, so where the sample cannot support the questionnaire the light is capped and
+    # the reason is stated. It does not change the segmentation, only the claim made for it.
+    too_wide = n_items is not None and n_resp < 2 * n_items
+    if min_jaccard >= 0.75 and repro >= 0.6 and not k_contested and not methods_disagree \
+            and not too_wide:
         light, label, meaning = "🟢", "High", ("the groups are clear and they reproduce reliably "
                                                "when the analysis is repeated.")
     elif min_jaccard >= 0.6 and repro >= 0.4:
         light, label, meaning = "🟡", "Moderate", ("the groups mostly hold up, but " + (
+            f"there are {n_items} questions and only {n_resp:,} people, which is too few to pin "
+            "down that many answers at once: respondents end up roughly equidistant from each "
+            "other, and a wrong answer can still reproduce perfectly. Treat the number of groups "
+            "as unsettled, and consider re-running on the questions that matter most."
+            if too_wide else
             "the methods disagree on how many groups there really are, so the exact number is "
             "uncertain." if k_contested else
             "other clustering methods put a sizeable share of people in different groups, so who "
@@ -1805,6 +1902,8 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
                            min(jaccard.values()), split_half, unit="group", k_agreement=k_agreement,
                            k_choice=how_k_was_chosen(signals, rec_k, cfg.k_min, cfg.k_max,
                                                      cfg=cfg),
+                           # How many questions the sample has to support at once.
+                           n_items=(len(centroids.columns) if centroids is not None else None),
                            # The weaker of the two independent paradigms: a mixture model, which
                            # unlike k-means can represent a cluster's breadth, and Ward, which
                            # builds bottom-up rather than around centroids. If both put people
@@ -3081,11 +3180,19 @@ def _multiselect_options(series, max_options=15):
     answer containing a comma would be shredded into nonsense."""
     vals = series.dropna().astype(str).str.strip()
     vals = vals[vals != ""]
-    if len(vals) < 8 or vals.str.contains(",").mean() < 0.15:
+    if len(vals) < 8:
+        return None
+    # Which character packs the ticked options together. Google Forms uses a comma; a Swedish or
+    # German Excel writes a semicolon, because the comma is already the decimal mark; some exports
+    # use a pipe. Whichever appears in most cells wins, and if none does this is not that shape.
+    # Missing the semicolon left "Spotify;Netflix" and "Netflix;Spotify" as different answers —
+    # 74 pseudo-categories from five options on a 300-person file.
+    sep = max((",", ";", "|"), key=lambda ch: vals.str.contains(re.escape(ch)).mean())
+    if vals.str.contains(re.escape(sep)).mean() < 0.15:
         return None                                   # nothing is multi-answer: not this shape
     items = []
     for v in vals:
-        items.extend([p.strip() for p in v.split(",") if p.strip()])
+        items.extend([p.strip() for p in v.split(sep) if p.strip()])
     counts = pd.Series(items).value_counts()
     if not 2 <= len(counts) <= max_options:
         return None
@@ -3099,11 +3206,11 @@ def _multiselect_options(series, max_options=15):
     # shredded into fake options.
     parents = {}
     for whole in vals.unique():
-        for part in {p.strip() for p in whole.split(",") if p.strip()}:
+        for part in {p.strip() for p in whole.split(sep) if p.strip()}:
             parents.setdefault(part, set()).add(whole)
     if float(np.median([len(v) for v in parents.values()])) < 2:
         return None
-    return list(counts.index)
+    return list(counts.index), sep
 
 
 _ID_NAME_HINTS = ("id", "respondent", "email", "e-mail", "user", "name", "uuid", "participant",
@@ -3191,7 +3298,8 @@ def classify_columns(df, id_col=None):
     categorical choice), or something to skip (timestamp, free text, constant). Returns a plan with
     a plain-language note for every column."""
     plan = {"id": None, "weight": None, "continuous": [], "categorical": [], "demographics": [],
-            "skipped": [], "recoded": {}, "multiselect": {}, "notes": []}
+            "skipped": [], "recoded": {}, "multiselect": {}, "multiselect_sep": {},
+            "notes": []}
     index_like = []          # row counters / stray record ids: never answers, but usable as the id
     for c in df.columns:
         name = str(c).lower().strip()
@@ -3288,9 +3396,11 @@ def classify_columns(df, id_col=None):
         if rec is not None:
             plan["continuous"].append(c); plan["recoded"][c] = rec
             plan["notes"].append(f"'{c}': agree/disagree scale, converted to 1-5"); continue
-        opts = _multiselect_options(s)
-        if opts is not None:
+        found = _multiselect_options(s)
+        if found is not None:
+            opts, sep = found
             plan["multiselect"][c] = opts
+            plan["multiselect_sep"][c] = sep
             plan["notes"].append(f"'{c}': a select-all question — split into {len(opts)} yes/no "
                                  f"columns ({', '.join(opts[:4])}"
                                  + (", ..." if len(opts) > 4 else "") + ")")
@@ -3368,8 +3478,9 @@ def auto_prepare(df, id_col=None, force_items=None):
     # multi-response data, and the only way it can contribute to grouping at all.
     expanded = {}
     for col, options in plan.get("multiselect", {}).items():
+        sep = plan.get("multiselect_sep", {}).get(col, ",")
         picked = df[col].fillna("").astype(str).apply(
-            lambda v: {p.strip() for p in v.split(",") if p.strip()})
+            lambda v, _s=sep: {p.strip() for p in v.split(_s) if p.strip()})
         for opt in options:
             name = _option_column_name(col, opt)
             # Two long questions can shorten to the same stem; a duplicate column name would

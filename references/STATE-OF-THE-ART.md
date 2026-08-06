@@ -392,6 +392,33 @@ one at a time until `typing_tool` went 0.24 GB to 11.11 GB in one call.
 A negative result from an incomplete instrument is not evidence of absence, and "no single big
 allocation" was a conclusion about my wrapper list, not about the program.
 
+## The claim that failed: confidently wrong on a wide questionnaire (2026-08-06)
+
+The property this tool is built around, stated in the section above and pinned by a test, is that
+**it never reports high confidence while wrong**. Feeding it a shape it had never seen falsified
+that.
+
+150 respondents, 400 questions, a genuine three-group structure carried by 60 of them. It found
+**two** groups, at an Adjusted Rand Index of 0.635 against the truth, and called it **High
+confidence on two runs out of three**.
+
+The mechanism is the one the panel is least equipped to notice, because it is the panel's own
+philosophy turned against it. With many questions and few people, distances concentrate:
+respondents end up roughly equidistant, the real structure is diluted across the 340 questions
+carrying none, and what remains is **highly reproducible — because noise reproduces**. Prediction
+strength, replication stability and per-segment Jaccard all agreed on the wrong answer, and they
+are exactly the criteria weighted most heavily.
+
+The light is now capped below green when the sample cannot support the questionnaire (fewer than
+two respondents per question), and the report says which numbers it is holding back on and why.
+It does not change the segmentation, only the claim made for it. Verified: the same file now
+reports Moderate on all three seeds, and normal-shaped studies — 2,800 respondents on 25 Big Five
+items, 48,842 on 6 — are untouched.
+
+**The general lesson is about the evidence, not the threshold.** Every criterion here answers
+"would this answer come back again?". None answers "is this answer right?". Where a regime makes
+noise reproducible, agreement among them is not corroboration, and a panel of them cannot tell.
+
 ## How big a study it handles (2026-08-06)
 
 | File | n | Columns | Method | Wall | Peak RSS |

@@ -4400,3 +4400,98 @@ def test_a_column_flattened_by_its_outliers_is_called_out():
         "an ordinary 1-5 answer scale was flagged as flattened"
     note = next(n_ for n_ in flagged if "quantity" in n_)
     assert "robust" in note, f"the note does not name the remedy: {note}"
+
+
+def test_a_title_typed_above_the_column_names_is_not_the_header(tmp_path):
+    """Somebody types "Customer Survey — Q1 2026 Results" in A1 and puts the column names on row 3.
+
+    pandas takes the title as the header: one named column and the rest "Unnamed: 1", "Unnamed: 2".
+    Measured on such a file, every real column name became data, the sheet read as text, and the
+    survey was routed down the categorical path — 302 rows where there were 300 respondents, with
+    no complaint anywhere.
+    """
+    rng = np.random.default_rng(3)
+    n = 200
+    centres = {0: [5, 1, 5, 1], 1: [1, 5, 1, 5], 2: [3, 3, 5, 5]}
+    who = rng.integers(0, 3, n)
+    rows = [[f"R{i}"] + [int(np.clip(round(b + rng.normal(0, 0.6)), 1, 5)) for b in centres[who[i]]]
+            for i in range(n)]
+    df = pd.DataFrame(rows, columns=["respondent_id", "Q1", "Q2", "Q3", "Q4"])
+
+    path = tmp_path / "titled.csv"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("Customer Survey — Q1 2026 Results\n\n")
+        df.to_csv(f, index=False)
+
+    got = sk._read_table(str(path))
+    assert list(got.columns) == list(df.columns), f"header not found: {list(got.columns)[:4]}"
+    assert len(got) == n, f"read {len(got)} rows from a {n}-respondent file"
+    assert sk.auto_prepare(got)[1] == "kmeans", "rating answers were read as text"
+
+
+def test_an_excel_unicode_text_export_is_readable(tmp_path):
+    """UTF-16 is what Excel's "Unicode Text (*.txt)" export writes, and latin-1 decodes any byte
+    without complaining — so with utf-16 missing from the attempts, such a file came back as a
+    single column named 'ÿþr' full of mojibake and failed later with "no questions found", which
+    tells the reader nothing about what was wrong."""
+    rng = np.random.default_rng(4)
+    n = 120
+    df = pd.DataFrame({"respondent_id": [f"R{i}" for i in range(n)],
+                       "Nöjdhet": rng.integers(1, 6, n), "Q2": rng.integers(1, 6, n),
+                       "Q3": rng.integers(1, 6, n)})
+    path = tmp_path / "unicode_text.csv"
+    df.to_csv(path, index=False, encoding="utf-16", sep="\t")
+
+    got = sk._read_table(str(path))
+    assert len(got) == n and list(got.columns) == list(df.columns), \
+        f"utf-16 export read as {got.shape} with columns {list(got.columns)[:3]}"
+    assert pd.api.types.is_numeric_dtype(got["Nöjdhet"])
+
+
+def test_a_select_all_question_is_split_whatever_packs_it(tmp_path):
+    """Google Forms joins ticked options with a comma. A Swedish or German Excel uses a semicolon,
+    because the comma is already the decimal mark. Only the comma was recognised, so
+    "Spotify;Netflix" and "Netflix;Spotify" were different answers — measured, five options became
+    74 pseudo-categories on a 300-person file."""
+    rng = np.random.default_rng(6)
+    n = 200
+    apps = ["Spotify", "Netflix", "HBO", "Viaplay", "YouTube"]
+    for sep in (",", ";", "|"):
+        picks = [sep.join(rng.choice(apps, rng.integers(1, 4), replace=False)) for _ in range(n)]
+        df = pd.DataFrame({"respondent_id": [f"R{i}" for i in range(n)],
+                           "q1": rng.integers(1, 6, n), "q2": rng.integers(1, 6, n),
+                           "Which do you use": picks})
+        plan = sk.classify_columns(df)
+        assert "Which do you use" in plan["multiselect"], f"not recognised when packed with '{sep}'"
+        assert set(plan["multiselect"]["Which do you use"]) == set(apps), \
+            f"wrong options for '{sep}': {plan['multiselect']['Which do you use']}"
+        assert plan["multiselect_sep"]["Which do you use"] == sep
+
+
+def test_more_questions_than_the_sample_can_support_is_never_called_high_confidence():
+    """With many questions and few people, distances between respondents concentrate: everybody is
+    roughly equidistant, real structure is diluted across the questions carrying none, and — the
+    dangerous part — what survives is highly REPRODUCIBLE, because noise reproduces.
+
+    Measured on 150 respondents answering 400 questions where only 60 carried a three-group
+    signal: two groups at an Adjusted Rand Index of 0.635 against the truth, reported as **High**
+    confidence on two runs out of three. Being wrong is survivable; being wrong and confident is
+    the one thing this report may not do.
+    """
+    rng = np.random.default_rng(7)
+    n, q = 120, 300
+    grp = rng.integers(0, 3, n)
+    signal = np.array([[5, 1, 3], [1, 5, 3], [3, 3, 5]], float)
+    X = rng.normal(3, 1.0, (n, q))
+    for j in range(40):
+        X[:, j] = signal[grp, j % 3] + rng.normal(0, 0.6, n)
+    df = pd.DataFrame(np.clip(np.rint(X), 1, 5).astype(int), columns=[f"Q{i+1}" for i in range(q)])
+    df.insert(0, "respondent_id", [f"R{i}" for i in range(n)])
+
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+    assert r["confidence"] != "high", (
+        f"{q} questions and {n} people, and the report claims high confidence — the regime where "
+        "every criterion agrees on a wrong answer")
+    assert "too few to pin down" in r["digest"] or "questions and only" in r["digest"], \
+        "the report does not say why it is holding back"
