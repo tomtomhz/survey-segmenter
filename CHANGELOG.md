@@ -3,6 +3,44 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.5.3] — 2026-08-06
+
+The first release driven by real data rather than data the tool generated for itself. Every
+validation before this used synthetic answers drawn from the model k-means assumes; this one came
+from feeding it five open survey datasets and the export formats real platforms write.
+
+### Fixed — files the tool read wrongly without saying so
+
+- **A Qualtrics export was analysed as if its rating scales were unordered categories.** Qualtrics
+  writes three header rows — short name, question wording, and a JSON `{"ImportId": ...}` blob —
+  and only the first became the header, so the other two arrived as respondents. A 240-person
+  export read as 242 rows, the wording turned every rating column into text, and the survey was
+  routed to latent class analysis. No error; the report looked ordinary. **SurveyMonkey** does the
+  same with two rows. Both now read correctly, and all formats produce the identical segmentation.
+- **A Swedish Excel export silently lost a question.** Swedish and German Excel write `4,5` for
+  four-and-a-half; the `;` delimiter was already handled, the decimal comma was not, so a 0-10
+  satisfaction score arrived as text and was dropped from the analysis without comment.
+- **An education column was used to build the segments.** The demographic vocabulary held the
+  Swedish `utbildning` and never the English `education`, so a 1-5 education code became a 26th
+  "personality question" on the Big Five inventory. A numeric demographic cannot be told from a
+  rating scale by its values — only the name gives it away — and that list now carries both
+  languages for each concept.
+
+### Added
+
+- **A warning when a number is too large to be an answer.** On the Chilean plebiscite survey the
+  tool reported eight segments; each was pure on how the person voted and then split in two by the
+  size of their town (3,750 to 250,000). Four of the eight "mind-sets" were really "lives somewhere
+  bigger". Columns on that magnitude are now flagged as possible facts about the person rather than
+  answers they gave — flagged, not excluded, since that is a judgement about the study.
+
+### Measured, and left alone
+
+- **Response-style segments do not happen here.** The textbook failure — recovering how people use
+  a scale instead of what they think — was tested with both truths planted and came out at ARI
+  −0.002 against response style. The standard remedy (ipsative scaling) measures *worse* than what
+  the tool already does, 0.819 against 0.977, and was deliberately not adopted.
+
 ## [1.5.2] — 2026-08-06
 
 ### Fixed
