@@ -4027,3 +4027,41 @@ def test_a_numeric_demographic_does_not_join_the_rating_grid():
     _, _, _, items, plan = sk.auto_prepare(df)
     assert "education" not in items, "education was used to form the groups"
     assert "education" in plan["demographics"], "education was not kept for profiling either"
+
+
+def test_a_number_too_big_to_be_an_answer_is_flagged():
+    """Some numeric columns are facts about a person, not answers they gave, and they quietly
+    help define the segments.
+
+    Found on the Chilean plebiscite survey (carData::Chile): 'population' — the size of the
+    respondent's town, 3,750 to 250,000 — was clustered on alongside two real opinion variables.
+    The result was eight segments, each pure on how the person voted and then split in two by
+    town size. Four of the eight "mind-sets" were really "lives somewhere bigger".
+
+    Whether a number is an answer or a circumstance is a judgement about the study, not a property
+    of the data, so this warns and leaves the column in rather than guessing. What it must not do
+    is stay silent.
+    """
+    rng = np.random.default_rng(9)
+    n = 120
+    df = pd.DataFrame({
+        "respondent_id": [f"R{i}" for i in range(n)],
+        "q1": rng.integers(1, 6, n),
+        "q2": rng.integers(1, 6, n),
+        "nps": rng.integers(0, 11, n),              # 0-10, a real answer scale
+        "slider": rng.integers(0, 101, n),          # 0-100, also a real answer scale
+        # A handful of town sizes shared across respondents, as in the real file. All-distinct
+        # large integers would be a record id instead, and are correctly skipped as one.
+        "population": rng.choice([3_750, 27_000, 65_000, 159_000, 250_000], n),
+    })
+    plan = sk.classify_columns(df)
+    notes = " ".join(plan["notes"])
+
+    assert "population" in plan["continuous"], "the column should still be usable, not dropped"
+    flagged = [n_ for n_ in plan["notes"] if "population" in n_ and "far larger" in n_]
+    assert flagged, f"a column running to 250,000 was presented as a rating: {notes}"
+
+    # ...and the genuine answer scales must not be flagged, or the warning becomes noise.
+    for real in ("nps", "slider", "q1"):
+        assert not any(real in n_ and "far larger" in n_ for n_ in plan["notes"]), \
+            f"'{real}' is a normal answer scale and must not be flagged"

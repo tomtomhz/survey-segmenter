@@ -315,6 +315,48 @@ are worth it.
    attempting: merging may be the honest answer, and "improving" it risks trading the confidence
    property, which is the more valuable one.
 
+## First contact with real public data (2026-08-06)
+
+Every validation before this one used data I generated, from rounded Gaussians around planted
+centres — which is precisely the model k-means with range scaling assumes. The test suite had 85
+random-number calls and the repository one example CSV. The engine had never seen a real
+respondent.
+
+Five open datasets, fed in raw, exactly as a user would drop them in:
+
+| File | Shape | Routed to | Result | Fair? |
+|---|---|---|---|---|
+| `psych::bfi` Big Five | 2800 x 25 Likert, 731 missing cells | k-means | Hopkins 0.57, k=2, Moderate, *reproducible* | **Yes.** Personality is continuous trait space; there are no discrete types. "No natural clusters, but a stable working split" is the correct answer |
+| `MASS::survey` student measurements | 237 x 13, 131 missing | k-prototypes | k=2, **Low**, *constructive* | **Yes** — a grab-bag with no segment structure, and it refused |
+| `carData::WVS` | 5381 x 7 | Latent class | k=2, High | Yes |
+| `carData::Mroz` | 753 x 9 | k-prototypes | k=3, High, *reproducible* | Plausible |
+| `carData::Chile` plebiscite | 2700 x 9, 295 missing | k-prototypes | k=8, Moderate, *natural* | **No — see below** |
+
+Nothing crashed, nothing hung, and every file routed to the right method unaided. The calibration
+result is the reassuring one: on the two datasets that genuinely contain no segments it said so,
+in one case with a red light.
+
+**Two real defects surfaced, both in ingest rather than in the statistics.**
+
+*Education was clustered on.* `_DEMO_WORDS` held the Swedish `utbildning` and never the English
+`education`, so on the Big Five file a 1-5 education code became a 26th personality "question".
+A numeric demographic code cannot be told from a rating scale by its values — 1-5 education looks
+exactly like a six-point item — so the name list is load-bearing, and it now carries both
+languages for each concept.
+
+*Town size defined half a segmentation.* On the Chilean plebiscite file the eight segments were
+each pure on how the person voted and then split in two by `population`, the size of their town
+(3,750 to 250,000). Four of the eight "mind-sets" were really "lives somewhere bigger". No answer
+scale reaches five figures, so a column on that magnitude is now flagged in the detection notes —
+warned about, not excluded, because whether a number is an answer or a circumstance is a
+judgement about the study and not a property of the data.
+
+Three tidier rules were tried against this file and died on measurement: that `population` is a
+function of `region` (it is not — region C holds nine distinct values), and two variants of the
+stability band described above. The pattern is consistent enough to be worth naming: on this
+project, rules that look principled in the abstract fail about as often as they succeed, and the
+only reliable filter is measuring them against data whose answer is known.
+
 ## Predicted, measured, and did not happen: response-style segments (2026-08-06)
 
 The textbook failure of survey segmentation is that clustering raw Likert answers recovers **how

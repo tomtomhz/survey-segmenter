@@ -2966,6 +2966,10 @@ _DEMO_WORDS = {"gender", "sex", "age", "school", "university", "college", "count
                "civilstånd", "civilstand", "hushåll", "hushall", "lön", "lon", "språk", "sprak",
                "modersmål", "modersmal", "postnummer", "födelseår", "fodelsear", "bransch"}
 _DEMO_PHRASES = ("study year", "year of study", "class year", "study programme", "study program")
+# The largest value any response scale plausibly reaches. Sliders run to 100, NPS to 10, Likert to
+# 7; ages and years sit below this too, so nothing a respondent actually answers is excluded. Above
+# it the number is a measurement or an amount attached to the person, and worth a second look.
+_RESPONSE_SCALE_MAX = 1000
 # A survey weight (e.g. post-stratification / design weight). Cluster UNWEIGHTED, but project the
 # segment SIZES to the population with these weights (studies often pool strata with weights).
 _WEIGHT_WORDS = {"weight", "weights", "weighting", "vikt", "designweight", "poststrat"}
@@ -3057,7 +3061,28 @@ def classify_columns(df, id_col=None):
                                  "groups instead, tick it under 'Group people on different "
                                  "questions'"); continue
         if pd.api.types.is_numeric_dtype(s):
-            plan["continuous"].append(c); plan["notes"].append(f"'{c}': number ratings, used as-is"); continue
+            plan["continuous"].append(c)
+            # No answer scale reaches five figures. A column on that magnitude is a measurement or
+            # a fact attached to the respondent — a headcount, a salary, a distance — not something
+            # anybody typed on a 1-5 scale, and it will help define the segments unless someone
+            # notices. Found on the Chilean plebiscite survey, where 'population' (the size of the
+            # respondent's town, 3,750 to 250,000) split every vote bloc in two: the tool reported
+            # eight mind-sets, and four of them were really "lives somewhere bigger".
+            #
+            # Warn rather than exclude. Whether a number is an answer or a circumstance is a
+            # judgement about the study, not a property of the data — on a housing dataset the
+            # large-magnitude column is the most informative one in the file — and the guesses this
+            # file has tempted me into have not survived measurement. So the reader decides, with
+            # the escape hatch named in the sentence.
+            if _RESPONSE_SCALE_MAX < float(np.nanmax(np.abs(pd.to_numeric(s, errors="coerce")))):
+                plan["notes"].append(
+                    f"'{c}': used to form the groups, but its values are far larger than any "
+                    "answer scale, so it may be a fact about the person (a headcount, an amount, "
+                    "a distance) rather than an answer they gave. If so, tick it under 'Group "
+                    "people on different questions' to profile the groups by it instead.")
+            else:
+                plan["notes"].append(f"'{c}': number ratings, used as-is")
+            continue
         rec = _try_likert(s)
         if rec is not None:
             plan["continuous"].append(c); plan["recoded"][c] = rec
