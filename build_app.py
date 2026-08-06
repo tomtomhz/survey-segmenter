@@ -111,10 +111,13 @@ def _smoke_test():
     # Two obvious mind-sets, jittered. Perfectly identical answers within a group leave zero
     # variance, which makes the validation maths degenerate and the run crawl — the check would
     # then fail on its own test data rather than on anything wrong with the build.
+    # Five questions and 120 people, not four and 80: the second cluster-tendency check needs at
+    # least four questions and forty respondents before it will run, and a smoke test that skips
+    # the capability it is meant to be checking proves nothing about it.
     rnd = random.Random(0)
-    rows = [["respondent_id", "q1", "q2", "q3", "q4"]]
-    for i in range(80):
-        base = [5, 1, 5, 2] if i % 2 else [1, 5, 2, 4]
+    rows = [["respondent_id", "q1", "q2", "q3", "q4", "q5"]]
+    for i in range(120):
+        base = [5, 1, 5, 2, 4] if i % 2 else [1, 5, 2, 4, 1]
         rows.append([f"P{i}", *[max(1, min(5, b + rnd.randint(-1, 1))) for b in base]])
     buf = io.StringIO()
     csv.writer(buf).writerows(rows)
@@ -193,8 +196,32 @@ def _smoke_test():
             for reason in why:
                 print(f"  - {reason}")
             _discard_archive()
+        # Beyond "it ran": the two capabilities that fail SILENTLY when a dependency does not
+        # survive bundling. Neither crashes the app — it starts, analyses, and quietly does less —
+        # which is precisely the shape of failure this project has shipped before, and the shape
+        # hardest to notice on a platform nobody is sitting in front of.
+        missing = []
+        report = result.get("report_html", "")
+        if "Dip test (second opinion)" not in report:
+            # The dip test is a compiled extension. Absent, the app reports the check as not run.
+            why = "not run"
+            marker = report.find("Second opinion on cluster tendency")
+            if marker >= 0:
+                why = report[marker:marker + 160].split("<")[0]
+            missing.append(f"the second cluster-tendency test did not run ({why})")
+        specs = sum(1 for c in result["charts"] if c.get("spec"))
+        if specs < len(result["charts"]):
+            missing.append(f"only {specs} of {len(result['charts'])} charts carry the data behind "
+                           "them, so the interactive versions will fall back to pictures")
+        if missing:
+            print("\nBUILD IS BROKEN — it runs, but quietly does less than it should:")
+            for reason in missing:
+                print(f"  - {reason}")
+            _discard_archive()
+
         print(f"Smoke test passed: the built app found {result['k']} groups in "
-              f"{result['n_people']} people and drew {len(result['charts'])} charts.")
+              f"{result['n_people']} people, drew {len(result['charts'])} charts with the data "
+              f"behind all of them, and ran both cluster-tendency tests.")
     finally:
         proc.terminate()
         try:
