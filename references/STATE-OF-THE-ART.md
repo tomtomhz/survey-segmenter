@@ -315,6 +315,41 @@ are worth it.
    attempting: merging may be the honest answer, and "improving" it risks trading the confidence
    property, which is the more valuable one.
 
+## Large studies: what is computed over everybody, and what is not (2026-08-06)
+
+Tested on the UCI bank marketing file — **41,188 real telephone-survey responses**, 21 mixed-type
+columns. Previously the largest thing the tool had ever seen was 5,381.
+
+Anything that needs a distance between **every pair** of respondents cannot be computed over
+everybody at that size: 41,188 people make 848 million pairs, and the consensus routine holds two
+dense n-by-n matrices, which is 27 GB. Three diagnostics are affected, and they are handled
+differently on purpose:
+
+| Diagnostic | At large n | Why |
+|---|---|---|
+| **consensus_PAC** | random 6,000, disclosed | PAC summarises how ambiguously pairs co-cluster; a sample estimates it well |
+| **silhouette** | random 6,000, disclosed | An average over respondents; same argument |
+| **Consensus ensemble partition** | skipped, stated | Has to place *every* respondent; a partition of a sample cannot |
+| **Ward cross-check** | skipped, stated | Same: a partition of a sample cannot be compared with one of everybody |
+
+Everything else — the segmentation itself, prediction strength, replication stability, the gap
+statistic, per-segment Jaccard — uses all 41,188.
+
+**What this actually fixed was not a crash.** A guard already dropped consensus clustering
+entirely above n=5,000, so the 27 GB allocation was unreachable by the normal path. What it did
+instead was quietly delete the `consensus_PAC` column — **one of the three criteria the k panel
+weights double** — from every study above 5,000 respondents. The panel ran on two doubled criteria
+instead of three and said nothing. Estimating it from a subsample restores the column and
+discloses its basis, which is strictly better than a silent absence.
+
+Measured after the change: 41,188 respondents in **1.3 minutes, 1.24 GB peak**, k=3, moderate
+confidence, with the report naming the 848,205,078 pairs and the 6,000 respondents used.
+
+The general rule this settles, and the reason the four rows above differ: **a diagnostic that
+summarises may be sampled and disclosed; a diagnostic that must place every person may not be
+sampled at all.** Sampling one of the latter and reporting it as though it covered the study is
+the failure mode this tool exists to avoid.
+
 ## First contact with real public data (2026-08-06)
 
 Every validation before this one used data I generated, from rounded Gaussians around planted

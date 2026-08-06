@@ -529,8 +529,32 @@ def _geometry(X, cfg):
     return np.asarray(X, float), "euclidean"
 
 
+# Above this many respondents, a diagnostic that needs every PAIR of people is computed on a
+# random subsample of this size, and the report says so. The pair count grows as the square: a
+# dense pairwise matrix is 288 MB at 6,000 people, 3.2 GB at 20,000 and 20 GB at 50,000 — and the
+# consensus routine holds two of them, per k. Measured: a 41,188-respondent file asked for 27 GB
+# and would have taken the machine down before producing anything, with no guard anywhere.
+#
+# Subsample rather than skip, where the quantity allows it. The consensus matrix is itself a
+# resampling method and PAC is a summary of it; the silhouette is an average over respondents.
+# Both mean the same thing on a random sample of this size. The Ward cross-check below skips
+# instead, correctly — a partition of a sample cannot be compared with one of everybody. What none
+# of them may do is report a sampled number as though it covered the whole study.
+MAX_PAIRWISE_N = 6000
+
+
+def _pairwise_sample(n, cfg):
+    """Row indices for a diagnostic that needs every pair, or None meaning 'use everybody'."""
+    if n <= MAX_PAIRWISE_N:
+        return None
+    return np.random.default_rng(cfg.random_state + 77).choice(n, MAX_PAIRWISE_N, replace=False)
+
+
 def _silhouette(X, labels, cfg):
     coords, metric = _geometry(X, cfg)
+    take = _pairwise_sample(len(coords), cfg)
+    if take is not None:
+        return float(silhouette_score(coords[take], np.asarray(labels)[take], metric=metric))
     return float(silhouette_score(coords, labels, metric=metric))
 
 
@@ -544,7 +568,9 @@ def _internal_indices(X, labels, cfg):
     report says so — these two sit in the middle tier of the panel, below prediction strength and
     replication, so the panel does not turn on them."""
     coords, metric = _geometry(X, cfg)
-    return {"silhouette": float(silhouette_score(coords, labels, metric=metric)),
+    # Only the silhouette needs every pair; Calinski-Harabasz and Davies-Bouldin are built from
+    # cluster centres and stay exact on everybody however large the study.
+    return {"silhouette": _silhouette(X, labels, cfg),
             "calinski_harabasz": float(calinski_harabasz_score(coords, labels)),
             "davies_bouldin": float(davies_bouldin_score(coords, labels))}
 
@@ -722,6 +748,14 @@ def consensus_matrix(X, k, cfg, rng):
     with the chosen model, and record for every pair the fraction of resamples (in which both
     were sampled) that placed them in the same cluster. A perfectly stable k gives a matrix of
     only 0s and 1s; instability shows up as intermediate values."""
+    # Two dense n-by-n matrices live here, so this is the routine that decides how large a study
+    # the tool survives. Unguarded it asked for 27 GB on a 41,188-respondent file. Above
+    # MAX_PAIRWISE_N the consensus is built for a random subsample of that many respondents: PAC
+    # is a summary of how ambiguously pairs co-cluster, and a random sample of 6,000 people
+    # estimates it perfectly well. The caller records that it was sampled.
+    take = _pairwise_sample(len(X), cfg)
+    if take is not None:
+        X = X[take]
     n = len(X)
     M = np.zeros((n, n)); I = np.zeros((n, n))
     n_sub = max(k + 1, int(cfg.consensus_frac * n))
@@ -756,7 +790,15 @@ def consensus_pac(X, k_range, cfg, rng):
 def consensus_partition(X, k, cfg, rng):
     """Build the consensus matrix at k and derive a robust ENSEMBLE partition from it by average-
     linkage hierarchical clustering on the consensus distance (1 - consensus). This partition is
-    far less sensitive to initialization than a single k-means run (Monti et al. 2003)."""
+    far less sensitive to initialization than a single k-means run (Monti et al. 2003).
+
+    Unlike the PAC score, this one cannot be taken from a subsample: it has to place every
+    respondent, and the linkage that derives it is O(n^2) besides. Above MAX_PAIRWISE_N it returns
+    None, and the caller keeps the ordinary partition and says why — adopting an ensemble that had
+    only seen a fraction of the study would be exactly the silent substitution this tool exists to
+    avoid."""
+    if len(X) > MAX_PAIRWISE_N:
+        return None, None
     C = consensus_matrix(X, k, cfg, rng)
     D = 1.0 - C
     np.fill_diagonal(D, 0.0)
@@ -1718,6 +1760,15 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
                 single_cluster=False, gap_one=None, gap_two=None, neighbours=None,
                 median_shadow=None, persistence=None, signals=None, dip=None, tendency=None):
     _method = getattr(cfg, "method", "kmeans")
+    # How many respondents this report covers, read off the sizes table. Used only to disclose
+    # which columns were estimated on a subsample.
+    try:
+        _total_n = int(sizes["n"].sum())
+    except Exception:
+        _total_n = None
+    # Name only the columns actually present. consensus_PAC is absent when consensus was turned
+    # off, and a note claiming it had been sampled would describe a column the reader cannot see.
+    _sampled_cols = [c for c in ("silhouette", "consensus_PAC") if c in diag.columns]
     method_name = {"gmm": "a Gaussian mixture / latent-class model ("
                           + cfg.gmm_covariance + " covariance)",
                    "kproto": "Gower k-prototypes (Szepannek et al. 2024), which uses the rating "
@@ -1802,6 +1853,22 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
          persistence_paragraph(persistence, _names),
          "## Choosing the number of segments\n", rationale, "\n",
          _md(diag.round(3)),
+         # Two columns here are estimated on a subsample once the study is large enough that
+         # every-pair arithmetic will not fit in memory. Saying so is the whole point: a sampled
+         # number presented as if it covered everybody is the failure this tool keeps meeting.
+         (None if _total_n is None or _total_n <= MAX_PAIRWISE_N else
+          "\n> **{} above {} estimated on a sample.** With {:,} respondents, {} {} a distance "
+          "between every pair of people — {:,} pairs, which does not fit in memory — so {} "
+          "computed on a random {:,} of them. Every other column, and the segmentation itself, "
+          "uses everybody.".format(
+              "Two columns" if len(_sampled_cols) > 1 else "One column",
+              "are" if len(_sampled_cols) > 1 else "is",
+              _total_n,
+              " and ".join(f"**{c}**" for c in _sampled_cols),
+              "need" if len(_sampled_cols) > 1 else "needs",
+              _total_n * (_total_n - 1) // 2,
+              "both are" if len(_sampled_cols) > 1 else "it is",
+              MAX_PAIRWISE_N)),
          "\n**How to read this table.** The two columns to trust most are **prediction_strength** "
          "(Tibshirani & Walther: pick the largest k above 0.80) and **stability_ARI** (Dolnicar & "
          "Leisch: near 1.0 means the same segments re-emerge when you repeat the analysis; below "
@@ -3624,11 +3691,18 @@ class Segmenter:
                   f"respondents {why}.")
             cfg = replace(cfg, k_max=max_valid_k)
 
-        # Memory guard: the consensus matrix is n x n. Skip it (with a note) for very large n.
-        if cfg.run_consensus and n > 5000:
-            print(f"NOTE: n={n} is large; skipping consensus clustering (its n x n matrix would use "
-                  f"~{2 * n * n * 8 / 1e6:.0f} MB). Re-enable deliberately if you have the memory.")
-            cfg = replace(cfg, run_consensus=False)
+        # The consensus matrix is n x n, so a large study cannot have one built over everybody:
+        # at 41,188 respondents the two matrices would want 27 GB. This used to drop consensus
+        # clustering altogether above 5,000, which cost the PAC column entirely — one of the three
+        # criteria the k panel weights double, silently absent on exactly the large studies where
+        # a second opinion is most useful. It is now estimated from a random MAX_PAIRWISE_N
+        # respondents instead, and the report says which columns that applies to. PAC is a summary
+        # of how ambiguously pairs co-cluster and a sample of 6,000 estimates it well; what cannot
+        # be sampled is the ensemble PARTITION, which has to place everybody, and that still skips.
+        if cfg.run_consensus and n > MAX_PAIRWISE_N:
+            print(f"NOTE: n={n:,} respondents; the consensus matrix needs a value for every pair, "
+                  f"so consensus_PAC is estimated on a random {MAX_PAIRWISE_N:,} of them. The "
+                  "segmentation itself uses everybody.")
         self.cfg = cfg   # use the validated/clamped config for the rest of the run
 
         # Gower normalises each question inside the distance itself, so there is no scaling step
@@ -3671,10 +3745,18 @@ class Segmenter:
         if cfg.run_consensus:
             cons_labels, _ = consensus_partition(X, self.recommended_k, cfg,
                                                  np.random.default_rng(cfg.random_state + 10))
-            self.consensus_agreement = float(adjusted_rand_score(self.labels, cons_labels))
-            if cfg.use_consensus_final:
-                self.labels = cons_labels
-                print("Adopted the consensus ensemble partition as the final segmentation.\n")
+            if cons_labels is None:
+                # Too large to place every respondent by consensus. Keep the ordinary partition
+                # and say so rather than adopting an ensemble built from part of the study.
+                print(f"Consensus ensemble partition: skipped, {len(X):,} respondents exceeds the "
+                      f"{MAX_PAIRWISE_N:,} this needs every pair for. The PAC column in the table "
+                      "above is estimated on a random subsample; the segmentation itself uses "
+                      "everybody.\n")
+            else:
+                self.consensus_agreement = float(adjusted_rand_score(self.labels, cons_labels))
+                if cfg.use_consensus_final:
+                    self.labels = cons_labels
+                    print("Adopted the consensus ensemble partition as the final segmentation.\n")
         self.split_half = split_half_replication(X, self.recommended_k, cfg)
         sil_overall = _silhouette(X, self.labels, cfg)
         self.jaccard = clusterboot_jaccard(X, self.labels, self.recommended_k, cfg)

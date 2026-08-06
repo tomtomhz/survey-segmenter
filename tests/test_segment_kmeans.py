@@ -4183,3 +4183,93 @@ def test_header_stripping_never_eats_a_real_respondent(tmp_path):
     gappy.loc[0, ["Q1", "Q2", "Q3", "Q4", "Q5"]] = np.nan
     p3 = tmp_path / "gappy.csv"; gappy.to_csv(p3, index=False)
     assert len(sk._read_table(str(p3))) == 60, "a respondent who skipped every question was dropped"
+
+
+def _diag_columns(digest):
+    """Column names of the k-selection table in a report. Read from the table's own header row:
+    the prose underneath explains every criterion by name whether or not it was computed, so
+    searching the whole digest for a column name finds the explanation, not the column."""
+    for line in digest.splitlines():
+        if line.startswith("|") and "inertia" in line:
+            return [c.strip() for c in line.strip("|").split("|")]
+    return []
+
+
+def test_a_large_study_still_gets_its_pairwise_diagnostics(monkeypatch):
+    """Anything needing a distance between every pair of people cannot be computed over everybody
+    once a study is large: the pair count grows as the square, and the consensus routine holds two
+    dense n-by-n matrices. At 41,188 respondents those want 27 GB.
+
+    The old response was to drop consensus clustering entirely above 5,000 — which silently cost
+    the consensus_PAC column, one of the three criteria the k panel weights double, on exactly the
+    large studies where a second opinion is worth most. Measured on the UCI bank marketing file
+    (41,188 real telephone-survey responses): PAC was simply absent from the table.
+
+    Both are now estimated from a random subsample and the report says so. The threshold is
+    lowered here so the test stays quick.
+    """
+    monkeypatch.setattr(sk, "MAX_PAIRWISE_N", 150)
+    rng = np.random.default_rng(6)
+    n = 400
+    centres = {0: [5, 1, 5, 1], 1: [1, 5, 1, 5], 2: [3, 3, 5, 5]}
+    who = rng.integers(0, 3, n)
+    rows = [[f"R{i}"] + [int(np.clip(round(b + rng.normal(0, 0.7)), 1, 5)) for b in centres[who[i]]]
+            for i in range(n)]
+    df = pd.DataFrame(rows, columns=["respondent_id", "q1", "q2", "q3", "q4"])
+
+    fast = dict(FAST); fast["run_consensus"] = True
+    cfg = sk.SegmentationConfig(k_min=2, k_max=4, consensus_H=6, **fast)
+    r = sk.run_analysis(df.to_csv(index=False).encode(), cfg=cfg)
+
+    cols = _diag_columns(r["digest"])
+    assert "consensus_PAC" in cols, (
+        f"PAC is missing on a large study — the panel is down one of its three doubled "
+        f"criteria. Columns present: {cols}")
+    assert "silhouette" in cols, "the silhouette was lost rather than sampled"
+
+    # And it must SAY it sampled. A sampled number presented as covering the study is the exact
+    # failure this project keeps meeting.
+    assert "estimated on a sample" in r["digest"], "the report does not disclose the subsampling"
+    assert f"random {150:,} of them" in r["digest"] or "random 150 of them" in r["digest"], \
+        "the disclosure does not say how many respondents it used"
+
+
+def test_a_small_study_is_not_sampled_and_says_nothing_about_it(monkeypatch):
+    """The dangerous direction: an ordinary survey must be computed over everybody, and must not
+    carry a footnote implying otherwise."""
+    monkeypatch.setattr(sk, "MAX_PAIRWISE_N", 6000)
+    rng = np.random.default_rng(7)
+    n = 200
+    centres = {0: [5, 1, 5, 1], 1: [1, 5, 1, 5]}
+    who = rng.integers(0, 2, n)
+    rows = [[f"R{i}"] + [int(np.clip(round(b + rng.normal(0, 0.7)), 1, 5)) for b in centres[who[i]]]
+            for i in range(n)]
+    df = pd.DataFrame(rows, columns=["respondent_id", "q1", "q2", "q3", "q4"])
+
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=3, **FAST))
+    assert "estimated on a sample" not in r["digest"], \
+        "a 200-person survey was described as sampled"
+    assert sk._pairwise_sample(n, sk.SegmentationConfig()) is None
+
+
+def test_the_sampling_note_names_only_columns_that_are_there(monkeypatch):
+    """The note once named consensus_PAC on a run where consensus was switched off, describing a
+    column the reader could not find. It reports what the table actually contains."""
+    monkeypatch.setattr(sk, "MAX_PAIRWISE_N", 150)
+    rng = np.random.default_rng(8)
+    n = 400
+    centres = {0: [5, 1, 5, 1], 1: [1, 5, 1, 5], 2: [3, 3, 5, 5]}
+    who = rng.integers(0, 3, n)
+    rows = [[f"R{i}"] + [int(np.clip(round(b + rng.normal(0, 0.7)), 1, 5)) for b in centres[who[i]]]
+            for i in range(n)]
+    df = pd.DataFrame(rows, columns=["respondent_id", "q1", "q2", "q3", "q4"])
+
+    r = sk.run_analysis(df.to_csv(index=False).encode(),          # FAST turns consensus off
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+    assert "consensus_PAC" not in _diag_columns(r["digest"]), \
+        "fixture assumption: consensus is off under FAST"
+    if "estimated on a sample" in r["digest"]:
+        note = r["digest"].split("estimated on a sample")[1][:400]
+        assert "consensus_PAC" not in note, "the note names a column that is not in the table"
+        assert "silhouette" in note
