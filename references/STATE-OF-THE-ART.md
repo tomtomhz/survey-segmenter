@@ -315,6 +315,47 @@ are worth it.
    attempting: merging may be the honest answer, and "improving" it risks trading the confidence
    property, which is the more valuable one.
 
+## Predicted, measured, and did not happen: response-style segments (2026-08-06)
+
+The textbook failure of survey segmentation is that clustering raw Likert answers recovers **how
+people use the scale** rather than what they think — extreme responders in one group, midpoint
+huggers in another — and presents scale use as a mind-set. It is the first thing to suspect when a
+segmentation meets real respondents, and this engine had never been tested against it.
+
+Tested with 600 respondents each carrying an attitude segment **and**, independently, a response
+style (extreme, midpoint, acquiescent), so "which did it recover?" is decidable — which is
+precisely what real survey data cannot tell you, since it carries no ground truth for either.
+
+| Run | k | ARI vs attitude | ARI vs response style |
+|---|---|---|---|
+| Control, no styles | 3 | **1.000** | 0.000 |
+| Styles present, default path | 2 | 0.612 | **-0.002** |
+| Styles present, `--scaling ipsative` | 2 | 0.612 | -0.002 |
+
+**The failure does not occur.** Association with response style is zero. Pinned by
+`test_response_styles_do_not_become_the_segments`.
+
+**Do not add ipsative (row-centred) scaling as a defence against this.** It is the standard
+remedy, it is already implemented, and measured here it is *worse*: holding k at the true value,
+range scaling recovers attitudes at 0.977 and ipsative at 0.819. Row-centring removes the
+between-person level differences that carry real signal along with the response-style artefact.
+Adding it as an automatic default would have degraded results on the path the app uses.
+
+What response styles actually cost is **resolution, not correctness**. They blur the three-way
+structure until the two-way split is genuinely the more reproducible fact — stability 0.997
+against 0.967, prediction strength 0.988 against 0.897 — so the tool merges two segments. It then
+reports Moderate rather than High, which is the behaviour that makes the merge survivable. Expect
+merged segments and a Moderate rating on style-heavy real data, not nonsense.
+
+### Loose thread: prediction strength is not monotone
+
+On that same file prediction strength ran 0.988, 0.897, 0.848, 0.496, 0.720, 0.872, 0.794 — it
+collapses at k=5 and recovers. Tibshirani & Walther's "largest k above the cutoff" assumes decay,
+so the signal voted **k=7** on three-segment data. The panel absorbed it (2 of 12 weight units),
+but on a closer vote it could decide the answer. This is the same shape as the stability defect
+fixed in v1.5.2, still present where the rule is the published one. Not changed yet: how often it
+bites has not been measured.
+
 ## Built, measured, and not adopted: sparse k-means
 
 Every question counts equally when respondents are grouped, and questions that separate nobody drag

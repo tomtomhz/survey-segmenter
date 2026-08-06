@@ -3925,3 +3925,58 @@ def test_forcing_the_number_of_groups_works_on_the_path_everyone_uses(tmp_path):
         f"{assignments['segment'].nunique()} — the flag was ignored")
     report = (outdir / "segmentation_report.md").read_text()
     assert "force_k" in report, "the report does not say the number was overridden"
+
+
+def test_response_styles_do_not_become_the_segments():
+    """The classic way survey segmentation goes wrong, measured rather than assumed.
+
+    Real respondents differ in how they USE a scale as well as in what they think: some push to
+    the ends, some hug the middle, some agree with everything. Cluster raw Likert answers and the
+    textbook worry is that you recover scale-use groups and present them as mind-sets.
+
+    Every respondent here has an attitude segment AND, independently, a response style, so the
+    question "which one did it recover?" has an answer. Measured: Adjusted Rand Index against
+    response style comes out at -0.002 — no relationship at all — while attitude is recovered.
+    The worry does not materialise on this engine, and this test exists to catch it if that ever
+    changes.
+
+    What response styles DO cost is resolution: they blur the three-way structure until the
+    two-way split is genuinely the more reproducible fact, so the tool merges two segments and
+    drops its own confidence to Moderate rather than overclaiming. That behaviour is asserted
+    below too, because quietly reporting High here would be the real failure.
+    """
+    rng = np.random.default_rng(17)
+    attitudes = np.array([[4.6, 4.4, 4.5, 2.0, 1.8, 3.9, 1.7, 2.2, 3.9, 2.1, 2.4, 3.0],
+                          [1.9, 2.6, 1.8, 4.6, 4.3, 2.8, 3.6, 3.5, 2.2, 4.4, 4.3, 3.2],
+                          [3.0, 3.9, 3.1, 3.8, 2.4, 4.6, 1.9, 4.7, 3.1, 3.3, 2.6, 4.2]])
+    n = 450
+    attitude = rng.integers(0, 3, n)
+    style = rng.integers(0, 3, n)
+    rows = []
+    for i in range(n):
+        x = attitudes[attitude[i]] + rng.normal(0, 0.55, attitudes.shape[1])
+        if style[i] == 0:
+            x = 3 + 1.7 * (x - 3)        # extreme responder
+        elif style[i] == 1:
+            x = 3 + 0.45 * (x - 3)       # midpoint responder
+        else:
+            x = x + 0.9                  # acquiescent
+        rows.append(np.clip(np.rint(x), 1, 5))
+    df = pd.DataFrame(np.array(rows, int), columns=[f"q{i+1}" for i in range(attitudes.shape[1])])
+    df.insert(0, "respondent_id", [f"R{i}" for i in range(n)])
+
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=6, **FAST))
+    labels = pd.read_csv(io.StringIO(r["files"]["segment_assignments.csv"]))["segment"]
+
+    to_style = adjusted_rand_score(style, labels)
+    to_attitude = adjusted_rand_score(attitude, labels)
+
+    assert to_style < 0.15, (
+        f"the segments track how people use the scale (ARI {to_style:.3f}), not what they think — "
+        "this is the failure mode the response-style literature warns about")
+    assert to_attitude > to_style + 0.3, (
+        f"attitude {to_attitude:.3f} vs response style {to_style:.3f}: the segments are not "
+        "clearly about what people think")
+    assert r["confidence"] != "high" or r["k"] == 3, (
+        "merged the blurred segments and still reported high confidence")
