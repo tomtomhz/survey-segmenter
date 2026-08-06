@@ -169,7 +169,7 @@ for _m in ("divide by zero encountered in matmul", "overflow encountered in matm
            "invalid value encountered in matmul"):
     warnings.filterwarnings("ignore", message=_m, category=RuntimeWarning)
 
-__version__ = "1.5.3"    # keep in sync with pyproject.toml
+__version__ = "1.5.4"    # keep in sync with pyproject.toml
 
 # Optional "ask Claude about your segments" add-on. Imported here (not lazily) so the packaged app
 # bundles it; wrapped so a missing file/SDK never stops the core segmentation tool from loading.
@@ -350,7 +350,11 @@ def _fix_decimal_commas(df):
     """
     for c in df.columns:
         s = df[c]
-        if s.dtype != object:
+        # Ask whether the column is numeric, not whether its dtype is exactly `object`. pandas 3
+        # gives text columns a `str` dtype, so an `!= object` guard skipped every one of them and
+        # this repair silently stopped happening -- caught by CI on 3.11/3.12 while the local
+        # pandas 2.3 still said `object`.
+        if pd.api.types.is_numeric_dtype(s):
             continue
         vals = s.dropna().astype(str)
         if len(vals) and vals.str.match(_DECIMAL_COMMA).all():
@@ -2565,7 +2569,9 @@ def profile_demographics(labels, ids, demo_source, id_col, unit="segment"):
         demo = demo.copy(); demo[unit] = labels
     pvals = {}
     for col in [c for c in demo.columns if c not in (unit, id_col)]:
-        if demo[col].dtype == object or demo[col].nunique() <= 12:
+        # Non-numeric or few-valued columns are profiled as categories. Tested by dtype
+        # rather than against `object` for the pandas 3 reason above.
+        if not pd.api.types.is_numeric_dtype(demo[col]) or demo[col].nunique() <= 12:
             ct = pd.crosstab(demo[unit], demo[col])
             if ct.shape[0] > 1 and ct.shape[1] > 1:
                 _, p, _, _ = stats.chi2_contingency(ct)

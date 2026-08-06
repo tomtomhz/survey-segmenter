@@ -3,6 +3,21 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.5.4] — 2026-08-06
+
+### Fixed
+
+- **The decimal-comma repair added in 1.5.3 did not run on newer pandas.** It asked whether a
+  column's dtype was exactly `object`; pandas 3 gives text columns a `str` dtype, so every string
+  column was skipped and the repair quietly stopped happening. The local pandas (2.3) still said
+  `object` and the tests passed; CI on Python 3.11 and 3.12 caught it. It now asks whether the
+  column is numeric, which is the actual question. The same assumption in the demographic
+  profiler is fixed with it.
+
+  The 1.5.3 **download is unaffected** — it bundles pandas 2.3, where the guard happened to hold.
+  A build made on a machine with pandas 3, including any built by CI, would have silently dropped
+  decimal-comma columns again.
+
 ## [1.5.3] — 2026-08-06
 
 The first release driven by real data rather than data the tool generated for itself. Every

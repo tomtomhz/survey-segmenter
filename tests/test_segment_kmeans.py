@@ -4146,6 +4146,18 @@ def test_a_swedish_excel_export_keeps_its_decimal_scores(tmp_path):
     assert abs(float(got["Nöjdhet (0-10)"].mean()) - float(df["Nöjdhet (0-10)"].mean())) < 0.01
     assert "Nöjdhet (0-10)" in sk.auto_prepare(got)[3], "the score is not among the questions"
 
+    # pandas 3 gives text columns a `str` dtype rather than `object`, and the first version of
+    # this repair asked `dtype != object` — so it skipped every string column and quietly stopped
+    # working. Local pandas 2.3 still said `object` and passed; CI on 3.11/3.12 did not. Pin the
+    # behaviour to "is it numeric?" using an explicitly string-typed column, which reproduces the
+    # same condition on either version.
+    typed = pd.DataFrame({"score": pd.array(["1,3", "5,0", "6,0", "0,3"], dtype="string")})
+    assert typed["score"].dtype != object                      # the condition CI hit
+    repaired = sk._fix_decimal_commas(typed.copy())
+    assert pd.api.types.is_numeric_dtype(repaired["score"]), \
+        "a string-dtype column was skipped; the guard is testing dtype identity again"
+    assert list(repaired["score"]) == [1.3, 5.0, 6.0, 0.3]
+
 
 def test_header_stripping_never_eats_a_real_respondent(tmp_path):
     """The dangerous direction. Header rows are recognised by being non-numeric where the answers

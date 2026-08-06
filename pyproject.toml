@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "segment-kmeans"
-version = "1.5.3"                 # keep in sync with __version__ in segment_kmeans.py
+version = "1.5.4"                 # keep in sync with __version__ in segment_kmeans.py
 description = "Market-segmentation-grade clustering (k-means, Gaussian mixture, latent class) with stability-first validation, a typing tool, automatic survey-file handling, and a no-expertise web UI."
 readme = "README.md"
 requires-python = ">=3.9"
