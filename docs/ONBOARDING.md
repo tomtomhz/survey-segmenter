@@ -348,6 +348,14 @@ this newer" but "would this change a decision, and could the person making it ex
 
 ---
 
+**Dependencies and shipped modules are declared in pyproject.toml, and nowhere else.** Two lists
+elsewhere both went stale within days of each other: `py-modules` forgot `kprototypes` and then
+`clusterability`, so installed copies died at import while every test passed; and `build_app.py`
+repeated the dependency list, so `diptest` was missing from every clean build and the second
+cluster-tendency test silently never ran — including on both CI runners. Neither failed loudly.
+Tests now pin both, but the rule is simpler than the tests: if you find yourself naming a package
+or module in a second place, that is the bug.
+
 ## 10. Traps this project has already fallen into
 
 Every one of these cost real time. They are listed so you do not repeat them.
@@ -375,6 +383,10 @@ Every one of these cost real time. They are listed so you do not repeat them.
   removed rather than shipped as a false green tick. Do the same.
 - **Report what you actually verified.** If a claim holds only under a narrower scope than you
   stated, correct it in plain language and move on.
+- **"It builds and runs" is not "it works".** The packaged smoke test now fails the build if the
+  dip test did not run or if any chart arrives without its data, because both of those degrade
+  silently — the app starts, analyses, and quietly does less. That check found a real defect on
+  its first CI run, on both platforms at once.
 
 ---
 

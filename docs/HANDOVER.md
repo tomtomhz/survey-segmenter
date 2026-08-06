@@ -18,7 +18,7 @@ this says where it stands, what was decided and why, and what to do next.
 |---|---|
 | Repo | `github.com/tomtomhz/survey-segmenter` — **private**, MIT, owner `tomtomhz` |
 | CI | Python 3.9 / 3.11 / 3.12 + a clean-install job, green |
-| Tests | 151 Python (`pytest`) + 99 frontend (`cd frontend && npm test`) |
+| Tests | 152 Python (`pytest`) + 99 frontend (`cd frontend && npm test`) |
 | Shipped app | **v1.5.0 release**: macOS `.app` (82 MB) and Windows `.exe`, built and smoke-tested by the **Desktop app** workflow. Never in git history. The team's copy lives in `~/Desktop/Survey Segmenter (app for the team)/`. |
 | Local path | `~/dev/survey-segmenter` — **moved out of iCloud Drive**, see below |
 
@@ -115,6 +115,11 @@ Not a survey, but 17,000 real rows through the whole pipeline on 2026-07-31
   only URLs in it are XML namespace declarations.
 
 ## Known limitations (real, not hypothetical)
+
+- **Windows is verified by CI, not by hand.** The **Desktop app** workflow builds and smoke-tests
+  on both platforms, and since the capability check was added that smoke test proves the compiled
+  dip extension runs and every chart carries its data — not merely that the app starts. Nobody has
+  sat in front of the Windows build and clicked through it.
 
 - **A mixed questionnaire is only as good as its questions.** Gower k-prototypes uses every
   question, which means a pick-any question that separates nobody now costs accuracy where it
