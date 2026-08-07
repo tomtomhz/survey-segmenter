@@ -3,6 +3,40 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.5.7] — 2026-08-07
+
+From a full audit run against the built app rather than the source tree.
+
+### Fixed
+
+- **A survey made entirely of multiple-choice questions was getting almost nothing to judge the
+  result by.** Measured against the ratings report: two of eleven pieces of evidence. It now also
+  reports split-half replication (would a fresh sample find the same classes), which of the three
+  kinds of segmentation this is, which classes sit next to each other, and how to read the
+  per-person fit column. The neighbours table was **already being computed and then discarded**.
+
+- **A "no answer" code in a follow-up file was scored silently.** Exports routinely write 99, 999
+  or −99, and nothing rejected them: the value is scaled with the study's own parameters, lands far
+  outside the space, and drags the respondent to whichever segment is extreme on that item.
+  Measured on a 250-person follow-up with 99 in one question, **35 of the 60 affected people were
+  put in the wrong segment**, and agreement with the truth fell from 0.967 to 0.593.
+
+  The scored file now carries `answers_off_the_original_scale` per respondent and the command line
+  says how many were affected. Counted, not corrected — whether 99 means "no answer" is a fact
+  about your questionnaire, not about the data. A skipped answer is not flagged; a blank is a blank.
+
+- **The report could recommend a number of groups below the cutoff it quotes as decisive** without
+  saying so. It calls prediction strength "the column to trust most" and quotes 0.80; on one file
+  it chose a solution scoring 0.74 while another scored a perfect 1.00. The answer is unchanged —
+  both readings were defensible there — but the disagreement is now stated, and the number of
+  groups that does clear the line is named.
+
+### Verified, not changed
+
+`.xlsx` reading, nine awkward file shapes, survey weights, eight concurrent analyses, bad-upload
+error messages, MaxDiff utility recovery, the downloadable files against the report on screen, and
+the AI add-on with no key configured — all checked against the packaged binary and all correct.
+
 ## [1.5.6] — 2026-08-07
 
 ### Fixed
