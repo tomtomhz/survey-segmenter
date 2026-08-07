@@ -3,6 +3,94 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.5.5] — 2026-08-06
+
+**Read this one if you have run a segmentation on 1.5.4 or earlier.** The numbers were right; some
+of what the report said about them was not, and in one case it pointed a budget at the wrong place.
+
+### Fixed — the report contradicting its own evidence
+
+- **A real segment was being condemned.** Each segment was checked against the solutions with one
+  group fewer and one more, and the *weaker* of the two was reported. Asking for one more group
+  forces the analysis to split something, so whichever segment gets subdivided scores about 0.5 in
+  that direction whether or not it is genuine. On a 420-person study whose three mind-sets were
+  recovered almost perfectly, the largest and cleanest segment held together perfectly when groups
+  were merged, scored 0.56 when split, and the report said: *"Do not build a campaign on the ones
+  marked 'dissolves'."*
+
+  The two directions are now separate, because only one is evidence. Members scattering when
+  groups **merge** means the segment was never a unit. Dividing when asked for **more** groups
+  means it contains sub-groups — useful, and now reported as an opportunity.
+
+- **"Start with the biggest, most distinct group"** — nothing in the analysis tests whether the
+  biggest is the most distinct, and on that same study it was the segment the table below
+  condemned. The summary now sends you to the stability tables and says the largest is not always
+  the soundest.
+
+- **A 40% share was described as "about 1 in 3 (40%)"** — a claim and its own contradiction inside
+  one set of brackets. The fraction wording is only used when it is accurate.
+
+- **The green light claimed the groups "are clear"** five lines above a cluster-tendency score
+  described as "essentially random". The light is built from stability numbers and now says only
+  what it measured: the same groups come back when the analysis is repeated.
+
+- **Segment names were unreadable.** "planning things rather + want meet people outside" —
+  stopwords stripped and cut mid-phrase. They are placeholders your team is meant to replace, so
+  they now read like the question they came from.
+
+- **The stability tables could not be matched to the groups.** The sizes table and the decisive
+  per-segment stability table used "Segment 0/1/2" while everything else used names. Both now
+  carry the name beside the number, which is what the exported CSV uses.
+
+### Fixed — large studies
+
+Driven by the first real files above 5,000 respondents: 41,188 telephone-survey responses, 48,842
+census records, and 581,012 rows.
+
+- **A study of 48,842 people needed 11 GB.** One line mapped each answer to its nearest known
+  level by comparing it against every level at once — nothing on a five-point scale, and 19 GB per
+  column once a continuous measurement had been typed as an ordinal one with 48,842 distinct
+  values. Now a binary search: same answer, **11.04 GB → 1.59 GB and 2.2 min → 0.9 min**. A
+  581,012-row file runs in 3.2 minutes.
+- **The consensus criterion silently vanished above 5,000 respondents** — one of the three the
+  panel weights double, absent exactly where a second opinion is worth most. It is now estimated
+  from a random sample and the report says so, naming the sample size and the number of pairs.
+- **A column flattened by its own outliers is now named.** A returned order of −80,995 against a
+  median quantity of 3 put every one of 541,909 respondents inside 2% of the scale, so the answer
+  described two outliers rather than half a million people. Stated, with `--scaling robust` named
+  as the remedy, rather than silently corrected.
+- Anything needing a distance between every pair of people is computed on a bounded sample above
+  6,000 respondents, disclosed in the report. **The segmentation itself, and every person's group,
+  always uses everybody.**
+
+### Fixed — files the tool read wrongly
+
+- **A title typed above the column names.** In Excel the title became the header; in CSV it broke
+  the delimiter sniffer entirely. Both are now found.
+- **UTF-16**, which is what Excel's "Unicode Text" export writes — the file arrived as a single
+  column of mojibake.
+- **Select-all answers packed with `;` or `|`** rather than a comma. A Swedish or German Excel uses
+  the semicolon because the comma is the decimal mark, so `Spotify;Netflix` and `Netflix;Spotify`
+  were different answers — five options became 74 pseudo-categories.
+- **Identifiers treated as questions.** The limit on how many options a question may offer scaled
+  with the number of respondents, so a 541,909-row file allowed 135,477 "options" and invoice
+  numbers were clustered on. An answer list does not grow because you surveyed more people.
+
+### Fixed — a wrong answer reported confidently
+
+- **Fewer than two respondents per question is now never called high confidence.** With many
+  questions and few people everybody ends up roughly equidistant, real structure dilutes, and what
+  survives is highly reproducible *because noise reproduces*. On 150 respondents answering 400
+  questions with a real three-group structure, the tool found two groups and called it High
+  confidence. Being wrong is survivable; being wrong and confident is not.
+
+### Added
+
+- The suite now generates reports across five different kinds of data and **reads each one back
+  against its own numbers**. Three defects had reached release with every test passing, all three
+  plainly visible in the report, because every test asked whether the analysis ran rather than
+  whether the document held together.
+
 ## [1.5.4] — 2026-08-06
 
 ### Fixed
