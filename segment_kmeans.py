@@ -1973,7 +1973,8 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
                 var_importance, consensus_agreement, cfg, typing=None, varsel=None,
                 k_agreement=None, ward_ari=None, distinct_share=None,
                 single_cluster=False, gap_one=None, gap_two=None, neighbours=None,
-                median_shadow=None, persistence=None, signals=None, dip=None, tendency=None):
+                median_shadow=None, persistence=None, signals=None, dip=None, tendency=None,
+                k_max_note=""):
     _method = getattr(cfg, "method", "kmeans")
     # How many respondents this report covers, read off the sizes table. Used only to disclose
     # which columns were estimated on a subsample.
@@ -2024,11 +2025,12 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
                                 if isinstance(v, (int, float)) and not np.isnan(v)],
                                default=None)),
          (f"Respondents clustered with **{method_name}**; final fit used "
-          f"{cfg.n_init_final} restarts. Search range: k = {cfg.k_min} to {cfg.k_max}.\n"
+          f"{cfg.n_init_final} restarts. Search range: k = {cfg.k_min} to {cfg.k_max}."
+          f"{k_max_note}\n"
           if _method == "kproto" else
           f"Respondents clustered with **{method_name}** on **{cfg.scaling}**-scaled utilities; "
           f"final fit used {cfg.n_init_final} restarts. Search range: k = "
-          f"{cfg.k_min} to {cfg.k_max}.\n"),
+          f"{cfg.k_min} to {cfg.k_max}.{k_max_note}\n"),
          # Say plainly which checks this path cannot run. Reporting four corroborating numbers
          # where the numeric path reports five, without mentioning the fifth, would quietly
          # overstate how much agreement there is behind the answer.
@@ -4073,7 +4075,26 @@ class Segmenter:
             [len(np.unique(_Xa, axis=0))]
             + [len(np.unique(_Xa[_rng.choice(n, n // 2, replace=False)], axis=0))
                for _ in range(5)])
-        max_valid_k = max(2, min(n // 2, n_distinct))
+        # A segment needs enough DISTINCT answer patterns to be a type rather than a coordinate.
+        # The cap used to be the number of patterns itself, which allows a group per pattern. On a
+        # short survey that is how the separation indices win an argument they should not: three
+        # questions on a 1-5 scale gave 16 distinct patterns among 400 people, the silhouette
+        # preferred eight groups of about two patterns each, and the answer came out at 0.39
+        # against a planted truth it recovers perfectly at k=2.
+        #
+        # Requiring roughly four patterns per group fixes that case (0.39 -> 1.00) and changes
+        # nothing else: measured across well-separated, unequal 80/15/5, overlapping, five-group
+        # and noise data, and against every real file in the corpus — bfi, Chile, Mroz, the MASS
+        # student survey, adult — where the smallest count of distinct patterns is 236 and the cap
+        # never comes near binding.
+        # Two different bounds, kept apart because they answer different questions.
+        self.k_max_note = ""
+        feasible = max(2, min(n // 2, n_distinct))          # more groups than this cannot exist
+        sensible = max(2, min(feasible, n_distinct // 4))   # ~4 patterns per group to be a type
+        # The ratio is a heuristic for choosing among many k, not a feasibility bound, so it never
+        # overrides a k the caller asked for outright — on six respondents with six answer patterns
+        # it would otherwise refuse an explicit k_min=3, which is a legitimate thing to ask.
+        max_valid_k = max(sensible, min(cfg.k_min, feasible))
         # Kept for the report: Hopkins is inflated when many respondents share an identical
         # answer pattern, so the reader needs to know how common that is here.
         self.distinct_share = float(len(np.unique(_Xa, axis=0)) / n)
@@ -4083,10 +4104,17 @@ class Segmenter:
         if cfg.k_max > max_valid_k:
             why = ("the resampling-based validation cannot reliably support more segments"
                    if max_valid_k == n // 2 else
-                   f"there are only {n_distinct} distinct answer patterns in the data, so more "
-                   "groups than that cannot exist")
+                   f"there are only {n_distinct} distinct answer patterns in the data, and a "
+                   "group built from fewer than a handful of them is a coordinate rather than a "
+                   "mind-set")
             print(f"NOTE: clamping k_max from {cfg.k_max} to {max_valid_k} — with n={n} "
                   f"respondents {why}.")
+            # The reader has to be told too. The report stated "Search range: k = 2 to 5" with no
+            # hint that 55 had been asked for and cut, and a note printed to a terminal is invisible
+            # to everyone using the app — which is a search quietly narrowed, the same shape of
+            # silence this report has been cleaned of elsewhere.
+            self.k_max_note = (f" The search stopped at {max_valid_k} rather than the "
+                               f"{cfg.k_max} requested: with {n:,} respondents {why}.")
             cfg = replace(cfg, k_max=max_valid_k)
 
         # The consensus matrix is n x n, so a large study cannot have one built over everybody:
@@ -4268,7 +4296,8 @@ class Segmenter:
                                             getattr(self, 'persistence', None),
                                             getattr(self, 'signals', None),
                                             getattr(self, 'dip', None),
-                                            getattr(self, 'tendency', None))
+                                            getattr(self, 'tendency', None),
+                                            k_max_note=getattr(self, 'k_max_note', ''))
         if demographics is not None and (not isinstance(demographics, pd.DataFrame) or not demographics.empty):
             self.report_markdown += "\n\n" + self._profile_external(demographics, id_col)
         if outdir:

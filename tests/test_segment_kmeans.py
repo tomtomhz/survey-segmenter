@@ -2532,13 +2532,23 @@ def test_it_will_not_recommend_segments_too_small_to_target():
     assert r["k"] <= 20, f"k={r['k']} is still far more groups than 120 people can support"
     assert smallest > 0.03, f"smallest segment is {smallest:.1%} — fragment-sized"
 
-    # The exclusion is stated, not silent — a reader can see which k values were taken off the
-    # table and why, rather than wondering why an obvious peak was ignored.
-    assert "Ruled out before the vote" in r["digest"]
+    # The narrowing is stated, not silent — a reader can see which k values were taken off the
+    # table and why, rather than wondering why an obvious peak was ignored. Either explanation
+    # will do: the search range is now usually cut earlier, by the rule that a group needs enough
+    # distinct answer patterns to be a type, so on this file nothing is left to rule out at the
+    # vote. What matters is that the report says so somewhere.
+    assert ("Ruled out before the vote" in r["digest"]
+            or "The search stopped at" in r["digest"]), \
+        "k values were dropped without the report explaining why"
 
     # And the residual case is still caught downstream: anything that slips under the floor in
-    # the final fit is called out in the report rather than passing silently.
-    assert "below 5% of the sample" in r["digest"]
+    # the final fit is called out rather than passing silently. On this file nothing does any
+    # more — requiring a handful of distinct answer patterns per group now stops the search long
+    # before it reaches fragment-sized solutions, so the smallest segment is about 45% of the
+    # sample. The property is what matters, not which of the two guards enforced it.
+    smallest = assignments["segment"].value_counts().min() / len(assignments)
+    assert smallest >= cfg.min_segment_frac or "below 5% of the sample" in r["digest"], (
+        f"smallest segment is {smallest:.1%} and the report does not mention it")
 
 
 def test_the_size_floor_does_not_distort_a_healthy_segmentation():

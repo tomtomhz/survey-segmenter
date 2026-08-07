@@ -392,6 +392,34 @@ one at a time until `typing_tool` went 0.24 GB to 11.11 GB in one call.
 A negative result from an incomplete instrument is not evidence of absence, and "no single big
 allocation" was a conclusion about my wrapper list, not about the program.
 
+## A group needs enough distinct answers to be a type (2026-08-07)
+
+On a short survey the separation indices can win an argument they should lose. Three questions on
+a 1-5 scale gave **16 distinct answer patterns among 400 people**; the silhouette preferred eight
+groups of about two patterns each, and the result scored **0.39** against a planted truth the same
+data recovers **perfectly at k=2**.
+
+Two groups of two answer patterns are coordinates on a grid, not mind-sets. The cap on the search
+range used to be the number of distinct patterns itself — one group per pattern — and it now
+requires roughly four patterns per group. Measured: **0.39 → 1.00** on that file, and **nothing
+else moved**, across well-separated, unequal 80/15/5, overlapping, five-group and noise data, and
+across every real file in the corpus (bfi, Chile, Mroz, the MASS student survey, WVS, the student
+survey, adult), where the smallest distinct-pattern count is 236 and the cap never comes close.
+
+**A different fix was tried first and rejected on measurement:** down-weighting the separation
+indices when few patterns are distinct. It did not fix the lumpy case at all, and it wrecked the
+unequal 80/15/5 case — k=2 to k=8, ARI 0.93 to 0.20. That is the fourth harmful "improvement"
+measurement has caught here, and the reason none of them shipped.
+
+Two things fell out of it:
+
+- **Feasibility and heuristic are now separate bounds.** The first attempt applied the ratio as a
+  hard limit and refused an explicit `k_min=3` on six respondents, which is a legitimate request.
+  The ratio caps the search; it never overrides a k the caller asked for.
+- **The report explains its own narrowing.** It said "Search range: k = 2 to 5" with no hint that
+  55 had been asked for and cut, and the reason was printed to a terminal nobody using the app can
+  see. It now says which k it stopped at, which was requested, and why.
+
 ## A full audit against the packaged binary (2026-08-07)
 
 Everything below was run against the **built app**, not the source tree, because the worst defect
