@@ -4619,3 +4619,122 @@ def test_a_segment_is_not_condemned_for_dividing_when_asked_for_more_groups():
     # are merged was never a unit, and must be called out.
     weak = sk.persistence_paragraph({0: {"merges": 0.30}, 1: {"merges": 0.95}}, ["Fragile", "Solid"])
     assert "scatters" in weak
+
+
+def _report_tables(md):
+    """Every markdown table in a report, as (header cells, [row cells])."""
+    out, cur = [], None
+    for line in md.splitlines():
+        if line.startswith("|"):
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            if cur is None:
+                cur = [cells, []]
+            elif set("".join(cells)) <= set("-: "):
+                continue
+            else:
+                cur[1].append(cells)
+        elif cur is not None:
+            out.append(cur); cur = None
+    if cur is not None:
+        out.append(cur)
+    return out
+
+
+def _report_complaints(md, k, n):
+    """What a careful reader would catch: the document disagreeing with its own numbers."""
+    bad, tables = [], _report_tables(md)
+
+    m = re.search(r"looked at \*\*([\d,]+) people\*\*", md)
+    if m and int(m.group(1).replace(",", "")) != n:
+        bad.append(f"headline says {m.group(1)} people, the run has {n:,}")
+    m = re.search(r"found \*\*(\d+) (?:group|class|segment)", md)
+    if m and int(m.group(1)) != k:
+        bad.append(f"headline says {m.group(1)} groups, the run produced {k}")
+
+    sizes = [t for t in tables if t[0][:1] == [""] and "n" in t[0]]
+    if sizes:
+        col = sizes[0][0].index("n")          # by name: columns get inserted over time
+        total = sum(int(r[col]) for r in sizes[0][1])
+        if total != n:
+            bad.append(f"segment sizes sum to {total:,}, the run has {n:,}")
+        if len(sizes[0][1]) != k:
+            bad.append(f"sizes table lists {len(sizes[0][1])} groups, the run produced {k}")
+
+    for d, pct in re.findall(r"about 1 in (\d+) \((\d+)%\)", md):
+        if abs(int(pct) / 100 - 1 / int(d)) > 0.035:
+            bad.append(f"'{pct}%' described as 1 in {d}")
+
+    named = {r[0] for t in tables for r in t[1]
+             if t[0][:1] == ["segment"] and not re.fullmatch(r"Segment \d+", r[0])}
+    generic = {r[0] for t in tables for r in t[1]
+               if t[0][:1] == ["segment"] and re.fullmatch(r"Segment \d+", r[0])}
+    if named and generic and not any("suggested name" in t[0] for t in tables):
+        bad.append("segments labelled both ways with no table mapping one to the other")
+
+    if "scatters" in md and re.search(r"Start with the (biggest|largest)", md):
+        bad.append("says to start with the biggest group while flagging one as scatters")
+    if "🟢" in md and "essentially random" in md and "groups are clear" in md:
+        bad.append("green light claims clear groups above an 'essentially random' score")
+    return bad
+
+
+def test_the_report_agrees_with_itself_in_every_regime():
+    """The blind spot, closed.
+
+    Three separate defects reached main while every test passed, and all three were plainly
+    visible in the generated report: the k-selection fault in v1.5.2 (a table contradicting the
+    prose above it), the wide-questionnaire fault (a confidence light contradicting its own
+    evidence), and the persistence fault (a summary recommending the segment the table below
+    condemned). The suite never caught any of them because every test asked whether the pipeline
+    RAN, never whether the document it produced held together.
+
+    This reads the report and checks it against its own numbers, across the regimes that produce
+    materially different reports — real structure, none at all, overlapping, very unequal sizes,
+    and a two-group answer where the persistence table has only one direction available.
+    """
+    def likert(a):
+        return np.clip(np.rint(a), 1, 5).astype(int)
+
+    separated = np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1]], float)
+    overlapping = np.array([[4, 2, 4, 2, 3], [2, 4, 2, 4, 3], [3, 3, 4, 4, 2]], float)
+    regimes = {}
+    r0 = np.random.default_rng(0)
+    who = r0.integers(0, 3, 400)
+    regimes["three real groups"] = likert(separated[who] + r0.normal(0, 0.5, (400, 5)))
+    regimes["no structure"] = likert(r0.normal(3, 1.1, (400, 5)))
+    w = r0.integers(0, 3, 400)
+    regimes["overlapping"] = likert(overlapping[w] + r0.normal(0, 1.1, (400, 5)))
+    w = r0.choice(3, 400, p=[0.8, 0.15, 0.05])
+    regimes["very unequal sizes"] = likert(separated[w] + r0.normal(0, 0.5, (400, 5)))
+    w = r0.integers(0, 2, 400)
+    regimes["two groups"] = likert(separated[:2][w] + r0.normal(0, 0.5, (400, 5)))
+
+    failures = {}
+    for name, X in regimes.items():
+        df = pd.DataFrame(X, columns=[f"q{i+1}" for i in range(X.shape[1])])
+        df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
+        with contextlib.redirect_stdout(io.StringIO()):
+            r = sk.run_analysis(df.to_csv(index=False).encode(),
+                                cfg=sk.SegmentationConfig(k_min=2, k_max=5, **FAST))
+        a = pd.read_csv(io.StringIO(r["files"]["segment_assignments.csv"]))
+        complaints = _report_complaints(r["digest"], a["segment"].nunique(), len(a))
+        if complaints:
+            failures[name] = complaints
+    assert not failures, "reports contradict themselves: " + json.dumps(failures, indent=2)
+
+    # A checker that cannot fail proves nothing, so put each real defect back and confirm it is
+    # caught. Every string below was in a report that shipped.
+    caught = _report_complaints(
+        "We looked at **400 people** and found **3 groups**:\n"
+        "- **A** (about 1 in 3 (40%) of people)\n"
+        "**Confidence: 🟢 High.** the groups are clear\n"
+        "Hopkins statistic = **0.59** — essentially random\n"
+        "Start with the biggest, most distinct group.\n"
+        "\n| segment | reading |\n|:--|:--|\n| Night crowd | scatters |\n"
+        "\n| segment | mean_Jaccard |\n|:--|--:|\n| Segment 0 | 0.9 |\n"
+        "\n|    |   n |   share |\n|:--|--:|--:|\n| Segment 0 | 250 | 0.6 |\n",
+        k=3, n=400)
+    joined = " | ".join(caught)
+    for expected in ("40%", "sizes sum to", "sizes table lists", "labelled both ways",
+                     "essentially random", "start with the biggest"):
+        assert expected in joined, f"the checker misses {expected!r}: {caught}"

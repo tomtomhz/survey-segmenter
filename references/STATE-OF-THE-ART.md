@@ -392,6 +392,43 @@ one at a time until `typing_tool` went 0.24 GB to 11.11 GB in one call.
 A negative result from an incomplete instrument is not evidence of absence, and "no single big
 allocation" was a conclusion about my wrapper list, not about the program.
 
+## The report is now checked against itself (2026-08-06)
+
+Three defects reached `main` while every test passed, and **all three were plainly visible in the
+generated report**:
+
+| Defect | What the report said |
+|---|---|
+| k-selection (v1.5.2) | A table showing 0.995 against 0.658 on the criterion the prose calls decisive, and a recommendation going the other way |
+| Wide questionnaire | A green confidence light above evidence that could not support it |
+| Persistence | A summary recommending the exact segment the table below told the reader not to fund |
+
+None was caught, because every test in the suite asked whether the pipeline **ran** — never
+whether the document it produced held together. That is the blind spot, and it had a perfect
+record.
+
+`test_the_report_agrees_with_itself_in_every_regime` now generates reports across the regimes that
+produce materially different documents — real structure, none at all, overlapping, very unequal
+sizes, and a two-group answer where the persistence table has only one direction available — and
+reads each one back against its own numbers:
+
+- the headline count of people and of groups must match the sizes table and the exported
+  assignments;
+- a share stated as a fraction must be that fraction, within three points;
+- a segment may not be labelled `Segment 1` in one table and by name in another unless some table
+  carries both on the same row (the exported CSV uses the number, the prose uses the name, so
+  both have to exist — what may not exist is the gap between them);
+- nothing may be recommended that the report elsewhere calls unsound;
+- a green light may not sit above a cluster-tendency score described as essentially random.
+
+The checker is itself checked: a report containing each of the shipped defects is fed to it and
+every one must be caught, because a checker that cannot fail proves nothing.
+
+**It found one more on its first run** — segments were labelled `Segment 0/1/2` in the sizes and
+Jaccard tables and by name everywhere else, in every regime on the numeric paths, so the decisive
+stability table could not be matched to any group the reader had been introduced to. Both tables
+now carry the suggested name beside the number.
+
 ## Reading a report as its reader (2026-08-06)
 
 Nobody had ever read one end to end as the marketer it is written for. Generated on 420 students

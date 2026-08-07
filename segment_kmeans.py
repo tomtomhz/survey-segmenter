@@ -2108,7 +2108,13 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
          (_typing_line(typing) if typing is not None else None),
          "\n**Per-segment bootstrap stability (Hennig's Jaccard).** This is the decisive test of "
          "which segments are real:\n"]
+    # Carry the suggested name alongside the number. The number is what the exported
+    # segment_assignments.csv uses, so it has to stay; the name is how every other table in this
+    # report refers to the same group. With only the number here, the decisive stability table
+    # could not be matched to any group the reader had been introduced to.
+    _auto = {k: defining[k].get("auto_name", "") for k in defining}
     jac = pd.DataFrame({"segment": [f"Segment {c}" for c in jaccard],
+                        "suggested name": [_auto.get(f"Segment {c}", "") for c in jaccard],
                         "mean_Jaccard": [round(v, 3) for v in jaccard.values()],
                         "reading": [jaccard_reading(v) for v in jaccard.values()]})
     L.append(_md(jac))
@@ -2125,7 +2131,8 @@ def make_report(diag, rec_k, rationale, reached, split_half, sil_overall, jaccar
            "estimate each segment's size in the whole population (the segments were still formed "
            "on unweighted data). Compare it with **share** (the raw sample) to see over- or "
            "under-representation.\n" if "population_share" in sizes.columns else None),
-          _md(sizes, index=True),
+          _md(sizes.assign(**{"suggested name": [_auto.get(i, "") for i in sizes.index]})
+              [["suggested name"] + list(sizes.columns)], index=True),
           "\n## The mind-sets (what defines each segment)\n"]
     for seg, d in defining.items():
         L.append(f"**{seg}** — suggested name: *{d['auto_name']}*")
