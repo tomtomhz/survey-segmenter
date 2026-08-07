@@ -4896,3 +4896,40 @@ def test_a_no_answer_code_in_a_follow_up_file_is_not_scored_silently(tmp_path):
     gappy = new.copy(); gappy.loc[gappy.index[:20], Q[0]] = np.nan
     assert int(sk.classify_new(rule, gappy, id_col="respondent_id")[col].sum()) == 0, \
         "a skipped answer was reported as an off-scale one"
+
+
+def test_it_says_when_the_chosen_k_fails_the_cutoff_it_quotes():
+    """The report calls prediction strength "the column to trust most" and quotes Tibshirani &
+    Walther's 0.80. It could then recommend a k below that line without a word.
+
+    Found on a file whose answers round onto a few tight patterns — every mind-set becomes a
+    handful of well-separated satellites, so the separation indices favour a fine split. k=6 won
+    the weighted vote at a prediction strength of 0.74 while k=2 scored a perfect 1.00. Both
+    readings are defensible there, which is precisely why the reader should be told they disagree
+    instead of being shown one number.
+
+    The answer is unchanged; only the claim made for it is.
+    """
+    cols = ["k", "inertia", "silhouette", "calinski_harabasz", "davies_bouldin",
+            "min_segment_share", "gap", "gap_se", "stability_ARI", "stability_ARI_sd",
+            "prediction_strength", "prediction_strength_sd", "gmm_BIC", "gmm_ICL", "consensus_PAC"]
+    # k=6 wins on separation and stability; its prediction strength is under the cutoff.
+    rows = [
+        (2, 300.0, 0.507, 200.0, 1.50, 0.42, 0.80, 0.01, 0.812, 0.05, 1.000, 0.01, 500.0, 505.0, 0.30),
+        (3, 260.0, 0.563, 210.0, 1.40, 0.23, 0.82, 0.01, 0.849, 0.05, 0.871, 0.02, 480.0, 485.0, 0.20),
+        (6, 180.0, 0.693, 320.0, 0.90, 0.10, 0.95, 0.01, 0.927, 0.02, 0.740, 0.05, 400.0, 405.0, 0.01),
+    ]
+    cfg = sk.SegmentationConfig()
+    pick, rationale, _ = sk.recommend_k(pd.DataFrame(rows, columns=cols), cfg)
+    assert pick == 6, "fixture assumption: the separation indices should win here"
+    assert "Prediction strength at k = 6 is 0.74" in rationale, rationale[-400:]
+    assert "below the 0.80" in rationale
+    assert "k = 2 reaches 1.00" in rationale, "it should name the k that does clear the cutoff"
+
+    # And it must stay quiet when the winner clears the line, or the note becomes noise.
+    fine = [
+        (2, 300.0, 0.507, 200.0, 1.50, 0.42, 0.80, 0.01, 0.812, 0.05, 0.990, 0.01, 500.0, 505.0, 0.30),
+        (3, 260.0, 0.400, 150.0, 1.90, 0.23, 0.70, 0.01, 0.700, 0.05, 0.600, 0.02, 600.0, 605.0, 0.20),
+    ]
+    pick2, rationale2, _ = sk.recommend_k(pd.DataFrame(fine, columns=cols), cfg)
+    assert pick2 == 2 and "Prediction strength at k" not in rationale2

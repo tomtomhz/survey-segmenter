@@ -1275,6 +1275,28 @@ def recommend_k(diag, cfg):
                      + f" — each of those splits the sample into at least one segment holding "
                        f"under {cfg.min_segment_frac:.0%} of respondents, which is too small to "
                        "target even if the statistics look clean.")
+    # When the winner fails the one cutoff this report quotes as decisive, say so. Measured on a
+    # file whose answers round onto a few tight patterns: k=6 won the weighted vote on the
+    # separation indices with prediction strength 0.740 — under the 0.80 the text below calls the
+    # column to trust most — while k=2 scored a perfect 1.000. Both readings are defensible there,
+    # which is exactly why the reader should be told they disagree rather than shown a single
+    # number. This changes nothing about the answer, only about what is claimed for it.
+    _ps_note = ""
+    try:
+        _ps_pick = float(diag.loc[diag["k"] == pick, "prediction_strength"].iloc[0])
+        if _ps_pick < cfg.ps_cutoff:
+            _clears = diag[diag["prediction_strength"] >= cfg.ps_cutoff]
+            _best = (f"k = {int(_clears.loc[_clears['prediction_strength'].idxmax(), 'k'])} reaches "
+                     f"{_clears['prediction_strength'].max():.2f}" if len(_clears)
+                     else "no number of segments reaches it")
+            _ps_note = (f"\n\n> **Note.** Prediction strength at k = {pick} is "
+                        f"{_ps_pick:.2f}, below the {cfg.ps_cutoff:.2f} that Tibshirani & Walther "
+                        f"suggest, and it is the column this report calls the most important — "
+                        f"{_best}. The separation and stability criteria outvoted it here. Read "
+                        "the table before committing: this is a case where the evidence genuinely "
+                        "points two ways.")
+    except Exception:
+        _ps_note = ""
     rationale = ("Recommended number of segments: **{}**.\n\nWhat each criterion points to: "
                  .format(pick)
                  + "; ".join(f"{n} -> {k}" for n, k in signals.items())
@@ -1285,7 +1307,8 @@ def recommend_k(diag, cfg):
                  "elbow as the weakest signal. On a tie it prefers the smaller, more "
                  "interpretable solution. Read the whole table before committing; if the "
                  "signals disagree sharply, that itself is evidence the data may not contain "
-                 "natural segments, and the right move may be a smaller k or a different method.")
+                 "natural segments, and the right move may be a smaller k or a different method."
+                 + _ps_note)
     return pick, rationale, signals
 
 
