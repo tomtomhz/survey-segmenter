@@ -8,33 +8,41 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-07 (late) · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ **v1.5.8 + 3 commits**, 184 Python + 102 frontend tests, CI green
+**Last updated:** 2026-08-07 (end of day) · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ **v1.5.9 + 1 commit**, 189 Python + 102 frontend tests, CI green
 
 ---
 
-## Session state — 2026-08-07, late (read this first)
+## Session state — 2026-08-07, end of day (read this first)
 
-**Released today: v1.5.1 → v1.5.8.** The team copy at `~/Desktop/Survey Segmenter (app for the
-team)/` is on **1.5.8**, verified. CI green. Tree clean.
+**Released today: v1.5.1 → v1.5.9.** The team copy at `~/Desktop/Survey Segmenter (app for the
+team)/` is on **1.5.9** — verified by asking the shipped binary itself, over HTTP, which version it
+stamps into a report, not by trusting the source tree. CI green. Tree clean.
 
-**Three commits sit on `main` after v1.5.8**, all safe and all tested — they are improvements
-found while auditing, not fixes to anything 1.5.8 got wrong:
+**v1.5.9 is the audit release.** Nothing in it came from a user report; all of it came from pointing
+the tool at data it had never seen and checking whether what it said was true. The one behaviour
+change is the distinct-patterns cap — a short survey can no longer be cut into more groups than its
+answers can distinguish. **That changes results on five-question surveys, which is what the original sponsor
+runs.** See CHANGELOG.md, which also records what was verified and deliberately left unchanged, so
+a later session does not repeat the measuring.
 
-| Commit | What |
-|---|---|
-| `Hold the charts to the same standard as the report` | A test that every chart accounts for every respondent. Proven to catch four ways of under-counting |
-| `Require enough distinct answers per group for it to be a type` | A short survey could report 8 groups where there are 2. ARI 0.39 → 1.00, nothing else moved |
-| `Re-measure the central accuracy claim` | Still 19 of 21 after three separate changes to how k is chosen |
+### No open findings
 
-Worth a v1.5.9 when convenient — the middle one changes results on short surveys, which is what
-the original sponsor runs.
+The `group_profiles.csv` naming defect recorded here previously is fixed and released. Every finding
+raised during this audit is either fixed or written down below as a known limit.
 
-### One open, unfixed finding
+### The three things nobody has checked, and cannot be checked from here
 
-`group_profiles.csv` still labels rows `Segment 0/1/2` after the groups have been named, while
-`segment_assignments.csv` carries a `group_name` column. Naming otherwise works end to end and
-survives closing and reopening a project. Cosmetic, but it is the same
-"two labels for one thing" fault that was fixed inside the report earlier today.
+These are not bugs. They are gaps in the evidence, and they are the honest reason the readiness
+verdict below is bounded rather than unconditional.
+
+1. **The live Claude API round-trip has never been run.** By deliberate constraint — the real key
+   sits in `~/.survey_segmenter/config.json` and is not to be read or used. The no-key path is
+   tested and degrades cleanly; the with-key path is tested only against a stub.
+2. **HB MaxDiff has never seen a real best-worst export.** It is verified against synthetic data
+   with known utilities (rank correlation 1.000 and 0.986 under misspecification) and against seven
+   malformed exports, but no genuine Qualtrics best-worst file has gone through it.
+3. **Nobody has hand-clicked the Windows build.** CI builds it and the smoke test drives it over
+   HTTP; no human has opened it.
 
 ### The working rules this session established
 
