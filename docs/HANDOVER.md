@@ -8,11 +8,61 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-07 · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ **v1.5.7**, 183 Python + 99 frontend tests, CI green
+**Last updated:** 2026-08-07 (late) · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ **v1.5.8 + 3 commits**, 184 Python + 102 frontend tests, CI green
 
 ---
 
-## Session state — 2026-08-07 (read this first)
+## Session state — 2026-08-07, late (read this first)
+
+**Released today: v1.5.1 → v1.5.8.** The team copy at `~/Desktop/Survey Segmenter (app for the
+team)/` is on **1.5.8**, verified. CI green. Tree clean.
+
+**Three commits sit on `main` after v1.5.8**, all safe and all tested — they are improvements
+found while auditing, not fixes to anything 1.5.8 got wrong:
+
+| Commit | What |
+|---|---|
+| `Hold the charts to the same standard as the report` | A test that every chart accounts for every respondent. Proven to catch four ways of under-counting |
+| `Require enough distinct answers per group for it to be a type` | A short survey could report 8 groups where there are 2. ARI 0.39 → 1.00, nothing else moved |
+| `Re-measure the central accuracy claim` | Still 19 of 21 after three separate changes to how k is chosen |
+
+Worth a v1.5.9 when convenient — the middle one changes results on short surveys, which is what
+the original sponsor runs.
+
+### One open, unfixed finding
+
+`group_profiles.csv` still labels rows `Segment 0/1/2` after the groups have been named, while
+`segment_assignments.csv` carries a `group_name` column. Naming otherwise works end to end and
+survives closing and reopening a project. Cosmetic, but it is the same
+"two labels for one thing" fault that was fixed inside the report earlier today.
+
+### The working rules this session established
+
+- **Audit the built app, not the source tree.** The worst defect of the day lived exactly in that
+  gap — every packaged release produced reports with no tables, while every test passed.
+- **Verify the instrument before trusting a negative result.** Five false alarms came from broken
+  probes: grepping a compressed archive, a "hang" that was my own pipe buffer, HTTP 200s whose
+  errors were in the body, a static scan flagging attributes the report shows, and two runs that
+  drew from the random stream differently and so were not the same data.
+- **A test that passes with and without the fix is not a test.** The memory guard was first written
+  at 2.5 GB; the defective code peaks at 2.39 GB and would have sailed through.
+- **Measure the fix before adopting it.** Four plausible improvements were rejected on measurement
+  this session, including two that made things actively worse.
+- **Re-run `python3 references/kbench.py` after touching `recommend_k`.** The documented accuracy
+  table goes stale silently otherwise.
+
+### What is genuinely left
+
+Nothing broken that I know of. The remaining gaps are all blocked on something other than code:
+
+| | |
+|---|---|
+| Live Claude API round-trip | Deliberately unverified — no key is used. The no-key path gives a clean error |
+| HB MaxDiff on real responses | Recovers planted utilities at rank correlation 1.000 / 0.986; never seen a real best-worst export |
+| The Windows build | CI-verified only; nobody has hand-clicked it |
+| `group_profiles.csv` naming | The open finding above |
+
+## Session state — 2026-08-07 (earlier)
 
 **Shipped today: v1.5.1 through v1.5.7.** The team copy at
 `~/Desktop/Survey Segmenter (app for the team)/` is on 1.5.7 and verified. CI green on both
