@@ -5093,3 +5093,53 @@ def test_naming_the_groups_reaches_every_file_that_names_them():
     assert len(frame) == len(groups), "the profiles file does not have a row per group"
     # And the number survives alongside the name, because that is the join key.
     assert numbers.tolist() == list(groups)
+
+
+def test_the_multiple_comparison_correction_matches_the_definition():
+    """The report profiles segments against every background trait, so it asks many questions of
+    one dataset and must correct for that or it will find a "significant" difference in noise.
+
+    Benjamini-Hochberg is a step-up procedure and easy to get subtly wrong — an off-by-one in the
+    rank, or rejecting only the hypotheses that individually clear the line rather than everything
+    up to the largest that does. Checked against the definition computed independently, over
+    random p-values including ties and values sitting exactly on a rejection threshold.
+    """
+    def reference(pvals, alpha=0.05):
+        """BH adjusted p-values, from the definition: p_adj(i) = min over j >= i of (m/j)·p(j),
+        made monotone, then compared with alpha. A different route to the same answer."""
+        items = sorted(pvals.items(), key=lambda kv: kv[1])
+        m = len(items)
+        adjusted, running = {}, 1.0
+        for i in range(m, 0, -1):
+            name, p = items[i - 1]
+            running = min(running, (m / i) * p)
+            adjusted[name] = running
+        return {name: adjusted[name] <= alpha for name, _ in items}
+
+    rng = np.random.default_rng(0)
+    for trial in range(600):
+        m = int(rng.integers(1, 15))
+        p = rng.uniform(0, 1, m)
+        if trial % 3 == 0:                       # enrich so rejections actually happen
+            p[: max(1, m // 3)] = rng.uniform(0, 0.05, max(1, m // 3))
+        if trial % 7 == 0 and m > 2:             # ties
+            p[1] = p[0]
+        names = {f"v{i}": float(v) for i, v in enumerate(p)}
+        assert sk._fdr_bh(names) == reference(names), (
+            f"disagrees with the definition on {sorted(round(v, 6) for v in names.values())}")
+
+    # And the textbook behaviour, worked through by hand. m = 4, alpha = 0.05, so the thresholds
+    # are 0.0125, 0.025, 0.0375, 0.05. Sorted: a=0.001, c=0.011, d=0.02, b=0.9. The first three
+    # each clear their own threshold and the fourth does not, so three are rejected — note that d
+    # at 0.02 is rejected although 0.02 > 0.0125, because the threshold rises with the rank. That
+    # is the whole point of a step-up procedure, and getting it wrong is how this is usually got
+    # wrong. (My first version of this line asserted d was NOT rejected; the code was right.)
+    got = sk._fdr_bh({"a": 0.001, "b": 0.9, "c": 0.011, "d": 0.02})
+    assert got == {"a": True, "c": True, "d": True, "b": False}, got
+
+    # A hypothesis whose p-value is above its own rank threshold is still rejected when a later
+    # one passes: the classic step-up case, and the one a naive per-test comparison gets wrong.
+    stepup = sk._fdr_bh({"x": 0.024, "y": 0.001})               # m = 2 -> 0.025, 0.05
+    assert stepup == {"x": True, "y": True}, stepup
+    assert sk._fdr_bh({"only": 0.04}) == {"only": True}
+    assert sk._fdr_bh({"only": 0.06}) == {"only": False}
