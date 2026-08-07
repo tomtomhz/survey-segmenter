@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-07 (end of day) · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.6.2**, 207 Python + 111 frontend tests green locally on Python 3.9 **and** 3.12 · **GitHub Actions is not running — see below**
+**Last updated:** 2026-08-07 (end of day) · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.7.0**, 209 Python + 111 frontend tests green locally on Python 3.9 **and** 3.12 · **GitHub Actions is not running — see below**
 
 ---
 
 ## Session state — 2026-08-07, end of day (read this first)
 
-**Released today: v1.5.1 → v1.6.2.** The team copy at `~/Desktop/Survey Segmenter (app for the
-team)/` is on **1.6.2** — verified by asking the shipped binary itself, over HTTP, which version it
+**Released: v1.5.1 → v1.7.0.** The team copy at `~/Desktop/Survey Segmenter (app for the
+team)/` is on **1.7.0** — verified by asking the shipped binary itself, over HTTP, which version it
 stamps into a report, not by trusting the source tree. Tree clean.
 
 ### GitHub Actions has not run since 15:24 today — billing, not code
@@ -34,8 +34,8 @@ What was done instead, locally, and what it does and does not cover:
 
 | | Covered |
 |---|---|
-| Python 3.9.6 (oldest in the CI matrix) | 207 passed |
-| Python 3.12.13, numpy 2.5.1, pandas 3.0.5 (newest) | 207 passed, no skips, all extras installed |
+| Python 3.9.6 (oldest in the CI matrix) | 209 passed |
+| Python 3.12.13, numpy 2.5.1, pandas 3.0.5 (newest) | 209 passed, no skips, all extras installed |
 | Python 3.11 | not run — bracketed by the two above, not directly tested |
 | Ubuntu | **not covered at all.** Both local runs are macOS/arm64 |
 | Windows build | **not covered at all.** No artifact was produced |
@@ -80,9 +80,10 @@ verdict below is bounded rather than unconditional.
    but its shape is now recognised and refused with instructions rather than silently clustered as
    ratings, which is what it did before (see CHANGELOG 1.6.2). Reading one properly needs a real
    sample, because the code polarity cannot be inferred from the data.
-3. **Nobody has hand-clicked the Windows build** — and as of today nobody can, because CI is not
-   running and no Windows artifact exists for anything after v1.5.8. Blocked on the billing fix
-   above.
+3. ~~**Nobody has hand-clicked the Windows build.**~~ **NOT A GAP — the tool is for macOS.**
+   Confirmed with Tom on 2026-08-08: this is a Mac tool and Windows is not a target. CI still
+   builds a Windows artefact when it runs, and the smoke test still drives it, but nobody needs to
+   hand-click it and its absence blocks nothing.
 
 ### The working rules this session established
 
@@ -107,7 +108,7 @@ Nothing broken that I know of. The remaining gaps are all blocked on something o
 |---|---|
 | Live Claude API round-trip | Deliberately unverified — no key is used. The no-key path gives a clean error |
 | HB MaxDiff on real responses | Validated on 350 real respondents: Spearman 1.0000 against the classical score. A real wide (Qualtrics/Sawtooth) export is still unseen; its shape is refused with guidance rather than misread |
-| The Windows build | CI-verified only up to v1.5.8; nobody has hand-clicked it |
+| The Windows build | Not a target — macOS is the platform. CI still builds it; nothing depends on it |
 
 ## Session state — 2026-08-07 (earlier)
 

@@ -169,7 +169,7 @@ for _m in ("divide by zero encountered in matmul", "overflow encountered in matm
            "invalid value encountered in matmul"):
     warnings.filterwarnings("ignore", message=_m, category=RuntimeWarning)
 
-__version__ = "1.6.2"    # keep in sync with pyproject.toml
+__version__ = "1.7.0"    # keep in sync with pyproject.toml
 
 # Optional "ask Claude about your segments" add-on. Imported here (not lazily) so the packaged app
 # bundles it; wrapped so a missing file/SDK never stops the core segmentation tool from loading.
@@ -4046,6 +4046,16 @@ def _maxdiff_ranking_section(est):
             lines += ["> Every item beats the one below it with at least 95% certainty, so this "
                       "order is one you can act on rather than an artefact of rounding.", ""]
 
+    # An MCMC estimate that has not settled still produces a tidy table and a confident-looking
+    # interval — there is nothing in the output itself to betray it. Saying so is the only
+    # protection a reader has, and it belongs beside the numbers rather than in a log nobody keeps.
+    if getattr(est, "converged", None) is False:
+        lines += [f"> **These numbers have not fully settled.** The estimator works by drawing "
+                  f"repeatedly and averaging, and its draws were still wandering when it stopped "
+                  f"(a convergence score of {est.rhat:.2f}, where under 1.05 counts as settled). "
+                  f"The order above is still the best available read of your data, but treat the "
+                  f"exact scores and the ranges around them as approximate. Fewer items to "
+                  f"compare, or more people, is what would settle it.", ""]
     lines += ["**How to read the score.** It is a relative preference, centred so the average item "
               "sits at zero: positive means wanted more than the average item, negative less. Only "
               "*differences* carry meaning — the units themselves are arbitrary, so a score of "

@@ -64,6 +64,11 @@ class MaxDiffResult:
     #: posterior, and marginal intervals cannot answer it: these utilities are centred, so they are
     #: correlated by construction and overlapping intervals do not imply an unresolved ordering.
     population_draws: np.ndarray = field(default=None, repr=False)
+    #: Worst split-R-hat across items, and whether it cleared `RHAT_TARGET`. An MCMC estimate that
+    #: has not settled still produces a tidy ranking and a confident-looking interval, so this is
+    #: the only thing standing between a reader and a number nobody should act on.
+    rhat: float = field(default=None, repr=False)
+    converged: bool = field(default=None, repr=False)
     rescaled: np.ndarray = field(default=None, repr=False)  # 0-100 per respondent, for reading
 
     def as_frame(self):
@@ -524,8 +529,53 @@ def read_maxdiff(df):
     return design, best_pos, worst_pos, items, usable
 
 
+def split_rhat(draws):
+    """Gelman's split-R-hat from a single chain: halve it and compare the halves.
+
+    An MCMC estimate is worth nothing if the chain has not settled, and this sampler's mixing gets
+    WORSE as a study gets bigger — measured on 300 respondents and 12 items, four independent
+    chains disagreed at R-hat 1.13 while the tool reported utilities and 95% intervals with no hint
+    that anything was unsettled. Splitting the one chain we already have costs nothing and catches
+    it; it reads conservative against the four-chain value, which is the right direction for a
+    warning.
+
+    Returns the worst value across items. 1.0 is perfect; convention treats 1.01 as converged and
+    anything past about 1.05 as not to be trusted.
+    """
+    d = np.asarray(draws, dtype=float)
+    half = d.shape[0] // 2
+    if half < 4:
+        return float("nan")
+    parts = np.stack([d[:half], d[half:2 * half]])
+    means = parts.mean(axis=1)
+    within = parts.var(axis=1, ddof=1).mean(axis=0)
+    between = half * means.var(axis=0, ddof=1)
+    within = np.where(within <= 0, 1e-12, within)
+    return float(np.max(np.sqrt(((half - 1) / half * within + between / half) / within)))
+
+
+#: How hard to work before giving up on convergence. Each step is a fresh, longer chain rather than
+#: a continuation, which wastes the previous run but keeps `estimate_hb` a single honest sampler
+#: with no resumable state to get wrong. Most studies stop at the first entry; the cost is only
+#: paid by the studies that actually need it.
+_ESCALATION = ((6000, 2000), (20000, 6000), (60000, 20000))
+
+#: Split-R-hat below this counts as settled. Looser than the 1.01 convention because split-R-hat
+#: runs conservative here: a four-chain value of 1.008 on the study that needed escalation came
+#: with a split value well above 1.01, and a threshold that can never be met would just spend
+#: everyone's time before printing the same warning.
+RHAT_TARGET = 1.05
+
+
 def utilities_from_export(df, **kw):
-    """One call: tidy MaxDiff export -> respondent-by-item utility table ready to segment."""
+    """One call: tidy MaxDiff export -> respondent-by-item utility table ready to segment.
+
+    Sampling length is chosen by measurement rather than by a constant. The old fixed 6,000 draws
+    were ample for a small study and NOT enough for a larger one — the failure being silent, since
+    an under-mixed chain still produces a tidy ranking and a confident-looking interval. The chain
+    now grows until split-R-hat says it has settled, or until the cap, at which point the result
+    says so instead of pretending.
+    """
     design, best_pos, worst_pos, items, respondents = read_maxdiff(df)
     n_sets = int((design >= 0).any(axis=2).sum(axis=1).max())
     exposures = float((design >= 0).sum() / (len(respondents) * len(items)))
@@ -535,4 +585,29 @@ def utilities_from_export(df, **kw):
     if exposures < 3:
         print(f"NOTE: only ~{exposures:.1f} exposures per item. Individual-level utilities get "
               "unreliable below about 3; treat per-respondent scores as indicative.")
-    return estimate_hb(design, best_pos, worst_pos, items, respondents, **kw)
+
+    # A caller who names its own sampling length means it — tests pin short chains deliberately,
+    # and silently overriding that would make every one of them slow for no benefit.
+    if "n_draws" in kw or "n_burn" in kw:
+        res = estimate_hb(design, best_pos, worst_pos, items, respondents, **kw)
+        res.rhat = split_rhat(res.population_draws)
+        res.converged = bool(res.rhat < RHAT_TARGET) if res.rhat == res.rhat else None
+        return res
+
+    res = None
+    for step, (n_draws, n_burn) in enumerate(_ESCALATION):
+        res = estimate_hb(design, best_pos, worst_pos, items, respondents,
+                          n_draws=n_draws, n_burn=n_burn, **kw)
+        res.rhat = split_rhat(res.population_draws)
+        res.converged = bool(res.rhat < RHAT_TARGET) if res.rhat == res.rhat else None
+        if res.converged is not False:
+            break
+        if step + 1 < len(_ESCALATION):
+            print(f"NOTE: the estimate has not settled yet (R-hat {res.rhat:.2f}); sampling "
+                  f"{_ESCALATION[step + 1][0]:,} draws instead of {n_draws:,}. This is normal on "
+                  "larger studies and only costs time.")
+    if res.converged is False:
+        print(f"NOTE: the sampler did not fully settle (R-hat {res.rhat:.2f} against a target of "
+              f"{RHAT_TARGET}). The ranking is still usable, but treat the exact scores and the "
+              "ranges around them as approximate.")
+    return res

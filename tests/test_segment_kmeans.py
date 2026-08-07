@@ -5715,3 +5715,55 @@ def test_the_wide_guard_does_not_turn_away_ordinary_matrix_surveys(label, build)
     df = pd.DataFrame(build(np.random.default_rng(2)))
     assert not md.looks_like_wide_best_worst(df), (
         f"an ordinary {label} with matrix column names was refused as a best-worst export")
+
+
+def test_an_unsettled_estimate_says_so_instead_of_looking_confident():
+    """The sampler's mixing gets worse as a study grows, and nothing in its output reveals it.
+
+    Measured before this was added: 300 respondents and 12 items produced four independent chains
+    that disagreed at R-hat 1.13, while the tool reported utilities and 95% intervals with no hint
+    that anything was unsettled. An MCMC estimate that has not converged still yields a tidy
+    ranking and a tight-looking interval — that is exactly why it needs saying out loud.
+    """
+    md = pytest.importorskip("maxdiff")
+    df, _names, _truth = _homogeneous_best_worst([1.5, 0.9, 0.3, -0.3, -0.9, -1.5], n_resp=60,
+                                                 n_task=6)
+    # A deliberately truncated chain: too short to settle, which is the state being reported on.
+    with contextlib.redirect_stdout(io.StringIO()):
+        bad = md.utilities_from_export(df, n_draws=140, n_burn=100, thin=1, progress=False)
+    assert bad.rhat is not None, "no convergence diagnostic was computed at all"
+
+    if bad.converged is False:                       # what a short chain should look like
+        prose = sk._maxdiff_ranking_section(bad)
+        assert "have not fully settled" in prose
+        assert f"{bad.rhat:.2f}" in prose, "the diagnostic is mentioned but its value is not"
+
+    # And a chain long enough to settle must NOT carry the warning: a caveat that fires on good
+    # data teaches the reader to ignore it.
+    with contextlib.redirect_stdout(io.StringIO()):
+        good = md.utilities_from_export(df, n_draws=6000, n_burn=2000, progress=False)
+    assert good.converged is True, f"a full-length chain still reports R-hat {good.rhat:.3f}"
+    assert "have not fully settled" not in sk._maxdiff_ranking_section(good)
+
+
+def test_sampling_length_is_chosen_by_measurement_not_by_a_constant():
+    """A fixed 6,000 draws was ample for a small study and not enough for a larger one, and the
+    shortfall was silent. The chain now grows until split-R-hat says it has settled.
+
+    The escalation must not fire on studies that do not need it — that would make every ordinary
+    run several times slower for nothing.
+    """
+    md = pytest.importorskip("maxdiff")
+    small, _n, _t = _homogeneous_best_worst([1.5, 0.9, 0.3, -0.3, -0.9, -1.5], n_resp=45, n_task=5)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        res = md.utilities_from_export(small, progress=False)
+    assert res.converged is True and res.rhat < md.RHAT_TARGET
+    assert "sampling" not in out.getvalue().lower() or "instead of" not in out.getvalue(), (
+        "a small study escalated when it did not need to, which costs every run time for nothing")
+
+    # A caller that pins its own length means it, and must not be silently overridden.
+    with contextlib.redirect_stdout(io.StringIO()):
+        pinned = md.utilities_from_export(small, n_draws=800, n_burn=300, progress=False)
+    assert pinned.n_draws == 800, "an explicitly requested chain length was overridden"
+    assert pinned.rhat is not None, "a pinned run still needs its diagnostic reported"

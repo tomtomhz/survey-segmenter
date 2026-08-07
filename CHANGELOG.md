@@ -3,6 +3,45 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.7.0] — 2026-08-08
+
+From an audit of the Hierarchical Bayes sampler itself. Its *outputs* had been checked hard —
+recovery of planted utilities, interval coverage, agreement with the classical score on real data.
+The sampler's own behaviour had not.
+
+### Changed
+
+- **How long the sampler runs is now decided by measurement, not by a constant.** The fixed 6,000
+  draws were ample for a small study and **not enough for a larger one**, and the shortfall was
+  silent: an under-mixed chain still produces a tidy ranking and a tight-looking interval, with
+  nothing in the output to betray it.
+
+  Measured on 300 respondents and 12 items, four independent chains disagreed at R-hat 1.13 while
+  the tool reported utilities and 95% intervals with no hint that anything was unsettled. Extending
+  the chain fixes it (R-hat 1.008 at 60,000 draws), so the chain now grows — 6,000, then 20,000,
+  then 60,000 — until split-R-hat says it has settled.
+
+  Studies that do not need it pay nothing: 40 people over 6 items settles first time in 0.6s, and
+  150 over 8 items in 1.6s. The real 350-person dataset settles at the first step in 4.1s. A caller
+  that names its own chain length is never overridden.
+
+### Added
+
+- **The report says when an estimate has not settled.** If the chain is still wandering at the cap,
+  the ranking carries a note giving the convergence score and saying to treat the exact numbers and
+  ranges as approximate. A caveat that fired on good data would teach the reader to ignore it, so
+  it appears only when it is true.
+
+### Verified, not changed
+
+- **The answer does not depend on the order of the file, or on which item gets pinned.** The
+  sampler holds one item at zero for identification, and that item is whichever sorts last — so the
+  concern is real. Shuffling every row moves the utilities by at most 0.016 on a scale spanning
+  4.6; renaming the items so a different one is pinned, by at most 0.032. The ranking is identical
+  in all three.
+- **Agreement with the classical best-minus-worst score on the real 350-person dataset is
+  unchanged at Spearman 1.0000** after the sampling change.
+
 ## [1.6.2] — 2026-08-07
 
 ### Fixed
