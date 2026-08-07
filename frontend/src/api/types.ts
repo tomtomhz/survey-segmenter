@@ -72,10 +72,15 @@ export interface RankedItem {
   low: number | null
   high: number | null
   /**
-   * Whether this item is genuinely ahead of the one below it, or whether their credible intervals
-   * overlap so the printed order is not one the study established. `null` on the last row, which
-   * has nothing below it to be ahead of.
+   * Probability that this item really does beat the one below it, from the joint posterior — so
+   * it accounts for the fact that these scores are centred and therefore correlated. `null` on the
+   * last row, which has nothing below it to beat.
+   *
+   * Shown rather than reduced to a verdict: 0.58 and 0.93 are very different findings, and the
+   * first version of this card gave both the same three words.
    */
+  prob_ahead?: number | null
+  /** Whether `prob_ahead` clears 95%. `null` on the last row. */
   clear_of_next: boolean | null
 }
 

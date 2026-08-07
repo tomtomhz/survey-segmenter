@@ -59,6 +59,11 @@ class MaxDiffResult:
     #: `population_mean`. Two items whose intervals overlap are not separated by this study.
     population_low: np.ndarray = field(default=None, repr=False)
     population_high: np.ndarray = field(default=None, repr=False)
+    #: (n_kept, n_items) retained posterior draws of the population ranking, centred like
+    #: `population_mean`. Kept because whether one item beats another is a question about the JOINT
+    #: posterior, and marginal intervals cannot answer it: these utilities are centred, so they are
+    #: correlated by construction and overlapping intervals do not imply an unresolved ordering.
+    population_draws: np.ndarray = field(default=None, repr=False)
     rescaled: np.ndarray = field(default=None, repr=False)  # 0-100 per respondent, for reading
 
     def as_frame(self):
@@ -66,13 +71,33 @@ class MaxDiffResult:
         import pandas as pd
         return pd.DataFrame(self.utilities, index=self.respondent_ids, columns=self.item_names)
 
+    #: How sure the study must be that one item beats the next before its printed position is
+    #: treated as established. The conventional 95%, chosen for the reason it is conventional
+    #: elsewhere: it is the line readers already have an intuition for.
+    ORDER_CERTAINTY = 0.95
+
     def ranking(self):
         """The study's headline answer: items ordered by how much the sample wants them.
 
-        Returns a DataFrame with one row per item, best first, carrying the credible interval and
-        a `separated_from_next` flag. That flag is the honest part — a ranking prints an order
-        whether or not the data supports one, and adjacent items with overlapping intervals are
-        printed in an order the study did not establish.
+        One row per item, best first, carrying the credible interval, the probability that each
+        item really does beat the one below it, and a flag for whether that clears
+        `ORDER_CERTAINTY`.
+
+        **Why the probability rather than overlapping intervals.** The first version of this
+        compared each item's lower bound against the next item's upper bound — the comparison a
+        reader makes on sight of a table, and easy to defend. It is also the wrong question, in two
+        ways that matter:
+
+        * These utilities are centred, so the items are correlated *by construction*: one going up
+          pushes the rest down. Reading two marginal intervals side by side quietly assumes an
+          independence the model does not have.
+        * It answers yes or no. Measured on a deliberately thin study, the interval rule returned
+          "too close to call" for a pair at probability 0.579 and for another at 0.929 — the same
+          three words for a coin flip and for a finding most people would act on. In the second
+          case "we cannot tell" was simply false.
+
+        The joint draws answer the question that was actually being asked, and cost nothing: the
+        sampler already produced them.
         """
         import pandas as pd
         lo = self.population_low
@@ -82,17 +107,20 @@ class MaxDiffResult:
             "utility": self.population_mean,
             "low": lo if lo is not None else np.nan,
             "high": hi if hi is not None else np.nan,
-        }).sort_values("utility", ascending=False).reset_index(drop=True)
-        if lo is not None:
-            # Separated from the item below it when this item's lower bound clears that item's
-            # upper bound. Comparing the intervals directly is the conservative reading and the
-            # one a non-statistician will make on sight of the table.
+        }).sort_values("utility", ascending=False)
+        order = out.index.to_numpy()          # original positions, now in ranked order
+        out = out.reset_index(drop=True)
+
+        draws = self.population_draws
+        if draws is not None and len(out) > 1:
+            d = np.asarray(draws)[:, order]   # columns reordered to match the table
+            ahead = (d[:, :-1] > d[:, 1:]).mean(axis=0)
+            out["prob_ahead"] = np.append(np.round(ahead, 4), np.nan)
             # Nullable boolean, not plain bool: the last row has no item below it, so its value is
             # genuinely missing rather than False. pandas 3 refuses to put NA into a bool column,
-            # which is the correct objection — "not separated" and "nothing to separate from" are
-            # different claims and the dtype should not let them blur.
-            nxt_high = out["high"].shift(-1)
-            sep = (out["low"] > nxt_high).astype("boolean")
+            # which is the correct objection — "not established" and "nothing to establish it
+            # against" are different claims and the dtype should not let them blur.
+            sep = pd.Series(np.append(ahead >= self.ORDER_CERTAINTY, False)).astype("boolean")
             sep.iloc[-1] = pd.NA
             out["separated_from_next"] = sep
         out.insert(0, "rank", np.arange(1, len(out) + 1))
@@ -256,6 +284,7 @@ def estimate_hb(design, best_pos, worst_pos, item_names, respondent_ids,
         population_mean=pop_mean,
         population_low=pop_low,
         population_high=pop_high,
+        population_draws=mu_draws,
         acceptance_rate=accepted / max(proposed, 1),
         n_draws=n_draws,
         n_burn=n_burn,

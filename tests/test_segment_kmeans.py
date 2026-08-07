@@ -5340,7 +5340,14 @@ def test_a_ranking_the_data_cannot_support_is_reported_as_tied():
         "the last item has nothing below it, so 'not separated' would be a claim about nothing")
     # And the report must say it in words, not only in a column a non-statistician will skim past.
     prose = sk._maxdiff_ranking_section(est)
-    assert "too close to call" in prose and "treat them as tied" in prose
+    assert "not settled" in prose and "chance that pair really is the right way round" in prose
+    # The probability itself has to reach the reader, not a verdict derived from it. Reducing it
+    # gave a pair at 0.58 and a pair at 0.93 the same three words, which is what this replaced.
+    assert "chance it beats the next" in prose
+    unsure = [p for p in rank["prob_ahead"].dropna() if p < md.MaxDiffResult.ORDER_CERTAINTY]
+    assert unsure, "the fixture stopped producing an unsettled pair; it no longer tests anything"
+    assert any(f"{p * 100:.0f}%" in prose for p in unsure), (
+        "no unsettled pair had its probability printed anywhere in the section")
 
 
 def test_a_well_separated_ranking_is_not_hedged_into_uselessness():
@@ -5351,8 +5358,8 @@ def test_a_well_separated_ranking_is_not_hedged_into_uselessness():
     with contextlib.redirect_stdout(io.StringIO()):
         est = md.utilities_from_export(df, n_draws=1200, n_burn=400, progress=False)
     prose = sk._maxdiff_ranking_section(est)
-    assert "too close to call" not in prose, "hedged a ranking with a full point between each item"
-    assert "clearly ahead of the one below it" in prose
+    assert "not settled" not in prose, "hedged a ranking with a full point between each item"
+    assert "at least 95% certainty" in prose
 
 
 def test_a_best_worst_study_can_download_what_it_was_fielded_to_measure():
@@ -5428,3 +5435,35 @@ def test_every_file_the_app_can_hand_over_has_a_human_label():
     missing = sorted(produced - labelled)
     assert not missing, (f"{missing} can be downloaded but has no entry in DOWNLOAD_LABEL, so the "
                          f"button will show the raw filename")
+
+
+def test_the_probability_is_read_from_the_right_pair_of_items():
+    """`ranking()` sorts the items but the posterior draws stay in their original column order, so
+    the columns must be reordered to match before any pair is compared.
+
+    Getting that wrong is silent: the table still looks right, every probability is in [0, 1], and
+    the numbers are simply about the wrong pairs. So this fixes draws by hand, in an order where
+    the ranking is NOT the storage order, and checks the arithmetic against values worked out
+    independently of the implementation.
+    """
+    md = pytest.importorskip("maxdiff")
+    # Stored order a, b, c — ranked order b, c, a, so a correct reordering is not the identity.
+    draws = np.array([[0.0, 2.0, 1.0],
+                      [0.0, 2.0, 1.0],
+                      [0.0, 1.0, 2.0],
+                      [0.0, 2.0, 1.0]])
+    res = md.MaxDiffResult(
+        utilities=np.zeros((1, 3)), item_names=["a", "b", "c"], respondent_ids=["R1"],
+        population_mean=draws.mean(axis=0), acceptance_rate=0.3, n_draws=4, n_burn=0,
+        population_draws=draws)
+    rank = res.ranking()
+
+    assert list(rank["item"]) == ["b", "c", "a"], "the fixture no longer ranks out of storage order"
+    # P(b > c) across the four draws: 2>1, 2>1, 1>2, 2>1 -> three of four.
+    assert rank.loc[0, "prob_ahead"] == pytest.approx(0.75)
+    # P(c > a): 1>0, 1>0, 2>0, 1>0 -> all four.
+    assert rank.loc[1, "prob_ahead"] == pytest.approx(1.0)
+    assert pd.isna(rank.loc[2, "prob_ahead"]), "the last item has nothing below it to beat"
+    # And the 95% line is applied to those probabilities, not to anything else.
+    assert bool(rank.loc[0, "separated_from_next"]) is False      # 0.75 is under the line
+    assert bool(rank.loc[1, "separated_from_next"]) is True       # 1.00 clears it

@@ -3943,16 +3943,25 @@ def _maxdiff_ranking_section(est):
       a league table nobody should act on.
     """
     rank = est.ranking()
-    has_interval = "separated_from_next" in rank.columns
+    # Two independent questions, kept independent. An estimate saved before the credible interval
+    # was retained has neither; one saved before the posterior draws were retained has the interval
+    # but not the probability. Conflating them would silently drop the range column from a result
+    # that has a perfectly good range.
+    has_range = "low" in rank.columns and rank["low"].notna().any()
+    has_prob = "prob_ahead" in rank.columns
+    cols = ["#", "item", "score"]
     show = rank.rename(columns={"rank": "#", "utility": "score"})
-    if has_interval:
+    if has_range:
         show["95% range"] = [f"{lo:+.2f} to {hi:+.2f}" for lo, hi in zip(rank["low"], rank["high"])]
-        show["clearly ahead of the next?"] = [
-            "" if pd.isna(v) else ("yes" if v else "no — too close to call")
-            for v in rank["separated_from_next"]]
-        show = show[["#", "item", "score", "95% range", "clearly ahead of the next?"]]
-    else:                     # an estimate produced before intervals were kept
-        show = show[["#", "item", "score"]]
+        cols.append("95% range")
+    if has_prob:
+        # The probability itself, not a verdict derived from it. A column that said only "yes" or
+        # "too close to call" gave the same three words to a coin flip and to a 93% finding.
+        show["chance it beats the next"] = [
+            "" if pd.isna(p) else (">99%" if p > 0.995 else f"{p * 100:.0f}%")
+            for p in rank["prob_ahead"]]
+        cols.append("chance it beats the next")
+    show = show[cols]
     show["score"] = show["score"].map(lambda v: f"{v:+.2f}")
 
     top, bottom = rank.iloc[0]["item"], rank.iloc[-1]["item"]
@@ -3965,20 +3974,23 @@ def _maxdiff_ranking_section(est):
              f"**{top}** comes out strongest and **{bottom}** weakest.", "",
              show.to_markdown(index=False, disable_numparse=True), ""]
 
-    if has_interval:
+    if has_prob:
         close = [i for i in range(len(rank) - 1)
                  if not bool(rank.iloc[i]["separated_from_next"])]
         if close:
-            pairs = [f"**{rank.iloc[i]['item']}** and **{rank.iloc[i + 1]['item']}**"
-                     for i in close]
+            # Named WITH their probabilities, because those differ enormously between pairs and a
+            # single collective warning would flatten them back into "we cannot tell".
+            pairs = [f"**{rank.iloc[i]['item']}** over **{rank.iloc[i + 1]['item']}** "
+                     f"({rank.iloc[i]['prob_ahead'] * 100:.0f}%)" for i in close]
             joined = pairs[0] if len(pairs) == 1 else ", ".join(pairs[:-1]) + " and " + pairs[-1]
-            lines += [f"> **{len(close)} pair{'s' if len(close) > 1 else ''} of neighbours are not "
-                      f"actually separated by this study:** {joined}. They are printed in an order, "
-                      f"but the data does not support one — treat them as tied. Fielding more "
-                      f"respondents, or more tasks each, is what would separate them.", ""]
+            lines += [f"> **{len(close)} position{'s' if len(close) > 1 else ''} in this order "
+                      f"{'are' if len(close) > 1 else 'is'} not settled** at the usual 95% mark: "
+                      f"{joined}. The percentage is the chance that pair really is the right way "
+                      f"round — read it rather than the position. More respondents, or more "
+                      f"questions each, is what would settle them.", ""]
         else:
-            lines += ["> Every item is clearly ahead of the one below it, so the order above is "
-                      "one you can act on rather than an artefact of rounding.", ""]
+            lines += ["> Every item beats the one below it with at least 95% certainty, so this "
+                      "order is one you can act on rather than an artefact of rounding.", ""]
 
     lines += ["**How to read the score.** It is a relative preference, centred so the average item "
               "sits at zero: positive means wanted more than the average item, negative less. Only "
@@ -4077,6 +4089,8 @@ def run_analysis(data, cfg=None, force_items=None):
                      "score": round(float(r["utility"]), 3),
                      "low": None if pd.isna(r.get("low")) else round(float(r["low"]), 3),
                      "high": None if pd.isna(r.get("high")) else round(float(r["high"]), 3),
+                     "prob_ahead": (None if pd.isna(r.get("prob_ahead"))
+                                    else round(float(r["prob_ahead"]), 4)),
                      "clear_of_next": (None if pd.isna(r.get("separated_from_next"))
                                        else bool(r["separated_from_next"]))}
                     for _, r in _rk.iterrows()]

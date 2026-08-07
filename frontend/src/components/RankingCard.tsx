@@ -17,7 +17,10 @@ export function RankingCard({ ranking }: { ranking?: RankedItem[] | null }) {
   const tied = ranking.filter((r) => r.clear_of_next === false)
   const strongest = ranking[0]
   const weakest = ranking[ranking.length - 1]
-  const hasIntervals = ranking.some((r) => r.low !== null)
+  // `!= null` deliberately, not `!== null`: the type says `number | null`, but JSON can simply
+  // omit the key, and TypeScript cannot see that. A row without `low` at all then passed the
+  // `!== null` test and reached `row.low.toFixed(2)` — "Cannot read properties of undefined".
+  const hasIntervals = ranking.some((r) => r.low != null)
   // The bars are drawn from the full span of the scale rather than from zero: these are relative
   // preferences centred on zero, so half of them are negative and a zero-based bar would render
   // the bottom half as nothing at all.
@@ -56,9 +59,17 @@ export function RankingCard({ ranking }: { ranking?: RankedItem[] | null }) {
                 {row.clear_of_next === false && (
                   <span
                     className="tie"
-                    title="Its range overlaps the item below, so this study did not establish which of the two is ahead"
+                    title={
+                      row.prob_ahead != null
+                        ? `${(row.prob_ahead * 100).toFixed(0)}% chance this really is ahead of the item below — under the 95% mark this study treats as settled`
+                        : 'This study did not establish which of these two is ahead'
+                    }
                   >
-                    tied with next
+                    {/* The number, not just the word. "58% sure" and "93% sure" are different
+                        findings, and a single "tied" label reports them identically. */}
+                    {row.prob_ahead != null
+                      ? `${(row.prob_ahead * 100).toFixed(0)}% sure of this order`
+                      : 'order not settled'}
                   </span>
                 )}
               </td>
@@ -68,7 +79,7 @@ export function RankingCard({ ranking }: { ranking?: RankedItem[] | null }) {
               </td>
               {hasIntervals && (
                 <td>
-                  {row.low !== null && row.high !== null ? (
+                  {row.low != null && row.high != null ? (
                     <span
                       className="range"
                       aria-label={`${row.low.toFixed(2)} to ${row.high.toFixed(2)}`}
@@ -94,16 +105,16 @@ export function RankingCard({ ranking }: { ranking?: RankedItem[] | null }) {
           {tied.length > 0 ? (
             <>
               <b>
-                {tied.length} {tied.length === 1 ? 'pair' : 'pairs'} too close to separate.
+                {tied.length} {tied.length === 1 ? 'position is' : 'positions are'} not settled
               </b>{' '}
-              Items marked <i>tied with next</i> are printed in an order this study did not
-              establish — treat them as level. More respondents, or more questions each, is what
-              would tell them apart.
+              at the usual 95% mark. The percentage on those rows is the chance that pair really is
+              the right way round — read it rather than the position. More respondents, or more
+              questions each, is what would settle them.
             </>
           ) : (
             <>
-              <b>Every item is clearly ahead of the one below it,</b> so this order is one you can
-              act on.
+              <b>Every item beats the one below it with at least 95% certainty,</b> so this order is
+              one you can act on.
             </>
           )}
         </p>
