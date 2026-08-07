@@ -4988,3 +4988,52 @@ def test_a_large_study_stays_within_a_sane_memory_budget(tmp_path):
         f"{n:,} respondents needed {peak_gb:.2f} GB, against about 0.48 GB expected. Something is "
         "allocating per respondent per level again — see kprototypes.encode, which once did "
         "exactly that and cost 11 GB on a 48,842-person file")
+
+
+def test_no_chart_quietly_describes_fewer_people_than_the_study():
+    """The charts exist so a reader can disagree with the write-up. That only works if they show
+    everybody.
+
+    They used to draw a random sample and say so in small print — a sample cannot falsify
+    anything — and the fix was to plot one dot per distinct answer pattern with its area
+    proportional to how many people share it. This checks the arithmetic actually holds: at every
+    size, the dots on the map, the bars of the gorge plot and the rows of the fit chart must
+    account for exactly as many people as the report claims to have analysed.
+
+    Checked across sizes because the failure mode is silent sampling above some threshold, which is
+    invisible on a small file.
+    """
+    centres = np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1]], float)
+    for n in (300, 1500, 4000):
+        rng = np.random.default_rng(3)
+        who = rng.integers(0, 3, n)
+        X = np.clip(np.rint(centres[who] + rng.normal(0, 0.6, (n, 5))), 1, 5).astype(int)
+        df = pd.DataFrame(X, columns=[f"q{i+1}" for i in range(5)])
+        df.insert(0, "respondent_id", [f"P{i}" for i in range(n)])
+        with contextlib.redirect_stdout(io.StringIO()):
+            r = sk.run_analysis(df.to_csv(index=False).encode(),
+                                cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+        specs = {c["id"]: (c["spec"] if isinstance(c.get("spec"), dict) else json.loads(c["spec"]))
+                 for c in r["charts"] if c.get("spec")}
+        people = r["n_people"]
+
+        if "map" in specs:
+            pts = specs["map"]["points"]
+            assert sum(pts["people"]) == people, (
+                f"the segment map accounts for {sum(pts['people'])} of {people} respondents")
+            assert specs["map"]["people"] == people
+            assert len(pts["x"]) == len(pts["people"]) == len(pts["segment"]), \
+                "the map's columns are different lengths, so a dot has no count or no group"
+        if "gorge" in specs:
+            assert sum(specs["gorge"]["counts"]) == people, (
+                f"the gorge plot counts {sum(specs['gorge']['counts'])} of {people} respondents")
+        if "fit" in specs:
+            covered = sum(int(row["people"]) for row in specs["fit"]["rows"])
+            assert covered == people, f"the fit chart covers {covered} of {people} respondents"
+            assert specs["fit"]["sampled"] == 0, "the fit chart fell back to a sample"
+
+        # And every chart that shows segments must show all of them.
+        for cid in ("map", "profiles", "heatmap", "fit"):
+            if cid in specs and "segments" in specs[cid]:
+                assert len(specs[cid]["segments"]) == r["k"], (
+                    f"the {cid} chart shows {len(specs[cid]['segments'])} of {r['k']} groups")
