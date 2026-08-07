@@ -8,9 +8,60 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-07-31 · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ 112 Python + 59 frontend tests, CI green
+**Last updated:** 2026-08-07 · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ **v1.5.7**, 183 Python + 99 frontend tests, CI green
 
 ---
+
+## Session state — 2026-08-07 (read this first)
+
+**Shipped today: v1.5.1 through v1.5.7.** The team copy at
+`~/Desktop/Survey Segmenter (app for the team)/` is on 1.5.7 and verified. CI green on both
+workflows. Nothing is outstanding or half-finished.
+
+**The three that change what a user gets, in order of how much they mattered:**
+
+1. **Every packaged release ever built produced reports with no tables** (fixed in 1.5.6). Segment
+   sizes, the stability checks, the centroids and the k-selection panel all arrived as
+   run-together text. `to_markdown` needs `tabulate`, pandas imports it lazily so the packager
+   never bundled it, and it was declared an *optional* extra described as "prettier Markdown
+   tables" — a description that was simply wrong. Measured on the binary: 0 tables before, 8 after.
+
+2. **A genuine segment was condemned in print** (fixed in 1.5.5). Segment persistence reported the
+   weaker of two directions, and asking for one more group forces a split, so whichever segment
+   got subdivided scored about 0.5 whether or not it was real. On a study recovered at ARI 0.954,
+   the largest and cleanest segment held together perfectly under merging, scored 0.56 under
+   splitting, and the report said *"Do not build a campaign on the ones marked 'dissolves'."*
+
+3. **The number of segments could be wrong on data that plainly contained them** (fixed in 1.5.2).
+   Two independent faults in `recommend_k`; against planted truth, 0.618 became 0.992.
+
+**Also shipped:** large studies (48,842 respondents went from 11.04 GB and 2.2 minutes to 1.59 GB
+and 0.9; 581,012 rows now run in 3.2 minutes), seven file shapes that were read wrongly and
+silently, a cap on calling a wide questionnaire high confidence, the categorical path brought from
+two of eleven pieces of evidence up to parity, and "no answer" codes in follow-up files no longer
+scored in silence.
+
+### The three rules this session established
+
+- **Audit the built app, not the source tree.** The worst defect of the day lived exactly in that
+  gap: the source had `tabulate`, so every test passed on every machine anyone was looking at.
+- **Verify the instrument before trusting a negative result.** Four separate false alarms came
+  from broken probes — grepping a compressed archive, a "hang" that was my own pipe buffer, HTTP
+  200s whose errors were in the body, and a static scan that flagged seven attributes the report
+  actually shows.
+- **A test that passes with and without the fix is not a test.** The memory guard was first written
+  at a 2.5 GB threshold; the defective code peaks at 2.39 GB and would have sailed through.
+
+### What is genuinely left
+
+Nothing broken that I know of. Remaining gaps are blocked on something other than code:
+
+| | |
+|---|---|
+| The live Claude API round-trip | Deliberately unverified — no key is used. The no-key path is checked and gives a clean error |
+| HB MaxDiff on real responses | Recovers planted utilities at rank correlation 1.000 / 0.986, but has never seen a real best-worst export |
+| The Windows build | CI-verified only; nobody has hand-clicked it |
+| The React front end | The only substantial area not audited this session |
 
 ## Session state — 2026-08-06
 
