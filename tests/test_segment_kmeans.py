@@ -1623,7 +1623,10 @@ def test_typing_rule_scores_a_raw_export_with_text_likert_answers(tmp_path):
     assert "q_text_scale" in rule["items"]                 # the recoded item is part of the rule
 
     scored = sk.classify_new(rule, make(new_idx))          # raw words, exactly as exported
-    assert list(scored.columns) == ["respondent_id", "segment", "confidence"]
+    # The id, the segment and the confidence, in that order and first: a scored list you cannot
+    # tie back to people is worthless for targeting. Later columns may be added after them —
+    # answers_off_the_original_scale is one — so this pins the contract rather than the exact set.
+    assert list(scored.columns)[:3] == ["respondent_id", "segment", "confidence"]
     assert len(scored) == len(new_idx)
     truth = seg[new_idx]
     assert adjusted_rand_score(truth, scored["segment"]) > 0.7   # it really recovers the mind-sets
@@ -4837,3 +4840,59 @@ def test_a_multiple_choice_survey_gets_the_same_evidence_as_a_rating_one():
     assert not (re.search(r"reproduces(,| well)", digest)
                 and "does not survive being repeated" in digest), \
         "the report describes one replication number two contradictory ways"
+
+
+def test_a_no_answer_code_in_a_follow_up_file_is_not_scored_silently(tmp_path):
+    """Survey exports routinely code "no answer" as 99, 999 or -99, and the typing rule accepted
+    such a value without a word.
+
+    Nothing rejects it: it is scaled with the study's own parameters, lands far outside the space,
+    and drags the respondent to whichever segment is extreme on that item. Measured on a 250-person
+    follow-up with 99 in one question, **35 of the 60 affected people were put in the wrong
+    segment** and agreement with the truth fell from 0.967 to 0.593.
+
+    The confidence column already dropped sharply for them (0.34 against 0.72), so the signal was
+    there — what was missing was any reason for the reader to go looking. Counted rather than
+    corrected, because whether 99 means "no answer" or is a real value is a fact about the
+    questionnaire, not about the data.
+    """
+    Q = ["I compare prices", "Quality over cost", "I wait for sales", "I try new brands"]
+    centres = np.array([[5, 1, 5, 2], [1, 5, 1, 5], [3, 3, 5, 4]], float)
+
+    def survey(n, seed):
+        r = np.random.default_rng(seed)
+        w = r.integers(0, 3, n)
+        X = np.clip(np.rint(centres[w] + r.normal(0, 0.6, (n, 4))), 1, 5).astype(int)
+        d = pd.DataFrame(X, columns=Q)
+        d.insert(0, "respondent_id", [f"R{i}" for i in range(n)])
+        return d, w
+
+    train, _ = survey(400, 1)
+    path = tmp_path / "train.csv"; train.to_csv(path, index=False)
+    with contextlib.redirect_stdout(io.StringIO()):
+        sk.Segmenter(sk.SegmentationConfig(k_min=2, k_max=5, **FAST)).run(
+            str(path), id_col="respondent_id", outdir=str(tmp_path / "out"))
+    rule = json.loads((tmp_path / "out" / "typing_rule.json").read_text())
+
+    new, truth = survey(250, 99)
+    clean = sk.classify_new(rule, new, id_col="respondent_id")
+    col = "answers_off_the_original_scale"
+    assert col in clean.columns
+    assert int(clean[col].sum()) == 0, "a clean follow-up must raise no flags at all"
+    assert adjusted_rand_score(truth, clean["segment"]) > 0.9
+
+    dirty = new.copy()
+    dirty.loc[dirty.index[:60], Q[1]] = 99          # "no answer"
+    dirty.loc[dirty.index[200:210], Q[3]] = -99     # the other common code
+    scored = sk.classify_new(rule, dirty, id_col="respondent_id")
+    flagged = scored[col] > 0
+
+    assert set(np.flatnonzero(flagged.to_numpy())) == set(range(60)) | set(range(200, 210)), (
+        "the flag does not identify exactly the respondents whose answers were off the scale")
+    assert scored.loc[flagged, "confidence"].mean() < scored.loc[~flagged, "confidence"].mean(), \
+        "an off-scale answer should show up as low confidence too"
+
+    # A respondent who simply skipped a question is NOT off the scale — a blank is a blank.
+    gappy = new.copy(); gappy.loc[gappy.index[:20], Q[0]] = np.nan
+    assert int(sk.classify_new(rule, gappy, id_col="respondent_id")[col].sum()) == 0, \
+        "a skipped answer was reported as an off-scale one"

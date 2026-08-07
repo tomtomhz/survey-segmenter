@@ -2606,6 +2606,43 @@ def _training_centre(params):
     return None
 
 
+def _warn_off_scale(out):
+    """Say it out loud when a follow-up file contains answers the original study never saw.
+
+    The count is in the exported CSV either way, but somebody typing a few hundred people from the
+    command line will not open it, and a "no answer" code of 99 quietly moves people into the
+    wrong segment — measured, 35 of 60 affected respondents, with the agreement against the truth
+    falling from 0.967 to 0.593.
+    """
+    col = "answers_off_the_original_scale"
+    if col not in out or not int((out[col] > 0).sum()):
+        return
+    n = int((out[col] > 0).sum())
+    print(f"\nNOTE: {n} of {len(out)} respondent(s) gave at least one answer outside the scale the "
+          "original study used — often a 'no answer' code such as 99 or -99. They have been scored "
+          f"anyway, and their '{col}' count and low confidence say so. Check that column before "
+          "using this list for anything.")
+
+
+def _answers_off_scale(sub, params, items):
+    """How many of each respondent's answers fall outside the range the study itself covered.
+
+    Only meaningful for the scalings that record the observed range — range scaling, which is the
+    default and what the app uses. The others fit a centre and a spread rather than bounds, so
+    there is nothing here to compare against and this returns None rather than a guess.
+    """
+    if params.get("scaling") != "range":
+        return None
+    lo = np.asarray(params.get("lo", []), float)
+    rng = np.asarray(params.get("range", []), float)
+    if lo.shape != (len(items),) or rng.shape != (len(items),):
+        return None
+    vals = sub.apply(pd.to_numeric, errors="coerce").to_numpy(float)
+    tol = 1e-9 + 0.01 * np.where(rng > 0, rng, 1.0)      # a hair's grace for float rounding
+    outside = (vals < lo - tol) | (vals > lo + rng + tol)
+    return pd.Series(np.where(np.isnan(vals), False, outside).sum(1).astype(int), index=sub.index)
+
+
 def classify_new(rule, df, id_col=None):
     """Assign new respondents to segments using a saved typing rule (parsed typing_rule.json).
     `df` must contain the rule's item columns. Returns the respondent id (from id_col, or a column
@@ -2659,6 +2696,20 @@ def classify_new(rule, df, id_col=None):
     inv = 1.0 / (d + 1e-9)
     out = pd.DataFrame({"segment": classes[d.argmin(1)],
                         "confidence": (inv.max(1) / inv.sum(1)).round(3)})
+    # Answers outside the scale the study was built on. Survey exports routinely code "no answer"
+    # as 99, 999 or -99, and such a value is not rejected by anything above: it is scaled with the
+    # study's own parameters, lands far outside the space, and drags the respondent to whichever
+    # segment is extreme on that item. Measured on a 250-person follow-up with 99 in one question,
+    # 35 of the 60 affected people were put in the wrong segment and the agreement with the truth
+    # fell from 0.967 to 0.593.
+    #
+    # Their confidence does drop sharply (0.34 against 0.72), so the signal was already there —
+    # what was missing is any reason for the reader to go looking. Counted per respondent so a
+    # list can be filtered on it, rather than corrected silently: whether 99 means "no answer" or
+    # is a real value is a fact about the questionnaire, not about the data.
+    off = _answers_off_scale(sub[items], rule["scale_params"], items)
+    if off is not None:
+        out["answers_off_the_original_scale"] = off
     idc = _pick_id_column(df, items, id_col)
     if idc:
         out.insert(0, idc, df[idc].to_numpy())
@@ -4334,6 +4385,7 @@ def _cli():
             print(f"Typed {len(out)} new respondent(s) -> {a.outdir}/new_assignments.csv")
         else:
             print(out.to_string(index=False))
+        _warn_off_scale(out)
         return
     if not a.csv:
         p.error("a respondent x item utilities CSV is required (or use --classify with --rule)")
