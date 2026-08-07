@@ -8,7 +8,7 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-07 (end of day) · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ **v1.5.9 + 1 commit**, 189 Python + 102 frontend tests green locally on Python 3.9 **and** 3.12 · **GitHub Actions is not running — see below**
+**Last updated:** 2026-08-07 (end of day) · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.5.9 + 1 commit**, 189 Python + 102 frontend tests green locally on Python 3.9 **and** 3.12 · **GitHub Actions is not running — see below**
 
 ---
 
@@ -21,14 +21,14 @@ stamps into a report, not by trusting the source tree. Tree clean.
 ### GitHub Actions has not run since 15:24 today — billing, not code
 
 Every run from `Re-measure the central accuracy claim` (15:33) onward failed **before starting a
-single step**, with the same annotation on all five jobs:
-
-> The job was not started because recent account payments have failed or your spending limit needs
-> to be increased.
+single step**: while the repo was private, Actions minutes were metered against a monthly
+allowance, running the full matrix on every push exhausted August's allowance in seven days, and
+GitHub then halts jobs rather than billing.
 
 So **nothing in v1.5.9 was tested by CI**, and no Windows build artifact exists for it. This was
 recorded as "CI green" for several hours on the strength of a stale reading; the lesson is that a
-green memory is not a green run, and `gh run list` costs one command.
+green memory is not a green run, and `gh run list` costs one command. The workflow has since been
+trimmed so an ordinary push runs two jobs rather than five — see the header of `ci.yml`.
 
 What was done instead, locally, and what it does and does not cover:
 
@@ -40,15 +40,15 @@ What was done instead, locally, and what it does and does not cover:
 | Ubuntu | **not covered at all.** Both local runs are macOS/arm64 |
 | Windows build | **not covered at all.** No artifact was produced |
 
-Fixing the billing and re-running CI is the single highest-value action available on this repo, and
-it is Tom's to do — it needs payment details, which the assistant must not handle.
+Re-running the full matrix on Ubuntu, and producing a Windows artifact somebody actually opens, is
+the single highest-value action outstanding on this repo.
 
 **v1.5.9 is the audit release.** Nothing in it came from a user report; all of it came from pointing
 the tool at data it had never seen and checking whether what it said was true. The one behaviour
 change is the distinct-patterns cap — a short survey can no longer be cut into more groups than its
-answers can distinguish. **That changes results on five-question surveys, which is what the original sponsor
-runs.** See CHANGELOG.md, which also records what was verified and deliberately left unchanged, so
-a later session does not repeat the measuring.
+answers can distinguish. **That changes results on five-question surveys**, which is the most common
+shape a short questionnaire takes. See CHANGELOG.md, which also records what was verified and
+deliberately left unchanged, so a later session does not repeat the measuring.
 
 ### No open findings
 
@@ -176,7 +176,7 @@ other than code" — see *Known limitations* below.
 
 | | |
 |---|---|
-| Repo | `github.com/tomtomhz/survey-segmenter` — **private**, MIT, owner `tomtomhz` |
+| Repo | `github.com/tomtomhz/survey-segmenter` — **public**, MIT, owner `tomtomhz` |
 | CI | Python 3.9 / 3.11 / 3.12 + a clean-install job, green |
 | Tests | 152 Python (`pytest`) + 99 frontend (`cd frontend && npm test`) |
 | Shipped app | **v1.5.0 release**: macOS `.app` (82 MB) and Windows `.exe`, built and smoke-tested by the **Desktop app** workflow. Never in git history. The team's copy lives in `~/Desktop/Survey Segmenter (app for the team)/`. |
@@ -221,9 +221,9 @@ expect it in *response handling*, not request construction.
   account has the beta and not every SDK knows the parameter.
 - **The binary lives in GitHub Releases, not git.** 190 MB of rebuildable artifact does not belong
   in every clone.
-- **`deliverables/` (in the parent workspace) is deliberately NOT on GitHub.** It contains ~100
-  named individuals' work email addresses — personal data under GDPR. Publishing needs a human
-  decision, not a tidy-up.
+- **Real study material is deliberately NOT on GitHub, and never becomes so as part of a tidy-up.**
+  Anything with named individuals in it is personal data under GDPR; publishing it needs a human
+  decision taken on purpose. Every data file in this repo is synthetic.
 
 ## MaxDiff / Hierarchical Bayes (added 2026-07-31)
 

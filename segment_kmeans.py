@@ -3466,8 +3466,9 @@ _DEMO_WORDS = {"gender", "sex", "age", "school", "university", "college", "count
                "postcode", "postal", "zip", "city", "town", "state", "province", "county",
                "municipality", "language", "race", "degree", "qualification", "diploma",
                "birthyear", "dob",
-               # Nordic equivalents — Swedish-language surveys are common, and a mis-detected 'Kön' or
-               # 'Universitet' would define the segments instead of describing them.
+               # Nordic equivalents, because a questionnaire fielded in Swedish or Norwegian labels
+               # its demographics in that language. A mis-detected 'Kön' or 'Universitet' would
+               # define the segments instead of describing them.
                "kön", "kjønn", "ålder", "alder", "universitet", "högskola", "hogskola",
                "lärosäte", "larosate", "land", "hemland", "nationalitet", "medborgarskap",
                "stad", "ort", "studieort", "kommun", "utbildning", "fakultet", "institution",
@@ -3485,7 +3486,8 @@ _NOMINAL_LEVELS_MAX = 100
 # it the number is a measurement or an amount attached to the person, and worth a second look.
 _RESPONSE_SCALE_MAX = 1000
 # A survey weight (e.g. post-stratification / design weight). Cluster UNWEIGHTED, but project the
-# segment SIZES to the population with these weights (studies often pool strata with weights).
+# segment SIZES to the population with these weights — the usual case being a study that pools
+# several sampling strata (schools, regions, panels) that were not sampled in their true proportions.
 _WEIGHT_WORDS = {"weight", "weights", "weighting", "vikt", "designweight", "poststrat"}
 
 

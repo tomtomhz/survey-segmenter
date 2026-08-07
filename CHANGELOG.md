@@ -11,11 +11,11 @@ data it had never seen and checking whether what it said was true.
 ### Changed
 
 - **A short survey can no longer be cut into more groups than its answers can distinguish.** Five
-  questions on a 1–5 scale asked of 400 people is a very common shape, and the tool would
-  happily look for eight segments in it. It now requires roughly four distinct answer patterns per
-  group before that group can be a type, and the report says in words why the search was narrowed
-  rather than silently searching a shorter range. **This changes results on short surveys** — the
-  shape short questionnaires take — which is why it is called out first.
+  questions on a 1–5 scale asked of 400 people is a very common shape, and the tool would happily
+  look for eight segments in it. It now requires roughly four distinct answer patterns per group
+  before that group can be a type, and the report says in words why the search was narrowed rather
+  than silently searching a shorter range. **This changes results on short surveys**, which is why
+  it is called out first.
 
 ### Fixed
 

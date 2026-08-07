@@ -90,6 +90,10 @@ cmd = [sys.executable, "-m", "PyInstaller", "--name", "Survey Segmenter", "--win
        "--add-data", f"webui{os.pathsep}webui",
        "run_app.py"]
 if sys.platform == "darwin":
+    # Reverse-DNS under the GitHub org that hosts the project, which is the convention for a
+    # project without its own domain. Changing this changes the app's IDENTITY to macOS: a build
+    # with a new identifier is a different application, so the first launch after this change asks
+    # for the usual 'Open Anyway' approval again even for someone who already granted it.
     cmd += ["--osx-bundle-identifier", "io.github.tomtomhz.surveysegmenter"]
 
 subprocess.run(cmd, check=True)

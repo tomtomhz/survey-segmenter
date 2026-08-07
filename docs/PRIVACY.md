@@ -1,8 +1,9 @@
 # Privacy and data protection
 
-Survey Segmenter processes survey responses, which in the EU and EEA means personal data under the
-GDPR. This document states exactly what the software does with that data, so the answer to "where
-does our respondent data go?" is a document rather than a recollection.
+Survey Segmenter processes survey responses, which in most jurisdictions — and always in the EU
+and EEA — means personal data under the GDPR. This document states exactly what the software does
+with that data, so the answer to "where does our respondent data go?" is a document rather than a
+recollection.
 
 ## The short version
 

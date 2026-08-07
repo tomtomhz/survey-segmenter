@@ -3227,8 +3227,8 @@ def test_swedish_survey_keeps_its_ordering_and_uses_its_pick_any_answers():
     survey down the categorical path and throws away the ordering it was measuring — the tool
     stops knowing that "Instämmer helt" is more than "Instämmer delvis". Found by sweeping
     realistic files: "Instämmer delvis inte" and "Håller delvis inte med" are the standard second
-    step on Swedish five-point scales and neither was listed. This matters because the original sponsor fields
-    Swedish surveys.
+    step on Swedish five-point scales and neither was listed — which matters for any study fielded
+    in Swedish, where that wording is the norm rather than the exception.
     """
     five = {
         "instämmer, partly-not wording": ["Instämmer inte alls", "Instämmer delvis inte",
