@@ -5047,3 +5047,49 @@ def test_no_chart_quietly_describes_fewer_people_than_the_study():
             if cid in specs and "segments" in specs[cid]:
                 assert len(specs[cid]["segments"]) == r["k"], (
                     f"the {cid} chart shows {len(specs[cid]['segments'])} of {r['k']} groups")
+
+
+def test_naming_the_groups_reaches_every_file_that_names_them():
+    """Once a team names its segments, every file that refers to them should use those names.
+
+    It did not: `segment_assignments.csv` gained a `group_name` column and a `group_names.csv`
+    appeared, while `group_profiles.csv` — the file describing what each group is like — still
+    said "Segment 0/1/2". One thing under two names, in two files a reader opens side by side,
+    which is the fault the report itself was cleaned of earlier.
+
+    The number stays everywhere, because that is what the files join on. What was missing was the
+    name beside it.
+    """
+    rng = np.random.default_rng(5)
+    n = 240
+    centres = np.array([[5, 1, 5, 1], [1, 5, 1, 5], [3, 3, 5, 5]], float)
+    who = rng.integers(0, 3, n)
+    X = np.clip(np.rint(centres[who] + rng.normal(0, 0.6, (n, 4))), 1, 5).astype(int)
+    df = pd.DataFrame(X, columns=[f"q{i+1}" for i in range(4)])
+    df.insert(0, "respondent_id", [f"P{i}" for i in range(n)])
+    with contextlib.redirect_stdout(io.StringIO()):
+        r = sk.run_analysis(df.to_csv(index=False).encode(),
+                            cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+
+    # The exported profiles must say what their first column is, or a spreadsheet shows a blank
+    # heading over the segment labels.
+    profiles = pd.read_csv(io.StringIO(r["files"]["group_profiles.csv"]))
+    assert not str(profiles.columns[0]).startswith("Unnamed"), \
+        f"the profiles file has a nameless first column: {list(profiles.columns)[:3]}"
+
+    # Now apply names the way the app does, and check both files carry them.
+    assign = pd.read_csv(io.StringIO(r["files"]["segment_assignments.csv"]))
+    groups = sorted(assign["segment"].unique())
+    names = [f"Mind-set {chr(65 + i)}" for i in range(len(groups))]
+    mapping = dict(zip(groups, names))
+
+    frame = pd.read_csv(io.StringIO(r["files"]["group_profiles.csv"]))
+    label = frame.columns[0]
+    numbers = frame[label].astype(str).str.extract(r"(\d+)")[0].astype("Int64")
+    assert numbers.notna().all(), "the profiles rows do not carry a segment number to join on"
+    frame.insert(1, "suggested name", [mapping[int(v)] for v in numbers])
+
+    assert list(frame["suggested name"]) == [mapping[g] for g in groups]
+    assert len(frame) == len(groups), "the profiles file does not have a row per group"
+    # And the number survives alongside the name, because that is the join key.
+    assert numbers.tolist() == list(groups)

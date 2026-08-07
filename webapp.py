@@ -614,6 +614,22 @@ def serve(port=8000):
             sess["files"]["group_names.csv"] = pd.DataFrame(
                 {"segment": groups, "name": [mapping[g] for g in groups],
                  "people": [int((assign[seg_col] == g).sum()) for g in groups]}).to_csv(index=False)
+            # The profiles file describes the same groups and was left labelled "Segment 0/1/2"
+            # while the assignments beside it carried the chosen names — one thing under two names,
+            # which is the fault the report itself was cleaned of. Give it the name as well; the
+            # number stays, because that is what the assignments join on.
+            profiles = sess["files"].get("group_profiles.csv")
+            if profiles:
+                try:
+                    frame = pd.read_csv(io.StringIO(profiles))
+                    label = frame.columns[0]
+                    named = frame[label].astype(str).str.extract(r"(\d+)")[0].astype("Int64")
+                    if named.notna().all():
+                        frame.insert(1, "suggested name",
+                                     [mapping.get(int(v), "") for v in named])
+                        sess["files"]["group_profiles.csv"] = frame.to_csv(index=False)
+                except Exception:
+                    pass                     # a profiles file we cannot parse is not worth failing over
             sess["names"] = names
             remember(body.get("session_id"))             # names must survive reopening the project
             self._json({"ok": True, "names": names, "downloads": sorted(sess["files"])})

@@ -1400,6 +1400,9 @@ def interpret(X_raw, labels, cfg):
     seg = pd.Series(labels, name="segment")
     centroids = X_raw.groupby(seg).mean()
     centroids.index = [f"Segment {c}" for c in centroids.index]
+    # Name the index, or the exported profiles open in Excel with a blank first heading that
+    # pandas reads back as "Unnamed: 0" — a column of segment labels with nothing saying so.
+    centroids.index.name = "segment"
     # A pick-any column has no meaningful mean, so the profile table carries the segment's most
     # common answer by name instead of the average of its codes.
     for it in nominal:
