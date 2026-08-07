@@ -208,6 +208,11 @@ one segment that dissolves on resampling.
 **19 of 21.** Both misses were overlapping segments, where it merged two into k=2 — and dropped
 to "moderate" both times it did.
 
+**Re-measured 2026-08-07**, after three separate changes to how k is chosen (the stability
+signal and tie-break in v1.5.2, the working set for large studies, and the distinct-patterns
+cap). Still 19 of 21, with the same single weak condition, and still never high confidence
+while wrong. Reproduce with `python3 references/kbench.py`.
+
 The single most important line in that table is the last one and the one before it. **It never
 reported high confidence while wrong**, and it never invented segments in noise. A tool that is
 occasionally conservative is usable; a tool that is confidently wrong is worse than no tool,
