@@ -4738,3 +4738,39 @@ def test_the_report_agrees_with_itself_in_every_regime():
     for expected in ("40%", "sizes sum to", "sizes table lists", "labelled both ways",
                      "essentially random", "start with the biggest"):
         assert expected in joined, f"the checker misses {expected!r}: {caught}"
+
+
+def test_the_report_actually_contains_tables():
+    """Every table in the report goes through DataFrame.to_markdown, which needs `tabulate`.
+
+    It was declared an optional extra described as "prettier Markdown tables", and that was wrong
+    in a way nobody would notice on a machine that had it: without tabulate the report contains no
+    tables at all. Measured with it blocked, eight markdown tables become zero and eight <table>
+    elements in the HTML become zero, so segment sizes, the stability checks, the centroids and the
+    whole k-selection panel arrive as run-together text. Neither CI nor the app build installed the
+    extra, so it was present only where it happened to be — the third capability to be declared
+    optional and then be quietly missing everywhere else, after the dip test and the decimal-comma
+    repair.
+    """
+    assert "|" in _md_probe(), (
+        "DataFrame.to_markdown is not producing a markdown table — `tabulate` is missing from this "
+        "environment, and the report will contain no tables")
+
+    rng = np.random.default_rng(0)
+    centres = np.array([[5, 1, 5, 1], [1, 5, 1, 5], [3, 3, 5, 5]], float)
+    who = rng.integers(0, 3, 200)
+    X = np.clip(np.rint(centres[who] + rng.normal(0, 0.6, (200, 4))), 1, 5).astype(int)
+    df = pd.DataFrame(X, columns=[f"q{i+1}" for i in range(4)])
+    df.insert(0, "respondent_id", [f"P{i}" for i in range(200)])
+    with contextlib.redirect_stdout(io.StringIO()):
+        r = sk.run_analysis(df.to_csv(index=False).encode(),
+                            cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+
+    assert r["digest"].count("|:--") >= 4, "the report's markdown tables are not tables"
+    assert r["report_html"].count("<table") >= 4, (
+        "the HTML report has no tables in it — a reader gets run-together text where the segment "
+        "sizes and stability checks should be")
+
+
+def _md_probe():
+    return sk._md(pd.DataFrame({"a": [1], "b": [2]}))

@@ -79,6 +79,12 @@ cmd = [sys.executable, "-m", "PyInstaller", "--name", "Survey Segmenter", "--win
        # reports the second cluster-tendency check as unavailable — a silent downgrade, which is
        # the kind this project has shipped before.
        "--collect-all", "diptest",
+       # pandas imports tabulate lazily, from inside to_markdown, so static analysis never sees it
+       # and every packaged release shipped without it — which means every report shipped with no
+       # tables at all, the segment sizes and stability checks arriving as run-together text. The
+       # same shape as matplotlib.backends.backend_svg above: a lazy import is invisible until
+       # something runs the code path, and the smoke test now does.
+       "--collect-all", "tabulate",
        # The interface itself. Without this the packaged app starts, serves its API, and shows
        # nothing at all — the failure looks like a broken server rather than a missing folder.
        "--add-data", f"webui{os.pathsep}webui",
@@ -234,6 +240,14 @@ def _smoke_test():
                  "the groups")]:
             if phrase not in report:
                 missing.append(f"{what} (expected {phrase!r} in the report)")
+        # Tables. Every one goes through DataFrame.to_markdown, which needs `tabulate`; without it
+        # the report has NO tables — segment sizes, the stability checks, the centroids and the
+        # whole k-selection panel arrive as run-together text. It was declared an optional extra
+        # that neither CI nor this script installed, so every packaged release shipped that way,
+        # and nothing noticed because the source tree has tabulate and the tests run there.
+        if result.get("report_html", "").count("<table") < 4:
+            missing.append("the report has no tables in it (tabulate did not survive bundling) — "
+                           "the segment sizes and stability checks will be run-together text")
         specs = sum(1 for c in result["charts"] if c.get("spec"))
         if specs < len(result["charts"]):
             missing.append(f"only {specs} of {len(result['charts'])} charts carry the data behind "

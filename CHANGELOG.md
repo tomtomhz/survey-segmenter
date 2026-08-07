@@ -3,6 +3,29 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.5.6] — 2026-08-07
+
+### Fixed
+
+- **Every packaged release has been producing reports with no tables in them.** Segment sizes, the
+  per-segment stability checks, the centroids and the whole k-selection panel arrived as
+  run-together text rather than tables — in the app, for as long as there has been an app.
+
+  Every table is rendered by `DataFrame.to_markdown`, which needs `tabulate`. pandas imports it
+  lazily, from inside that call, so PyInstaller's static analysis never saw it and never bundled
+  it. The same shape as the chart backend that went missing once before: a lazy import is
+  invisible until something runs the code path. It was also declared an *optional* extra described
+  as "prettier Markdown tables", which is why nothing looked wrong — the description was incorrect,
+  since without it there are no tables at all.
+
+  `tabulate` is now a core dependency and is collected explicitly into the build. **Measured on the
+  packaged binary: 0 tables before, 8 after.**
+
+- The packaged smoke test now fails the build if the report comes back without tables. It was
+  found only because a CI run went red on an unrelated assertion; nothing in the app itself
+  complained, and the source tree has `tabulate`, so every test passed on every machine that
+  mattered.
+
 ## [1.5.5] — 2026-08-06
 
 **Read this one if you have run a segmentation on 1.5.4 or earlier.** The numbers were right; some

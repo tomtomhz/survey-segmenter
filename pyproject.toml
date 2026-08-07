@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "segment-kmeans"
-version = "1.5.5"                 # keep in sync with __version__ in segment_kmeans.py
+version = "1.5.6"                 # keep in sync with __version__ in segment_kmeans.py
 description = "Market-segmentation-grade clustering (k-means, Gaussian mixture, latent class) with stability-first validation, a typing tool, automatic survey-file handling, and a no-expertise web UI."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -26,11 +26,19 @@ dependencies = [
     # dip. The tool still runs without it — the check reports itself as not run — but a build that
     # ships without it is quietly weaker, so it belongs here rather than under an extra.
     "diptest>=0.9",
+    # Every table in the report is rendered through DataFrame.to_markdown, which requires this.
+    # It was an optional extra called "prettier Markdown tables", and that description was wrong:
+    # without it the report contains no tables AT ALL. Measured with it blocked — eight markdown
+    # tables become zero, and eight <table> elements in the HTML report become zero, so segment
+    # sizes, the stability checks, the centroids and the whole k-selection panel arrive as
+    # run-together text. Neither CI nor build_app.py installed the extra, so it was present only
+    # on the machine that happened to have it, which is the third time a capability has been
+    # declared optional and then quietly missing everywhere else.
+    "tabulate>=0.9",
 ]
 
 [project.optional-dependencies]
 excel = ["openpyxl>=3.0"]         # read .xlsx survey exports
-tables = ["tabulate>=0.9"]        # prettier Markdown tables in the report
 ai = ["anthropic>=0.40"]          # "ask Claude about your segments" chat (optional; bring your own key)
 dev = ["pytest>=7.0", "pyflakes>=3.0"]
 
