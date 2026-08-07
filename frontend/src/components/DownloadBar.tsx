@@ -97,6 +97,15 @@ function ScoreSummary({ result, scored }: { result: Analysis; scored: ScoreResul
       <b>{scored.n} people scored.</b> {breakdown}
       <br />
       <span style={{ color: 'var(--muted)' }}>Average confidence {scored.mean_confidence}.</span>
+      {!!scored.off_scale && (
+        <div className="note warn" style={{ margin: '8px 0 0' }}>
+          <b>{scored.off_scale} of {scored.n} answered something outside your original scale</b> —
+          usually a &ldquo;no answer&rdquo; code such as 99. They have still been scored, but a value
+          the study never saw pulls someone towards whichever group is extreme on that question, so
+          their group is unreliable. The column{' '}
+          <code>answers_off_the_original_scale</code> in the download says who they are.
+        </div>
+      )}
       <div className="chips" style={{ margin: '8px 0 0' }}>
         <a className="chip" href={api.downloadUrl(result.session_id, scored.file)} download>
           Download the scored list (CSV)

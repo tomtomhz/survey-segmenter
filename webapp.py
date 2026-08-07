@@ -561,9 +561,16 @@ def serve(port=8000):
             sess["files"]["scored_new_people.csv"] = out.to_csv(index=False)
             remember(sid)                                # keep the scored list with the project
             counts = out[group_col].value_counts().sort_index()
+            # How many of these people answered something the original study never saw — a "no
+            # answer" code such as 99 or -99. The scored CSV has carried this per respondent since
+            # it was added, and the command line prints it, but the app said nothing, so the
+            # people most likely to be scoring a follow-up were the least likely to hear about it.
+            off_col = "answers_off_the_original_scale"
+            off_scale = int((out[off_col] > 0).sum()) if off_col in out.columns else 0
             self._json({"ok": True, "n": int(len(out)),
                         "breakdown": {str(k): int(v) for k, v in counts.items()},
                         "mean_confidence": round(float(out["confidence"].mean()), 2),
+                        "off_scale": off_scale,
                         "file": "scored_new_people.csv"})
 
         def _do_name(self):

@@ -103,6 +103,9 @@ export interface ScoreResult {
   n: number
   breakdown: Record<string, number>
   mean_confidence: number | string
+  /** How many of the scored people answered something outside the scale the study used —
+   *  typically a "no answer" code such as 99. Optional so an older server still parses. */
+  off_scale?: number
   file: string
 }
 

@@ -156,6 +156,7 @@ header .sp{flex:1}
  color:var(--ink-soft);font-size:.93rem;box-shadow:var(--shadow-sm)}
 .note b{color:var(--ink)}
 .note.err{border-color:var(--risk);background:var(--risk-bg);color:var(--ink)}
+.note.warn{border-color:var(--warn);background:var(--warn-bg);color:var(--ink)}
 /* Also used on real <button> elements. Anything that acts like a button is one — a styled span
    with role="button" can be focused but not activated from the keyboard, which is a trap. */
 .link{color:var(--accent);cursor:pointer;text-decoration:underline;text-underline-offset:2px;
