@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 import charts
 import clusterability
 import kprototypes as kp
+import maxdiff as _maxdiff
 import webapp
 from sklearn.metrics import adjusted_rand_score
 from sklearn.cluster import KMeans
@@ -5214,3 +5215,48 @@ def test_a_useless_pick_any_question_is_flagged_like_a_useless_rating():
     assert vi.loc["brand_noise", "eta_squared"] < 0.05
     assert "near-noise" in vi.loc["brand_noise", "role"]
     assert vi.loc["q_noise", "eta_squared"] < 0.05
+
+
+def test_a_best_worst_export_is_read_in_the_words_real_exports_use():
+    """A MaxDiff set is only usable if both the best and the worst answer can be identified in it.
+    Any set where they cannot is dropped — silently — so an unrecognised word in the choice column
+    empties the whole file and the run fails having read nothing.
+
+    Only the literal English "best" and "worst" were recognised. A Swedish study writing "bäst"
+    and "sämst" — which is this tool's own user base, and a language it goes to lengths for
+    elsewhere — lost every observation, and the failure named no cause.
+    """
+    items = ["A", "B", "C", "D", "E"]
+    rng = np.random.default_rng(1)
+    rows = []
+    for i in range(60):
+        u = rng.normal(0, 1, len(items))
+        for s in range(8):
+            shown = rng.choice(len(items), 4, replace=False)
+            v = u[shown] + rng.gumbel(0, 1, 4)
+            best, worst = shown[v.argmax()], shown[v.argmin()]
+            for it in shown:
+                rows.append({"respondent_id": f"R{i}", "set": s, "item": items[it],
+                             "choice": "best" if it == best else "worst" if it == worst else ""})
+    base = pd.DataFrame(rows)
+
+    for label, mapping in [
+            ("English", {"best": "best", "worst": "worst", "": ""}),
+            ("Swedish", {"best": "bäst", "worst": "sämst", "": ""}),
+            ("most/least", {"best": "Most", "worst": "Least", "": ""}),
+            ("Norwegian", {"best": "beste", "worst": "verste", "": ""})]:
+        df = base.assign(choice=base["choice"].map(mapping))
+        with contextlib.redirect_stdout(io.StringIO()):
+            utilities = _maxdiff.utilities_from_export(df).as_frame()
+        assert utilities.shape == (60, len(items)), f"{label} export lost respondents or items"
+        assert np.isfinite(utilities.to_numpy()).all(), f"{label} produced non-finite utilities"
+
+    # Words that mean nothing here must still fail — but say why, rather than handing back a
+    # sentinel. The message has to name the choice column, since that is the cause every time.
+    nonsense = base.assign(choice=base["choice"].map({"best": "yes", "worst": "no", "": ""}))
+    with pytest.raises(ValueError) as caught:
+        with contextlib.redirect_stdout(io.StringIO()):
+            _maxdiff.utilities_from_export(nonsense)
+    explained = sk._explain_run_error(str(caught.value))
+    assert "choice column" in explained and "best" in explained, explained
+    assert not explained.startswith("_"), "the reader is being shown an internal sentinel"

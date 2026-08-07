@@ -3828,6 +3828,16 @@ _FRIENDLY = {
     "_BAD_FILE":
         ("I could not read that as a survey table. It looks empty, or it is not a spreadsheet\n"
          "(CSV or Excel) file. Export your survey with one row per person and try again."),
+    # This used to reach the reader as the bare sentinel, naming no cause. Almost always the cause
+    # is the choice column: every set where the best and the worst cannot both be identified is
+    # dropped, so an unrecognised word empties the file in silence.
+    "_MAXDIFF_TOO_FEW":
+        ("That looks like a best-worst (MaxDiff) export, but I could not read enough complete\n"
+         "sets from it to score anybody.\n"
+         "Each set needs exactly one row marked as the best answer and one as the worst. I read\n"
+         "best/worst, most/least, and their Nordic equivalents (bäst/sämst, beste/verste,\n"
+         "paras/huonoin); anything else in that column is treated as 'just shown'.\n"
+         "Check the choice column, and that each person answered at least a few sets."),
 }
 
 

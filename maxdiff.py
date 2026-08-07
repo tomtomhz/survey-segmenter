@@ -247,6 +247,27 @@ def looks_like_maxdiff(df) -> bool:
     return have == 4
 
 
+# What a best-worst export actually writes in its choice column. Only the literal English "best"
+# and "worst" were recognised, and anything else made every set look incomplete: each one was
+# dropped in silence and the run then failed with a "too few" error that named no cause. A Swedish
+# study writing "bäst" and "sämst" — this tool's own users — lost every observation that way, and
+# "most"/"least" is at least as common in English tooling as best/worst.
+_CHOICE_WORDS = {
+    "best": "best", "worst": "worst",
+    "most": "best", "least": "worst",
+    "b": "best", "w": "worst",
+    "most important": "best", "least important": "worst",
+    "most preferred": "best", "least preferred": "worst",
+    "bäst": "best", "sämst": "worst",           # Swedish
+    "basta": "best", "bast": "best", "samst": "worst", "sämsta": "worst",
+    "bästa": "best", "viktigast": "best", "minst viktig": "worst",
+    "beste": "best", "verste": "worst",         # Norwegian / Danish
+    "bedste": "best", "værst": "worst", "vaerst": "worst",
+    "paras": "best", "huonoin": "worst",        # Finnish
+    "": "", "nan": "", "none": "",
+}
+
+
 def read_maxdiff(df):
     """Tidy long MaxDiff table -> (design, best_pos, worst_pos, item_names, respondent_ids).
 
@@ -268,7 +289,7 @@ def read_maxdiff(df):
 
     d = df[[pick["respondent"], pick["set"], pick["item"], pick["choice"]]].copy()
     d.columns = ["respondent", "set", "item", "choice"]
-    d["choice"] = d["choice"].astype(str).str.strip().str.lower()
+    d["choice"] = d["choice"].astype(str).str.strip().str.lower().map(_CHOICE_WORDS).fillna("")
 
     items = sorted(d["item"].astype(str).unique())
     item_ix = {n: i for i, n in enumerate(items)}
