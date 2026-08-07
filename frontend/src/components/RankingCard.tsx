@@ -17,6 +17,12 @@ export function RankingCard({ ranking }: { ranking?: RankedItem[] | null }) {
   const tied = ranking.filter((r) => r.clear_of_next === false)
   const strongest = ranking[0]
   const weakest = ranking[ranking.length - 1]
+  // Every position unsettled means the study found no differences at all, not that it found a
+  // ranking with caveats. `clear_of_next` is null on the last row, which is absence of a question
+  // rather than a negative answer, so it is excluded from both counts.
+  const pairs = ranking.filter((r) => r.clear_of_next !== null && r.clear_of_next !== undefined)
+  const nothingSettled = pairs.length > 0 && pairs.every((r) => r.clear_of_next === false)
+  const topUnsettled = !nothingSettled && ranking[0]?.clear_of_next === false
   // `!= null` deliberately, not `!== null`: the type says `number | null`, but JSON can simply
   // omit the key, and TypeScript cannot see that. A row without `low` at all then passed the
   // `!== null` test and reached `row.low.toFixed(2)` — "Cannot read properties of undefined".
@@ -32,9 +38,27 @@ export function RankingCard({ ranking }: { ranking?: RankedItem[] | null }) {
   return (
     <div className="card">
       <h3 style={{ margin: '0 0 2px' }}>What matters most</h3>
+      {/* The opening line has to agree with the table under it. Announcing a winner and then
+          explaining two lines later that nothing was separated is the card arguing with itself. */}
       <p className="hint" style={{ margin: '0 0 12px' }}>
-        Across everyone, before any grouping. <b>{strongest.item}</b> comes out strongest and{' '}
-        <b>{weakest.item}</b> weakest.
+        {nothingSettled ? (
+          <>
+            Across everyone, before any grouping — except that <b>this study did not separate these
+            items</b>. <b>{strongest.item}</b> scores highest and <b>{weakest.item}</b> lowest, but
+            no item is clearly ahead of any other, so do not read this as a ranking.
+          </>
+        ) : topUnsettled ? (
+          <>
+            Across everyone, before any grouping. <b>{strongest.item}</b> scores highest and{' '}
+            <b>{weakest.item}</b> lowest — though <b>{strongest.item}</b> is not clearly ahead of{' '}
+            <b>{ranking[1].item}</b>, so treat the top as a pair rather than a winner.
+          </>
+        ) : (
+          <>
+            Across everyone, before any grouping. <b>{strongest.item}</b> comes out strongest and{' '}
+            <b>{weakest.item}</b> weakest.
+          </>
+        )}
       </p>
       <table className="rank">
         <thead>

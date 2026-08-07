@@ -96,6 +96,43 @@ describe('the overall preference ranking', () => {
     expect(screen.getByText(/2 positions are not settled/)).toBeTruthy()
   })
 
+  it('does not announce a winner when nothing was separated', () => {
+    // Sorting noise still produces a first row. Presenting it as "comes out strongest" above a
+    // table that says every position is unsettled is the card contradicting itself.
+    render(
+      <RankingCard
+        ranking={[
+          row({ rank: 1, item: 'Price', score: 0.06, low: -0.3, high: 0.4, prob_ahead: 0.55,
+                clear_of_next: false }),
+          row({ rank: 2, item: 'Speed', score: 0.01, low: -0.35, high: 0.36, prob_ahead: 0.52,
+                clear_of_next: false }),
+          row({ rank: 3, item: 'Brand', score: -0.07, low: -0.42, high: 0.3, prob_ahead: null,
+                clear_of_next: null }),
+        ]}
+      />,
+    )
+    expect(screen.getByText(/did not separate these items/)).toBeTruthy()
+    expect(screen.getByText(/do not read this as a ranking/)).toBeTruthy()
+    expect(screen.queryByText(/comes out strongest/)).toBeNull()
+  })
+
+  it('calls the top a pair when the leader is not clear of second place', () => {
+    render(
+      <RankingCard
+        ranking={[
+          row({ rank: 1, item: 'Price', score: 0.6, low: 0.3, high: 0.9, prob_ahead: 0.6,
+                clear_of_next: false }),
+          row({ rank: 2, item: 'Speed', score: 0.55, low: 0.25, high: 0.85, prob_ahead: 1 }),
+          row({ rank: 3, item: 'Brand', score: -1.2, low: -1.5, high: -0.9, prob_ahead: null,
+                clear_of_next: null }),
+        ]}
+      />,
+    )
+    expect(screen.getByText(/treat the top as a pair rather than a winner/)).toBeTruthy()
+    expect(screen.queryByText(/did not separate these items/)).toBeNull()
+    expect(screen.queryByText(/comes out strongest/)).toBeNull()
+  })
+
   it('does not hedge a ranking the data fully supports', () => {
     // A caveat that fires on clean data teaches the reader to ignore the caveat.
     render(

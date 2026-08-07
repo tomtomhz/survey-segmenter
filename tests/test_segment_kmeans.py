@@ -5467,3 +5467,32 @@ def test_the_probability_is_read_from_the_right_pair_of_items():
     # And the 95% line is applied to those probabilities, not to anything else.
     assert bool(rank.loc[0, "separated_from_next"]) is False      # 0.75 is under the line
     assert bool(rank.loc[1, "separated_from_next"]) is True       # 1.00 clears it
+
+
+def test_the_opening_sentence_does_not_claim_more_than_the_table_below_it():
+    """A section that announces a winner and then explains that nothing was separated is the
+    report arguing with itself — the exact fault fixed twice before, in the confidence wording and
+    in the persistence table.
+
+    On items with no real differences the ranking still has a first row, because sorting noise
+    produces an order. The prose must not present that row as a finding.
+    """
+    md = pytest.importorskip("maxdiff")
+
+    flat, _n, _t = _homogeneous_best_worst([0.0] * 6, n_resp=60, n_task=6, seed=2)
+    with contextlib.redirect_stdout(io.StringIO()):
+        est = md.utilities_from_export(flat, n_draws=1200, n_burn=400, progress=False)
+    assert not any(bool(v) for v in est.ranking()["separated_from_next"][:-1]), (
+        "the fixture separated something; it can no longer test the no-differences wording")
+    prose = sk._maxdiff_ranking_section(est)
+    assert "did not separate these items at all" in prose
+    assert "should not be read as a ranking" in prose
+    assert "comes out strongest" not in prose, "named a winner on data with no differences in it"
+
+    clean, _n2, _t2 = _homogeneous_best_worst([2.0, 1.0, 0.0, -1.0, -2.0, -3.0], n_resp=200,
+                                              n_task=10, seed=3)
+    with contextlib.redirect_stdout(io.StringIO()):
+        est2 = md.utilities_from_export(clean, n_draws=1200, n_burn=400, progress=False)
+    prose2 = sk._maxdiff_ranking_section(est2)
+    assert "comes out strongest" in prose2, "hedged a ranking with a full point between each item"
+    assert "did not separate these items" not in prose2

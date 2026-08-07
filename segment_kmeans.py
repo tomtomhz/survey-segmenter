@@ -3965,13 +3965,31 @@ def _maxdiff_ranking_section(est):
     show["score"] = show["score"].map(lambda v: f"{v:+.2f}")
 
     top, bottom = rank.iloc[0]["item"], rank.iloc[-1]["item"]
+    # The opening sentence has to know what the table knows. Asserting "X comes out strongest" and
+    # then spending the next paragraph explaining that nothing is separated is the report arguing
+    # with itself, which is a fault this tool has had to fix twice elsewhere. On data with no real
+    # differences every position is unsettled, and the lead must say so rather than name a winner
+    # picked out of noise.
+    settled = ([bool(rank.iloc[i]["separated_from_next"]) for i in range(len(rank) - 1)]
+               if has_prob else [])
+    if has_prob and not any(settled):
+        lead = (f"Before any grouping: this is what your respondents want, taken together — except "
+                f"that **this study did not separate these items at all**. **{top}** scores highest "
+                f"and **{bottom}** lowest, but no item is clearly ahead of any other, so the order "
+                f"below should not be read as a ranking.")
+    elif has_prob and not settled[0]:
+        lead = (f"Before any grouping: this is what your respondents want, taken together. "
+                f"**{top}** scores highest and **{bottom}** lowest — though **{top}** is not "
+                f"clearly ahead of **{rank.iloc[1]['item']}**, so treat the top of this list as a "
+                f"pair rather than a winner.")
+    else:
+        lead = (f"Before any grouping: this is what your respondents want, taken together. "
+                f"**{top}** comes out strongest and **{bottom}** weakest.")
     # disable_numparse, or tabulate re-parses the formatted strings as numbers and re-formats them
     # its own way: "+1.50" comes back as "1.5" and "+2.00" as "2", so a column that was deliberately
     # aligned to two decimals arrives ragged. The signs matter here too — this scale is centred on
     # zero, so whether a number is positive is the first thing being read.
-    lines = ["## What matters most, overall", "",
-             f"Before any grouping: this is what your respondents want, taken together. "
-             f"**{top}** comes out strongest and **{bottom}** weakest.", "",
+    lines = ["## What matters most, overall", "", lead, "",
              show.to_markdown(index=False, disable_numparse=True), ""]
 
     if has_prob:
