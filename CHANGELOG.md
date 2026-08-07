@@ -3,6 +3,19 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.5.8] — 2026-08-07
+
+### Fixed
+
+- **The app now tells you about "no answer" codes in a follow-up file.** 1.5.7 counted them per
+  respondent and warned from the command line, and the scored CSV carried the column — but the app
+  itself said nothing, so the people most likely to be scoring a follow-up were the least likely to
+  hear about it. It showed *"250 people scored. Average confidence 0.58."* with no hint that sixty
+  of them had a 99 in one question and had been pulled towards whichever group is extreme on it.
+
+  The summary now says how many, why it matters, and which column in the download identifies them.
+  It stays quiet when there are none.
+
 ## [1.5.7] — 2026-08-07
 
 From a full audit run against the built app rather than the source tree.
