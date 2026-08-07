@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-07 (end of day) · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.6.1**, 202 Python + 111 frontend tests green locally on Python 3.9 **and** 3.12 · **GitHub Actions is not running — see below**
+**Last updated:** 2026-08-07 (end of day) · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.6.2**, 207 Python + 111 frontend tests green locally on Python 3.9 **and** 3.12 · **GitHub Actions is not running — see below**
 
 ---
 
 ## Session state — 2026-08-07, end of day (read this first)
 
-**Released today: v1.5.1 → v1.6.1.** The team copy at `~/Desktop/Survey Segmenter (app for the
-team)/` is on **1.6.1** — verified by asking the shipped binary itself, over HTTP, which version it
+**Released today: v1.5.1 → v1.6.2.** The team copy at `~/Desktop/Survey Segmenter (app for the
+team)/` is on **1.6.2** — verified by asking the shipped binary itself, over HTTP, which version it
 stamps into a report, not by trusting the source tree. Tree clean.
 
 ### GitHub Actions has not run since 15:24 today — billing, not code
@@ -34,8 +34,8 @@ What was done instead, locally, and what it does and does not cover:
 
 | | Covered |
 |---|---|
-| Python 3.9.6 (oldest in the CI matrix) | 202 passed |
-| Python 3.12.13, numpy 2.5.1, pandas 3.0.5 (newest) | 202 passed, no skips, all extras installed |
+| Python 3.9.6 (oldest in the CI matrix) | 207 passed |
+| Python 3.12.13, numpy 2.5.1, pandas 3.0.5 (newest) | 207 passed, no skips, all extras installed |
 | Python 3.11 | not run — bracketed by the two above, not directly tested |
 | Ubuntu | **not covered at all.** Both local runs are macOS/arm64 |
 | Windows build | **not covered at all.** No artifact was produced |
@@ -76,8 +76,10 @@ verdict below is bounded rather than unconditional.
    matter most and least — now goes through it. Against the classical best-minus-worst score on the
    same data: Spearman 1.0000, Pearson 0.9986. It also independently found three segments, the
    number that package's own authors report. Reading it required two fixes; see CHANGELOG 1.6.1.
-   What remains unseen is a **Qualtrics/SurveyMonkey** export specifically, whose column naming
-   nobody here has a sample of.
+   A **Qualtrics/Sawtooth wide export** — one row per person — is still unseen as a real file,
+   but its shape is now recognised and refused with instructions rather than silently clustered as
+   ratings, which is what it did before (see CHANGELOG 1.6.2). Reading one properly needs a real
+   sample, because the code polarity cannot be inferred from the data.
 3. **Nobody has hand-clicked the Windows build** — and as of today nobody can, because CI is not
    running and no Windows artifact exists for anything after v1.5.8. Blocked on the billing fix
    above.
@@ -104,7 +106,7 @@ Nothing broken that I know of. The remaining gaps are all blocked on something o
 | | |
 |---|---|
 | Live Claude API round-trip | Deliberately unverified — no key is used. The no-key path gives a clean error |
-| HB MaxDiff on real responses | Now validated on 350 real respondents: Spearman 1.0000 against the classical score. A Qualtrics-shaped export is still unseen |
+| HB MaxDiff on real responses | Validated on 350 real respondents: Spearman 1.0000 against the classical score. A real wide (Qualtrics/Sawtooth) export is still unseen; its shape is refused with guidance rather than misread |
 | The Windows build | CI-verified only up to v1.5.8; nobody has hand-clicked it |
 
 ## Session state — 2026-08-07 (earlier)

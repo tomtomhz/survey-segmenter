@@ -5647,3 +5647,71 @@ def test_a_best_worst_file_missing_a_column_is_explained_not_signalled():
     assert "best-worst" in explained and "one row per item" in explained.lower()
     assert "one row per person" not in explained.split("not one row per person")[0], (
         "still telling the reader a best-worst file should have one row per person")
+
+
+def _wide_best_worst(n_resp=80, seed=4):
+    """A best-worst export the way Qualtrics and Sawtooth write one: a row per PERSON, a column
+    per (task, item), and a small code in each cell — commonly 3 for the item picked best, 1 for
+    worst, 2 for the others shown."""
+    rng = np.random.default_rng(seed)
+    items = ["Price", "Speed", "Support", "Design", "Range", "Eco"]
+    strength = np.array([2.0, 1.2, 0.4, -0.4, -1.2, -2.0])
+    rows = []
+    for person in range(n_resp):
+        rec = {"ResponseId": f"R_{person:04d}"}
+        for task in range(1, 7):
+            shown = rng.choice(len(items), 4, replace=False)
+            u = strength[shown] + rng.gumbel(0, 1, 4)
+            best, worst = shown[u.argmax()], shown[u.argmin()]
+            for i in shown:
+                rec[f"Q{task}_{i + 1}...-{items[i]}"] = 3 if i == best else (1 if i == worst else 2)
+        rows.append(rec)
+    return pd.DataFrame(rows)
+
+
+def test_a_best_worst_export_saved_one_row_per_person_is_refused_not_guessed():
+    """The silent failure this catches is the worst kind the tool can produce.
+
+    Qualtrics and Sawtooth write MaxDiff wide, and nothing in such a file says it is a preference
+    exercise. It was therefore read as an ordinary rating grid and the response CODES were
+    clustered as if they were scores: an 80-person export came back as two confident segments with
+    no warning anywhere.
+
+    It is refused rather than read because the layout is recoverable but the POLARITY is not.
+    Whether 3 means best or 1 means best is a fact about how the survey was built, and guessing it
+    would invert every ranking the tool then produced. `choicetools`, which does read these files,
+    makes the analyst state it for the same reason.
+    """
+    pytest.importorskip("maxdiff")
+    wide = _wide_best_worst()
+    with pytest.raises(ValueError) as caught:
+        with contextlib.redirect_stdout(io.StringIO()):
+            sk.run_analysis(wide.to_csv(index=False).encode(),
+                            cfg=sk.SegmentationConfig(k_min=2, k_max=3, **FAST))
+
+    explained = sk._explain_run_error(str(caught.value))
+    assert "_MAXDIFF" not in explained, "an internal sentinel is being shown to the reader"
+    # The message has to be actionable: name the problem, and show the shape that works.
+    assert "one row per" in explained.lower()
+    assert "respondent_id, task, item, choice" in explained
+    assert "upside down" in explained, "does not say why guessing the codes would be dangerous"
+
+
+@pytest.mark.parametrize("label, build", [
+    # Every one of these is an ORDINARY survey with Qualtrics-style matrix naming. Refusing any of
+    # them would be worse than the defect being fixed: a valid file turned away.
+    ("5-point matrix", lambda r: {f"Q{q}_{i}": r.integers(1, 6, 300)
+                                  for q in (1, 2, 3) for i in range(1, 6)}),
+    # Three points is the dangerous one: "exactly one lowest and one highest" happens by chance.
+    ("3-point matrix", lambda r: {f"Q{q}_{i}": r.integers(1, 4, 300)
+                                  for q in (1, 2, 3) for i in range(1, 5)}),
+    ("binary pick-any", lambda r: {f"Q{q}_{i}": r.integers(0, 2, 300)
+                                   for q in (1, 2, 3) for i in range(1, 6)}),
+    ("0-10 sliders", lambda r: {f"S{q}_{i}": r.integers(0, 11, 300)
+                                for q in (1, 2, 3) for i in range(1, 5)}),
+])
+def test_the_wide_guard_does_not_turn_away_ordinary_matrix_surveys(label, build):
+    md = pytest.importorskip("maxdiff")
+    df = pd.DataFrame(build(np.random.default_rng(2)))
+    assert not md.looks_like_wide_best_worst(df), (
+        f"an ordinary {label} with matrix column names was refused as a best-worst export")

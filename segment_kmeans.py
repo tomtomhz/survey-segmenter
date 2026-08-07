@@ -169,7 +169,7 @@ for _m in ("divide by zero encountered in matmul", "overflow encountered in matm
            "invalid value encountered in matmul"):
     warnings.filterwarnings("ignore", message=_m, category=RuntimeWarning)
 
-__version__ = "1.6.1"    # keep in sync with pyproject.toml
+__version__ = "1.6.2"    # keep in sync with pyproject.toml
 
 # Optional "ask Claude about your segments" add-on. Imported here (not lazily) so the packaged app
 # bundles it; wrapped so a missing file/SDK never stops the core segmentation tool from loading.
@@ -3852,6 +3852,24 @@ def _explain_run_error(msg):
                 "choices. Mixing it with word answers would invent one category per person and "
                 "produce a confident-looking but meaningless result.\n\nEither pick questions that "
                 "are ALL numbers, or pick ones that are all multiple-choice.")
+    if msg.startswith("_MAXDIFF_WIDE:"):
+        n = msg.split(":", 1)[1]
+        return (f"That looks like a best-worst (MaxDiff) survey saved with one row per PERSON — I "
+                f"found {n} question blocks where each person has exactly one top pick and one "
+                f"bottom pick.\n\n"
+                "I stopped instead of analysing it, because a file like this does not say which "
+                "code means 'best'. Some tools write 3 for the best item and 1 for the worst, "
+                "others the other way round, and choosing wrong would turn the whole ranking "
+                "upside down without either of us noticing.\n\n"
+                "Reshape it to one row per item SHOWN, with four columns:\n\n"
+                "    respondent_id, task, item, choice\n"
+                "    P001, 1, Fast delivery, best\n"
+                "    P001, 1, Low price, worst\n"
+                "    P001, 1, Good support, \n"
+                "    P001, 2, Wide range, best\n\n"
+                "The last column can be the words best and worst (or most and least), or numbers: "
+                "1 for best, -1 for worst, 0 for the rest. Any spreadsheet can do this with a "
+                "pivot, and it is the point where YOU tell me which pick was which.")
     if msg.startswith("_MAXDIFF_MISSING:"):
         # Reached a user verbatim, as "Technical detail: _MAXDIFF_MISSING:item", alongside generic
         # advice to check the file has one row per person — which is the opposite of what a
@@ -4050,6 +4068,16 @@ def run_analysis(data, cfg=None, force_items=None):
     # silently wrong (by clustering the raw choice codes) would look like a working result.
     maxdiff_note = None
     maxdiff_est = None
+    # A best-worst export written one row per PERSON carries no sign that it is a preference
+    # exercise, so it was read as an ordinary rating grid and its response CODES were clustered as
+    # though they were scores — two confident segments out of an 80-person file, no warning
+    # anywhere. Stop rather than answer. The layout can be recovered but the polarity cannot:
+    # whether 3 means best or 1 means best is a fact about how the survey was built, not about the
+    # data, and guessing it would invert every ranking silently.
+    if _maxdiff is not None and not _maxdiff.looks_like_maxdiff(df):
+        _wide = _maxdiff.looks_like_wide_best_worst(df)
+        if _wide:
+            raise ValueError(f"_MAXDIFF_WIDE:{_wide}")
     if _maxdiff is not None and _maxdiff.looks_like_maxdiff(df):
         est = maxdiff_est = _maxdiff.utilities_from_export(df)
         df = est.as_frame().reset_index().rename(columns={"index": "respondent_id"})

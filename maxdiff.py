@@ -397,6 +397,63 @@ _CHOICE_WORDS = {
 }
 
 
+_TASK_KEY = __import__("re").compile(r"^([A-Za-z]{0,4}\d+)[._-]")
+
+
+def looks_like_wide_best_worst(df):
+    """A best-worst export laid out one row per PERSON, which this tool cannot score.
+
+    Qualtrics and Sawtooth write MaxDiff wide: a column for every (task, item) pair holding a small
+    code — commonly 3 for the item picked best, 1 for the one picked worst, 2 for the rest shown.
+    Nothing about that file says it is a preference exercise, so it was being read as an ordinary
+    rating grid and the CODES were clustered as if they were scores. Measured on an 80-person
+    export: two confident segments, no warning anywhere.
+
+    **Why this detects rather than reads.** The layout is recoverable, but the polarity is not:
+    whether 3 means best or 1 means best is a property of how the survey was built, not of the
+    data. `choicetools`, which does read these files, makes the analyst state it for that reason.
+    Guessing would silently invert every ranking the tool produced, which is worse than any error
+    message.
+
+    Returns the number of task groups it recognised, or 0.
+    """
+    import pandas as pd
+    groups = {}
+    for c in df.columns:
+        m = _TASK_KEY.match(str(c).strip())
+        if m:
+            groups.setdefault(m.group(1).lower(), []).append(c)
+    groups = {k: v for k, v in groups.items() if 3 <= len(v) <= 12}
+    if len(groups) < 2:
+        return 0
+
+    # The signature: within one task, a respondent's row holds exactly one "best" code and exactly
+    # one "worst" code, and everything else is the same single value (or blank). A rating matrix —
+    # Q1_1..Q1_5 answered 1-5 — does not look like that, which is what keeps this off ordinary
+    # surveys.
+    matching = 0
+    for cols in groups.values():
+        block = df[cols].apply(pd.to_numeric, errors="coerce")
+        if block.notna().sum().sum() == 0:
+            continue
+        ok = 0
+        rows = 0
+        for _, row in block.iterrows():
+            vals = row.dropna()
+            if len(vals) < 3:
+                continue
+            rows += 1
+            counts = vals.value_counts()
+            if len(counts) < 2:
+                continue
+            lo, hi = vals.min(), vals.max()
+            if counts.get(lo, 0) == 1 and counts.get(hi, 0) == 1 and len(counts) <= 3:
+                ok += 1
+        if rows and ok / rows > 0.9:
+            matching += 1
+    return matching if matching >= 2 else 0
+
+
 def read_maxdiff(df):
     """Tidy long MaxDiff table -> (design, best_pos, worst_pos, item_names, respondent_ids).
 

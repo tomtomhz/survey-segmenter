@@ -3,6 +3,30 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.6.2] — 2026-08-07
+
+### Fixed
+
+- **A best-worst survey saved one row per person was silently analysed as a rating grid.** This is
+  how Qualtrics and Sawtooth write MaxDiff: a column for every (task, item) pair holding a small
+  code, commonly 3 for the item picked best, 1 for the one picked worst and 2 for the others shown.
+  Nothing in such a file announces that it is a preference exercise, so the tool read the CODES as
+  scores and clustered them. Measured on an 80-person export: **two confident segments, no warning
+  anywhere** — the worst kind of answer this tool can give.
+
+  It is now recognised and refused, with a worked example of the four-column layout to reshape to.
+
+  **Why refused rather than read.** The layout can be recovered; the polarity cannot. Whether 3
+  means best or 1 means best is a fact about how the survey was built, not about the data, and
+  choosing wrong would turn every ranking upside down with nothing to reveal it. `choicetools`,
+  the R package that does read these files, makes the analyst state it for the same reason.
+
+  Recognition is deliberately narrow — it needs at least two question blocks in which nearly every
+  respondent has exactly one lowest code, exactly one highest code, and no more than three distinct
+  values. Ordinary matrix surveys with the same column naming were checked against it and are read
+  normally: 5-point matrices, **3-point matrices** (where one-lowest-one-highest happens by
+  chance), binary pick-any grids, 0-10 sliders, and every real dataset in the local project store.
+
 ## [1.6.1] — 2026-08-07
 
 Found by feeding the tool a **real published best-worst dataset** for the first time: the
