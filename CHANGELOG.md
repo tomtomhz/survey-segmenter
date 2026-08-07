@@ -3,6 +3,40 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.5.9] — 2026-08-07
+
+The audit release. Nothing here came from a user report — all of it came from pointing the tool at
+data it had never seen and checking whether what it said was true.
+
+### Changed
+
+- **A short survey can no longer be cut into more groups than its answers can distinguish.** Five
+  questions on a 1–5 scale asked of 400 people is a very common shape, and the tool would
+  happily look for eight segments in it. It now requires roughly four distinct answer patterns per
+  group before that group can be a type, and the report says in words why the search was narrowed
+  rather than silently searching a shorter range. **This changes results on short surveys** — the
+  shape short questionnaires take — which is why it is called out first.
+
+### Fixed
+
+- **A best-worst export is now read in the words real exports use.** The MaxDiff reader recognised
+  only `best`/`worst`; Qualtrics, SurveyMonkey and their Nordic equivalents write `most`/`least`,
+  `bäst`/`sämst`, `beste`/`verste`, `bedste`/`værst`, `paras`/`huonoin`. Six of seven malformed
+  exports in the test set now load; the seventh is refused with a reason.
+- **The names you choose now reach the file that describes the groups.** Naming a segment renamed
+  it in the report and in the scored export, but not in the profile download.
+- **The charts are held to the same standard as the report: they must show everybody.**
+
+### Verified, not changed
+
+Recorded because the checking is the work, and a later session should not redo it: the gap statistic
+(picks the planted k on 3- and 5-group data, stays at the floor on noise and on a single blob),
+question importance reported as Cramér's V **squared** (perfect 1.0000, independent 0.0000,
+invariant to renumbering), the Benjamini-Hochberg correction against its definition, the Hopkins
+statistic across five geometries, the two cluster-tendency tests as a pair, the dip test's question
+and respondent floors at their exact boundaries, and that the HTML report loses nothing from the
+markdown — same eight tables, same sections, same figures.
+
 ## [1.5.8] — 2026-08-07
 
 ### Fixed
