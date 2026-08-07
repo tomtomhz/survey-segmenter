@@ -5496,3 +5496,42 @@ def test_the_opening_sentence_does_not_claim_more_than_the_table_below_it():
     prose2 = sk._maxdiff_ranking_section(est2)
     assert "comes out strongest" in prose2, "hedged a ranking with a full point between each item"
     assert "did not separate these items" not in prose2
+
+
+def test_the_ai_digest_stays_aggregate_on_a_best_worst_study_too():
+    """The privacy guarantee covered only rating grids, and best-worst is a different route.
+
+    A MaxDiff export is read by a different reader, rebuilt into a different frame — respondent
+    ids move through the INDEX of the utilities table rather than a column — and now carries a
+    report section that did not exist when the original guarantee was written. None of that is
+    exercised by the rating-grid test, so the claim "only aggregates are transmitted" was unproven
+    for exactly the newest path.
+    """
+    pytest.importorskip("maxdiff")
+    rng = np.random.default_rng(19)
+    items = ["Price", "Speed", "Support", "Design", "Range", "Eco"]
+    truth = np.array([1.5, 0.9, 0.3, -0.3, -0.9, -1.5])
+    ids = [f"RESPONDENT-UNIQUE-{i:04d}" for i in range(90)]
+    secrets = [f"my-secret-comment-{i:04d}" for i in range(90)]
+    rows = []
+    for r in range(90):
+        for t in range(7):
+            shown = rng.choice(len(items), 4, replace=False)
+            u = truth[shown] + rng.gumbel(0, 1, 4)
+            best, worst = shown[u.argmax()], shown[u.argmin()]
+            for i in shown:
+                rows.append({"respondent_id": ids[r], "task": t, "item": items[i],
+                             "choice": "best" if i == best else
+                                       ("worst" if i == worst else ""),
+                             "open_feedback": secrets[r]})
+    with contextlib.redirect_stdout(io.StringIO()):
+        r = sk.run_analysis(pd.DataFrame(rows).to_csv(index=False).encode(),
+                            cfg=sk.SegmentationConfig(k_min=2, k_max=3, **FAST))
+
+    payload = r["digest"]
+    assert [x for x in ids if x in payload] == [], "respondent identifiers reached the AI payload"
+    assert [c for c in secrets if c in payload] == [], "free text reached the AI payload"
+    # Not empty-by-accident: the aggregate this study exists to produce IS in there, and the item
+    # names are questionnaire wording rather than anything belonging to a person.
+    assert "What matters most" in payload
+    assert all(i in payload for i in items)
