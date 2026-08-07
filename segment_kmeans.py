@@ -2944,8 +2944,32 @@ def classify_new_lca(rule, df, id_col=None):
     return out
 
 
+def lca_split_half(Xcat, level_counts, k, cfg):
+    """Would a fresh sample find these same classes? The categorical answer to the question the
+    numeric path answers with `split_half_replication`.
+
+    Fit the model on each half of the sample independently, then have both label the SAME held-out
+    half and compare. The k-means path has reported this since the beginning; the categorical path
+    reported nothing of the kind, so a survey made entirely of multiple-choice questions arrived
+    with no answer at all to "does this reproduce", which is the single question the confidence
+    light is built from.
+    """
+    rng = np.random.default_rng(cfg.random_state + 5)
+    idx = rng.permutation(len(Xcat)); h = len(Xcat) // 2
+    a, b = idx[:h], idx[h:]
+    if min(len(a), len(b)) < max(2 * k, 10):
+        return None                       # too little data either side to mean anything
+    try:
+        ma = _lca_fit(Xcat[a], level_counts, k, max(3, cfg.n_init_search // 2), 1)
+        mb = _lca_fit(Xcat[b], level_counts, k, max(3, cfg.n_init_search // 2), 2)
+        return float(adjusted_rand_score(_lca_predict(ma, Xcat[b]), _lca_predict(mb, Xcat[b])))
+    except Exception:
+        return None
+
+
 def latent_class_report(diag, rec_k, rationale, model, jaccard, names, level_labels, labels, cfg,
-                        typing=None, weighted_share=None):
+                        typing=None, weighted_share=None, neighbours=None, split_half=None,
+                        median_shadow=None):
     method = "Latent Class Analysis (categorical, local-independence finite mixture)"
     n = len(labels)
     weights = model["weights"]; theta = model["theta"]
@@ -2975,7 +2999,32 @@ def latent_class_report(diag, rec_k, rationale, model, jaccard, names, level_lab
          "class membership is crisp and 1 when it is maximally fuzzy.\n",
          _md(diag), "\n",
          f"Classification certainty: mean top posterior = **{mean_top:.2f}**, normalized entropy = "
-         f"**{norm_ent:.2f}** (0 = crisp, 1 = fuzzy).\n"]
+         f"**{norm_ent:.2f}** (0 = crisp, 1 = fuzzy).\n",
+         # Everything below here the categorical path either already computed and discarded, or
+         # could answer and did not. A survey made entirely of multiple-choice questions used to
+         # arrive with two of the eleven pieces of evidence the numeric path gives, and nothing
+         # saying so.
+         (None if split_half is None else
+          f"\n**Would a fresh sample find the same classes?** Split-half replication (Adjusted "
+          f"Rand Index): **{split_half:.3f}** "
+          # Read against the SAME 0.6 threshold segmentation_kind uses in the sentence below.
+          # With a lower band here, 0.577 was reported as "partly reproduces" immediately above
+          # "the division does not survive being repeated" — two adjacent sentences disagreeing
+          # about one number, which is the fault this report has been cleaned of elsewhere.
+          + ("(reproduces well)." if split_half >= 0.7 else
+             "(reproduces, though not strongly)." if split_half >= 0.6 else
+             "(does NOT reproduce — re-running on half the sample gives a different answer, which "
+             "is what happens when the data has no real classes in it).")),
+         # segmentation_kind returns (kind, gloss) — use the gloss it already writes rather than
+         # keeping a second copy of the same three sentences, which would drift.
+         (None if split_half is None else
+          "\n**This is a {} segmentation** — {}".format(
+              *segmentation_kind(False, split_half, median_shadow))),
+         neighbours_paragraph(neighbours, _cn, len(_cn)),
+         "\n**Who fits, person by person.** `segment_assignments.csv` carries a `fit` column: how "
+         "clearly each respondent belongs to the class they were given (about 1 = squarely inside, "
+         "about 0 = poised between two). Before spending money on a list, drop the low scores "
+         "rather than contacting people who matched nothing in particular.\n"]
     rec_stab = float(diag.loc[diag["k"] == rec_k, "stability_ARI"].iloc[0])
     if rec_stab < cfg.stability_cutoff:
         L.append(f"\n> WARNING: replication stability at k = {rec_k} is only {rec_stab:.2f} (below "
@@ -3086,10 +3135,20 @@ class LatentClassSegmenter:
         except Exception as e:
             print(f"NOTE: could not score class fit ({type(e).__name__}: {e}).")
             self.shadow, self.neighbours = None, None
+        # The neighbours table was computed above and then dropped on the floor — the comment
+        # beside that computation says it exists so the categorical half is not a poor relation,
+        # and then it never reached the report. Split-half replication is new here: the numeric
+        # path has always reported it, and without it a multiple-choice survey arrived with no
+        # answer to "does this reproduce", which is what the confidence light is built from.
+        self.split_half = lca_split_half(Xcat, level_counts, self.recommended_k, cfg)
         self.report_markdown = latent_class_report(self.diagnostics, self.recommended_k, rationale,
                                                    self.model, self.jaccard, names, level_labels,
                                                    self.labels, cfg, typing=self.typing,
-                                                   weighted_share=weighted_share)
+                                                   weighted_share=weighted_share,
+                                                   neighbours=self.neighbours,
+                                                   split_half=self.split_half,
+                                                   median_shadow=(float(np.median(self.shadow))
+                                                                  if self.shadow is not None else None))
         if demographics is not None and (not isinstance(demographics, pd.DataFrame)
                                          or not demographics.empty):
             self.report_markdown += "\n\n" + profile_demographics(self.labels, ids, demographics,

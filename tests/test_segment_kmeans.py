@@ -4675,6 +4675,12 @@ def _report_complaints(md, k, n):
         bad.append("says to start with the biggest group while flagging one as scatters")
     if "🟢" in md and "essentially random" in md and "groups are clear" in md:
         bad.append("green light claims clear groups above an 'essentially random' score")
+
+    # Two sentences about the same replication number must not disagree. Found on the categorical
+    # path: a split-half of 0.577 was called "partly reproduces" immediately above "the division
+    # does not survive being repeated on half the sample".
+    if re.search(r"reproduces(,| well)", md) and "does not survive being repeated" in md:
+        bad.append("one replication number described both as reproducing and as not surviving")
     return bad
 
 
@@ -4709,15 +4715,26 @@ def test_the_report_agrees_with_itself_in_every_regime():
     w = r0.integers(0, 2, 400)
     regimes["two groups"] = likert(separated[:2][w] + r0.normal(0, 0.5, (400, 5)))
 
+    # The categorical path builds a different report from different machinery, and until now had
+    # two of the eleven pieces of evidence the numeric path gives — so it needs checking too.
+    words = ["Yes", "No", "Maybe"]
+    rcat = np.random.default_rng(3)
+    grp = rcat.integers(0, 3, 400)
+    regimes["all multiple-choice"] = pd.DataFrame(
+        {f"pick{i+1}": [words[(grp[j] + i) % 3] if rcat.random() < 0.85 else rcat.choice(words)
+                        for j in range(400)] for i in range(4)})
+
     failures = {}
     for name, X in regimes.items():
-        df = pd.DataFrame(X, columns=[f"q{i+1}" for i in range(X.shape[1])])
+        df = X.copy() if isinstance(X, pd.DataFrame) else pd.DataFrame(
+            X, columns=[f"q{i+1}" for i in range(X.shape[1])])
         df.insert(0, "respondent_id", [f"P{i}" for i in range(len(df))])
         with contextlib.redirect_stdout(io.StringIO()):
             r = sk.run_analysis(df.to_csv(index=False).encode(),
                                 cfg=sk.SegmentationConfig(k_min=2, k_max=5, **FAST))
         a = pd.read_csv(io.StringIO(r["files"]["segment_assignments.csv"]))
-        complaints = _report_complaints(r["digest"], a["segment"].nunique(), len(a))
+        col = "segment" if "segment" in a.columns else "class"
+        complaints = _report_complaints(r["digest"], a[col].nunique(), len(a))
         if complaints:
             failures[name] = complaints
     assert not failures, "reports contradict themselves: " + json.dumps(failures, indent=2)
@@ -4774,3 +4791,49 @@ def test_the_report_actually_contains_tables():
 
 def _md_probe():
     return sk._md(pd.DataFrame({"a": [1], "b": [2]}))
+
+
+def test_a_multiple_choice_survey_gets_the_same_evidence_as_a_rating_one():
+    """A survey made entirely of pick-any questions goes down the latent-class path, and that path
+    was giving the reader almost nothing to judge the result by.
+
+    Measured against the numeric report, eleven pieces of evidence to two: no split-half
+    replication, no statement of which kind of segmentation this is, no table of which classes sit
+    next to each other, and no explanation of the per-person fit column — even though the
+    neighbours table was **already being computed** and then dropped, under a comment saying it
+    existed so the categorical half would not be a poor relation.
+
+    Split-half replication is the one that matters most: the confidence light is built from it, and
+    without it a multiple-choice survey had no answer at all to "would this come back again".
+    """
+    rng = np.random.default_rng(11)
+    n = 400
+    words = ["Yes", "No", "Maybe"]
+    grp = rng.integers(0, 3, n)
+    df = pd.DataFrame({f"pick{i+1}": [words[(grp[j] + i) % 3] if rng.random() < 0.85
+                                      else rng.choice(words) for j in range(n)]
+                       for i in range(4)})
+    df.insert(0, "respondent_id", [f"P{i}" for i in range(n)])
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        r = sk.run_analysis(df.to_csv(index=False).encode(),
+                            cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+    digest = r["digest"]
+
+    for phrase, what in [
+            ("fresh sample find the same", "split-half replication"),
+            ("segmentation** —", "which of the three kinds of segmentation this is"),
+            ("sit next to each other", "which classes border each other"),
+            ("`fit` column", "how to read the per-person fit"),
+            ("mean_Jaccard", "per-class bootstrap stability")]:
+        assert phrase in digest, f"the categorical report does not give the reader {what}"
+
+    # The assignments must carry that fit, not merely mention it.
+    a = pd.read_csv(io.StringIO(r["files"]["segment_assignments.csv"]))
+    assert "fit" in a.columns and a["fit"].notna().all()
+
+    # And the two sentences about replication must agree with each other — 0.577 was once
+    # "partly reproduces" directly above "does not survive being repeated on half the sample".
+    assert not (re.search(r"reproduces(,| well)", digest)
+                and "does not survive being repeated" in digest), \
+        "the report describes one replication number two contradictory ways"

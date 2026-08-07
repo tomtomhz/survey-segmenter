@@ -392,6 +392,37 @@ one at a time until `typing_tool` went 0.24 GB to 11.11 GB in one call.
 A negative result from an incomplete instrument is not evidence of absence, and "no single big
 allocation" was a conclusion about my wrapper list, not about the program.
 
+## The categorical path was a poor relation (2026-08-07)
+
+A survey made entirely of pick-any questions goes down the latent-class path. Compared against the
+numeric report on the same measure — what evidence does the reader get to judge the result by —
+it gave **two of eleven**:
+
+| Evidence | k-means | Latent class (was) | Now |
+|---|---|---|---|
+| Split-half replication | yes | **no** | yes |
+| Which of the three kinds of segmentation | yes | **no** | yes |
+| Which segments border each other | yes | **no** (computed, discarded) | yes |
+| How to read the per-person fit | yes | **no** (column existed, unexplained) | yes |
+| Per-segment bootstrap Jaccard | yes | yes | yes |
+| Typing-tool accuracy | yes | yes | yes |
+
+The neighbours table is the one worth dwelling on: it was **already being computed**, under a
+comment saying it existed "so the gorge plot and the 'which segments sit next to each other' table
+are not privileges of the numeric half of the tool" — and then it was never passed to the report.
+The intent was written down and the wiring was not finished.
+
+Split-half replication is the one that mattered most. The confidence light is built from it, so a
+multiple-choice survey had no answer at all to *would this come back again* — the single question
+the whole report exists to answer. `lca_split_half` fits the model on each half independently and
+has both label the same held-out half, which is what the numeric path has always done.
+
+**And adding it immediately produced the fault this report has been cleaned of elsewhere**: a
+split-half of 0.577 read as "partly reproduces" directly above "the division does not survive being
+repeated on half the sample". Two adjacent sentences, one number, opposite readings — because I
+wrote a fresh set of bands instead of using the 0.6 threshold `segmentation_kind` already applies.
+The self-consistency checker now looks for exactly that pattern, and covers the categorical path.
+
 ## The report is now checked against itself (2026-08-06)
 
 Three defects reached `main` while every test passed, and **all three were plainly visible in the
