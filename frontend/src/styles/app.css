@@ -197,6 +197,24 @@ header .sp{flex:1}
 .rep th,.rep td{border:1px solid var(--line);padding:6px 10px;text-align:left;white-space:nowrap}
 .rep thead th{background:var(--sunk);font-weight:600}
 .rep tbody tr:nth-child(even){background:var(--sunk)}
+/* The overall preference ranking on a best-worst study. Its own table rather than `.rep table`,
+   which is styled for a dense statistical appendix; this one is the headline and is read at a
+   glance. Scrolls inside itself so a long item name never pushes the page sideways. */
+.rank{border-collapse:collapse;width:100%;font-size:.9rem;display:block;overflow-x:auto;
+ font-variant-numeric:tabular-nums}
+.rank th,.rank td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--line)}
+.rank thead th{font-size:.76rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);
+ font-weight:600;border-bottom:1px solid var(--line-strong)}
+.rank tbody tr:last-child td{border-bottom:none}
+.rank .num{color:var(--ink);font-weight:600}
+.rank td:first-child{color:var(--muted);font-weight:600;width:1%}
+/* Not a colour-only signal: the word says it too, for anyone who cannot separate the hues. */
+.rank .tie{color:var(--warn-ink,var(--muted));font-size:.75rem;white-space:nowrap;
+ border:1px solid var(--line-strong);border-radius:999px;padding:1px 7px;margin-left:6px}
+/* The interval, drawn on a shared scale so the rows are comparable by eye. */
+.rank .range{position:relative;display:block;width:120px;min-width:120px;height:8px;
+ background:var(--sunk);border-radius:999px}
+.rank .range-bar{position:absolute;top:0;height:8px;background:var(--accent);border-radius:999px}
 .rep h1{font-size:var(--step-2)}.rep h2{font-size:var(--step-1)}.rep h3{font-size:var(--step-0)}
 .rep h1,.rep h2,.rep h3{letter-spacing:-.01em;margin:1.2em 0 .4em}
 .rep p,.rep li{font-size:.92rem;color:var(--ink-soft)}

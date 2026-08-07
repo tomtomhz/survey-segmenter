@@ -264,7 +264,8 @@ def serve(port=8000):
     store = ProjectStore()
 
     _REHYDRATE = ("digest", "messages", "files", "title", "report_html", "columns", "k",
-                  "n_people", "confidence", "transcript", "raw", "names", "charts")
+                  "n_people", "confidence", "transcript", "raw", "names", "charts",
+                  "ranking")
 
     def session(sid):
         """Look up a session, falling back to disk before giving up.
@@ -296,7 +297,8 @@ def serve(port=8000):
                          "report_html": s.get("report_html"), "columns": s.get("columns", {}),
                          "k": s.get("k"), "n_people": s.get("n_people"),
                          "confidence": s.get("confidence"), "transcript": s.get("transcript", []),
-                         "charts": s.get("charts", []), "names": s.get("names", [])},
+                         "charts": s.get("charts", []), "names": s.get("names", []),
+                         "ranking": s.get("ranking")},
                    raw=s.get("raw"))
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -362,6 +364,7 @@ def serve(port=8000):
                             "confidence": saved.get("confidence") or "unknown",
                             "charts": _charts_for_browser(saved.get("charts")),
                             "names": saved.get("names") or [],
+                            "ranking": saved.get("ranking"),
                             "transcript": saved.get("transcript") or [],
                             "ai_available": bool(st.get("configured") and st.get("sdk_installed")),
                             "reopened": True})
@@ -467,6 +470,7 @@ def serve(port=8000):
                              "report_html": r["report_html"], "columns": r.get("columns", {}),
                              "k": r["k"], "n_people": r["n_people"],
                              "confidence": r.get("confidence"), "charts": r.get("charts", []),
+                             "ranking": r.get("ranking"),
                              "transcript": [{"role": "you", "text": f"Analyse: {filename}"}]}
             for old in list(sessions)[:-5]:    # bound memory: sessions hold the file + its results
                 sessions.pop(old, None)
@@ -482,6 +486,7 @@ def serve(port=8000):
                     "columns": r.get("columns", {}),
                     "charts": _charts_for_browser(r.get("charts")),
                     "chart_errors": r.get("chart_errors") or [],
+                    "ranking": r.get("ranking"),
                     "confidence": r.get("confidence", "unknown")}
 
         def _do_regroup(self):
@@ -517,6 +522,7 @@ def serve(port=8000):
                          "report_html": r["report_html"], "columns": r.get("columns", {}),
                          "k": r["k"], "n_people": r["n_people"],
                          "confidence": r.get("confidence"), "charts": r.get("charts", []),
+                         "ranking": r.get("ranking"),
                          "transcript": [{"role": "you",
                                          "text": "Group people on: " + ", ".join(items)}]})
             remember(sid)

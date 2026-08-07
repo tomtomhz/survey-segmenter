@@ -3925,6 +3925,68 @@ def run_auto(path, args, parser):
           "(or the .md version in any text editor). The plain-language summary is at the top.")
 
 
+def _maxdiff_ranking_section(est):
+    """The headline answer to a best-worst study: what the sample wants, strongest first.
+
+    This exists because the tool was computing it and throwing it away. A MaxDiff export was
+    detected, converted to individual utilities, and handed to the segmenter — and the report then
+    described the groups while never once saying which items the sample actually preferred. That is
+    the question the study was fielded to answer; the segments are what you do about the answer.
+
+    Two things are deliberate in the table:
+
+    * **The interval, not just the score.** Hierarchical Bayes knows how sure it is, and the whole
+      argument for paying its cost is that it produces a distribution rather than a point.
+    * **Whether each item is genuinely ahead of the one below it.** A ranking prints an order
+      whether or not the data supports one. Adjacent items whose intervals overlap are printed in
+      an order this study did not establish, and saying so is the difference between a ranking and
+      a league table nobody should act on.
+    """
+    rank = est.ranking()
+    has_interval = "separated_from_next" in rank.columns
+    show = rank.rename(columns={"rank": "#", "utility": "score"})
+    if has_interval:
+        show["95% range"] = [f"{lo:+.2f} to {hi:+.2f}" for lo, hi in zip(rank["low"], rank["high"])]
+        show["clearly ahead of the next?"] = [
+            "" if pd.isna(v) else ("yes" if v else "no — too close to call")
+            for v in rank["separated_from_next"]]
+        show = show[["#", "item", "score", "95% range", "clearly ahead of the next?"]]
+    else:                     # an estimate produced before intervals were kept
+        show = show[["#", "item", "score"]]
+    show["score"] = show["score"].map(lambda v: f"{v:+.2f}")
+
+    top, bottom = rank.iloc[0]["item"], rank.iloc[-1]["item"]
+    # disable_numparse, or tabulate re-parses the formatted strings as numbers and re-formats them
+    # its own way: "+1.50" comes back as "1.5" and "+2.00" as "2", so a column that was deliberately
+    # aligned to two decimals arrives ragged. The signs matter here too — this scale is centred on
+    # zero, so whether a number is positive is the first thing being read.
+    lines = ["## What matters most, overall", "",
+             f"Before any grouping: this is what your respondents want, taken together. "
+             f"**{top}** comes out strongest and **{bottom}** weakest.", "",
+             show.to_markdown(index=False, disable_numparse=True), ""]
+
+    if has_interval:
+        close = [i for i in range(len(rank) - 1)
+                 if not bool(rank.iloc[i]["separated_from_next"])]
+        if close:
+            pairs = [f"**{rank.iloc[i]['item']}** and **{rank.iloc[i + 1]['item']}**"
+                     for i in close]
+            joined = pairs[0] if len(pairs) == 1 else ", ".join(pairs[:-1]) + " and " + pairs[-1]
+            lines += [f"> **{len(close)} pair{'s' if len(close) > 1 else ''} of neighbours are not "
+                      f"actually separated by this study:** {joined}. They are printed in an order, "
+                      f"but the data does not support one — treat them as tied. Fielding more "
+                      f"respondents, or more tasks each, is what would separate them.", ""]
+        else:
+            lines += ["> Every item is clearly ahead of the one below it, so the order above is "
+                      "one you can act on rather than an artefact of rounding.", ""]
+
+    lines += ["**How to read the score.** It is a relative preference, centred so the average item "
+              "sits at zero: positive means wanted more than the average item, negative less. Only "
+              "*differences* carry meaning — the units themselves are arbitrary, so a score of "
+              "+2.0 is not 'twice' +1.0, it is further ahead of the average.", ""]
+    return "\n".join(lines)
+
+
 def run_analysis(data, cfg=None, force_items=None):
     """Raw survey (bytes or a path) -> a dict with everything the web app and the AI layer need:
     the title, the report as an HTML fragment (auto-detection notes on top), and a plain-text
@@ -3939,8 +4001,9 @@ def run_analysis(data, cfg=None, force_items=None):
     # utilities first — that conversion IS the analysis for a MaxDiff study, and doing it
     # silently wrong (by clustering the raw choice codes) would look like a working result.
     maxdiff_note = None
+    maxdiff_est = None
     if _maxdiff is not None and _maxdiff.looks_like_maxdiff(df):
-        est = _maxdiff.utilities_from_export(df)
+        est = maxdiff_est = _maxdiff.utilities_from_export(df)
         df = est.as_frame().reset_index().rename(columns={"index": "respondent_id"})
         maxdiff_note = (
             f"This file is a MaxDiff (best-worst) export, not a rating grid, so it was scored "
@@ -3972,6 +4035,14 @@ def run_analysis(data, cfg=None, force_items=None):
     # without ever touching the command line.
     files = {"segment_assignments.csv": seg.assignments.to_csv(index=False),
              "typing_rule.json": json.dumps(seg.typing_rule_dict(), indent=2)}
+    if maxdiff_est is not None:
+        # The scored study itself, not just the grouping of it. `item_utilities.csv` is the
+        # deliverable most people came for; `respondent_utilities.csv` is what makes any further
+        # analysis possible without re-running the sampler, which is the expensive part.
+        files["item_utilities.csv"] = maxdiff_est.ranking().to_csv(index=False)
+        _per_person = maxdiff_est.as_frame()
+        _per_person.index.name = "respondent_id"
+        files["respondent_utilities.csv"] = _per_person.to_csv()
     if method == "lca":
         files["group_profiles.csv"] = seg.profiles_frame().to_csv(index=False)
     else:
@@ -3990,9 +4061,28 @@ def run_analysis(data, cfg=None, force_items=None):
     # how much to trust the answer is the first thing a reader needs, not a line buried mid-report.
     m = re.search(r"\*\*Confidence: .{0,3} (High|Moderate|Low)\.\*\*", seg.report_markdown)
     _chart_errors = []          # this analysis's own; the server runs several at once
-    return {"title": title, "method": method,
-            "report_html": notes_html + _markdown_to_html(seg.report_markdown),
-            "digest": notes_md + "\n" + seg.report_markdown,
+    # For a best-worst study the ranking comes BEFORE the segmentation, because it is the answer
+    # the study was fielded for — the groups are what you do about it. Putting it after would bury
+    # the headline under three pages of validation the reader did not ask for yet.
+    _body = seg.report_markdown
+    _ranking = None
+    if maxdiff_est is not None:
+        _body = _maxdiff_ranking_section(maxdiff_est) + "\n" + _body
+        # Also as structured data, not only as prose inside the report. The report is rendered
+        # into a panel that is COLLAPSED by default and sits below the segment map, so a study
+        # whose entire purpose was to rank items was hiding that ranking two clicks down. Handing
+        # the interface the numbers lets it show the answer where the answer belongs.
+        _rk = maxdiff_est.ranking()
+        _ranking = [{"rank": int(r["rank"]), "item": str(r["item"]),
+                     "score": round(float(r["utility"]), 3),
+                     "low": None if pd.isna(r.get("low")) else round(float(r["low"]), 3),
+                     "high": None if pd.isna(r.get("high")) else round(float(r["high"]), 3),
+                     "clear_of_next": (None if pd.isna(r.get("separated_from_next"))
+                                       else bool(r["separated_from_next"]))}
+                    for _, r in _rk.iterrows()]
+    return {"title": title, "method": method, "ranking": _ranking,
+            "report_html": notes_html + _markdown_to_html(_body),
+            "digest": notes_md + "\n" + _body,
             "files": files, "n_people": int(len(seg.assignments)),
             "k": int(seg.recommended_k), "columns": roles,
             "charts": build_charts(seg, method, errors=_chart_errors),

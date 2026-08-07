@@ -3,6 +3,7 @@ import { ChartsCard } from './ChartsCard'
 import { ColumnPicker } from './ColumnPicker'
 import { DownloadBar } from './DownloadBar'
 import { NamePanel } from './NamePanel'
+import { RankingCard } from './RankingCard'
 import { StatStrip } from './StatStrip'
 import type { Analysis } from '../api/types'
 
@@ -38,6 +39,10 @@ export function ResultCard({
   return (
     <>
       <StatStrip result={result} />
+      {/* Best-worst studies only, and it goes ABOVE the charts: for those studies the ranking is
+          the finding and the segments are what you do about it. RankingCard renders nothing at
+          all when `ranking` is absent, which is every ordinary survey. */}
+      <RankingCard ranking={result.ranking} />
       <ChartsCard charts={result.charts ?? []} />
       <details className="card">
         <summary>

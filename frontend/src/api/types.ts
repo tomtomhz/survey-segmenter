@@ -55,6 +55,28 @@ export interface Analysis {
   charts: Chart[]
   confidence: Confidence
   names?: string[]
+  /**
+   * Best-worst (MaxDiff) studies only, and absent for every ordinary survey. This is the answer
+   * such a study was fielded to produce, so it is sent as data rather than left only as prose
+   * inside `report_html` — that panel is collapsed by default and sits below the charts.
+   */
+  ranking?: RankedItem[] | null
+}
+
+/** One row of the overall preference ranking, strongest first. */
+export interface RankedItem {
+  rank: number
+  item: string
+  /** Relative preference, centred so the average item is zero. Only differences mean anything. */
+  score: number
+  low: number | null
+  high: number | null
+  /**
+   * Whether this item is genuinely ahead of the one below it, or whether their credible intervals
+   * overlap so the printed order is not one the study established. `null` on the last row, which
+   * has nothing below it to be ahead of.
+   */
+  clear_of_next: boolean | null
 }
 
 /** /project additionally replays the conversation that happened about the analysis. */

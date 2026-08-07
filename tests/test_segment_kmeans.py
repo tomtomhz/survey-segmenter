@@ -5273,3 +5273,158 @@ def test_the_two_places_the_version_is_written_by_hand_agree():
     assert declared.group(1) == sk.__version__, (
         f"pyproject.toml says {declared.group(1)} but segment_kmeans.__version__ says "
         f"{sk.__version__}; a release moved one and not the other")
+
+
+def _homogeneous_best_worst(order, n_resp=140, n_task=9, seed=5):
+    """A best-worst export from one population with a KNOWN preference order.
+
+    Deliberately not `_simulate_maxdiff`, which plants several mind-sets: a mixture has no single
+    true ranking to check the headline table against, and that table is what these tests are about.
+    """
+    rng = np.random.default_rng(seed)
+    names = [f"item_{i:02d}" for i in range(len(order))]
+    truth = np.asarray(order, dtype=float)
+    rows = []
+    for r in range(n_resp):
+        for t in range(n_task):
+            shown = rng.choice(len(names), 4, replace=False)
+            u = truth[shown] + rng.gumbel(0, 1, 4)
+            best, worst = shown[u.argmax()], shown[u.argmin()]
+            for i in shown:
+                rows.append({"respondent_id": f"R{r:04d}", "task": t,
+                             "item": names[i],
+                             "choice": "best" if i == best else
+                                       ("worst" if i == worst else "")})
+    return pd.DataFrame(rows), names, truth
+
+
+def test_the_headline_ranking_recovers_the_order_the_sample_preferred():
+    """The question a best-worst study is fielded to answer, which the tool used to discard.
+
+    It scored the export, handed the utilities to the segmenter, and reported the groups — while
+    never saying which items the sample actually wanted. The ranking was computed and thrown away.
+    """
+    md = pytest.importorskip("maxdiff")
+    df, names, truth = _homogeneous_best_worst([2.0, 1.2, 0.4, -0.4, -1.2, -2.0])
+    with contextlib.redirect_stdout(io.StringIO()):
+        est = md.utilities_from_export(df, n_draws=1200, n_burn=400, progress=False)
+    rank = est.ranking()
+
+    want = [n for _, n in sorted(zip(-truth, names))]
+    assert list(rank["item"]) == want, f"ranked {list(rank['item'])}, planted order was {want}"
+    # The scores must be monotone with the planted strengths, not merely in the right order by
+    # accident of sorting: a table that ranks correctly but with meaningless spacing invites
+    # "twice as important" readings that the numbers do not support.
+    planted = rank["item"].map(dict(zip(names, truth)))
+    assert np.corrcoef(rank["utility"], planted)[0, 1] > 0.99
+
+
+def test_a_ranking_the_data_cannot_support_is_reported_as_tied():
+    """The honesty half. A ranking prints an order whether or not one exists, and a reader acts on
+    the order, not on the standard errors nobody put in the table.
+
+    Near-identical items on a small sample must come back flagged rather than silently ordered.
+    """
+    md = pytest.importorskip("maxdiff")
+    # Three items essentially tied at the top, and a deliberately thin study.
+    df, _names, _truth = _homogeneous_best_worst([0.55, 0.5, 0.45, -0.5, -0.55, -0.6],
+                                                 n_resp=45, n_task=5, seed=11)
+    with contextlib.redirect_stdout(io.StringIO()):
+        est = md.utilities_from_export(df, n_draws=1200, n_burn=400, progress=False)
+    rank = est.ranking()
+
+    unresolved = [bool(v) for v in rank["separated_from_next"][:-1]]
+    assert not all(unresolved), ("every neighbouring pair was called clearly separated on a study "
+                                 "of 45 people with three items 0.05 apart")
+    assert pd.isna(rank["separated_from_next"].iloc[-1]), (
+        "the last item has nothing below it, so 'not separated' would be a claim about nothing")
+    # And the report must say it in words, not only in a column a non-statistician will skim past.
+    prose = sk._maxdiff_ranking_section(est)
+    assert "too close to call" in prose and "treat them as tied" in prose
+
+
+def test_a_well_separated_ranking_is_not_hedged_into_uselessness():
+    """The guard on the guard: a warning that fires on clean data would train the reader to ignore
+    it, which is worse than not having it."""
+    md = pytest.importorskip("maxdiff")
+    df, _n, _t = _homogeneous_best_worst([2.5, 1.5, 0.5, -0.5, -1.5, -2.5], n_resp=200, n_task=10)
+    with contextlib.redirect_stdout(io.StringIO()):
+        est = md.utilities_from_export(df, n_draws=1200, n_burn=400, progress=False)
+    prose = sk._maxdiff_ranking_section(est)
+    assert "too close to call" not in prose, "hedged a ranking with a full point between each item"
+    assert "clearly ahead of the one below it" in prose
+
+
+def test_a_best_worst_study_can_download_what_it_was_fielded_to_measure():
+    """Reporting the ranking on screen is half of it. The utilities are the asset — re-running the
+    sampler to get them back is the expensive part of the whole analysis."""
+    pytest.importorskip("maxdiff")
+    df, names, _truth = _homogeneous_best_worst([1.8, 1.0, 0.2, -0.6, -1.2, -1.8], n_resp=90,
+                                                n_task=7)
+    with contextlib.redirect_stdout(io.StringIO()):
+        r = sk.run_analysis(df.to_csv(index=False).encode(),
+                            cfg=sk.SegmentationConfig(k_min=2, k_max=3, **FAST))
+
+    assert "## What matters most, overall" in r["digest"]
+    assert "What matters most" in r["report_html"], "the section never reached the rendered report"
+
+    items = pd.read_csv(io.StringIO(r["files"]["item_utilities.csv"]))
+    assert set(items["item"]) == set(names)
+    assert list(items["rank"]) == sorted(items["rank"]), "the export is not in ranked order"
+
+    people = pd.read_csv(io.StringIO(r["files"]["respondent_utilities.csv"]))
+    assert len(people) == 90, "one row per respondent, so a follow-up analysis needs nothing else"
+    assert set(names).issubset(people.columns)
+
+    # The download and the report must agree. Two numbers for one thing is the fault this project
+    # has fixed twice already, in the report tables and in the segment names.
+    top_in_table = items.sort_values("rank").iloc[0]["item"]
+    assert f"**{top_in_table}** comes out strongest" in r["digest"]
+
+
+def test_a_rating_grid_gets_no_ranking_section_or_utility_downloads():
+    """The section is meaningless for a survey that was never a best-worst exercise, and offering
+    an empty 'item_utilities.csv' would be worse than offering nothing."""
+    rng = np.random.default_rng(4)
+    cen = np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3]], float)
+    w = rng.integers(0, 2, 160)
+    X = np.clip(np.rint(cen[w] + rng.normal(0, .6, (160, 5))), 1, 5).astype(int)
+    grid = pd.DataFrame(X, columns=[f"q{i+1}" for i in range(5)])
+    grid.insert(0, "respondent_id", [f"P{i}" for i in range(160)])
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        r = sk.run_analysis(grid.to_csv(index=False).encode(),
+                            cfg=sk.SegmentationConfig(k_min=2, k_max=3, **FAST))
+    assert "What matters most, overall" not in r["digest"]
+    assert "item_utilities.csv" not in r["files"]
+    assert "respondent_utilities.csv" not in r["files"]
+
+
+def test_every_file_the_app_can_hand_over_has_a_human_label():
+    """The download chips read from a map in the TypeScript, and a file with no entry there falls
+    through to its raw filename — `respondent_utilities.csv` sitting in a row of plain-English
+    buttons. It has happened before, to the two files the interface itself creates, and it happened
+    again the moment this release added two more.
+
+    Checking it from the Python side is the only place both halves are visible: the names are
+    decided here and rendered there, and nothing else crosses that boundary to notice a mismatch.
+    """
+    pytest.importorskip("maxdiff")
+    df, _names, _truth = _homogeneous_best_worst([1.5, 0.8, 0.1, -0.6, -1.0, -1.5], n_resp=70,
+                                                 n_task=6)
+    with contextlib.redirect_stdout(io.StringIO()):
+        produced = set(sk.run_analysis(df.to_csv(index=False).encode(),
+                                       cfg=sk.SegmentationConfig(k_min=2, k_max=3,
+                                                                 **FAST))["files"])
+    # The two the interface creates after the fact, which no analysis run returns.
+    produced |= {"group_names.csv", "scored_new_people.csv"}
+
+    labels = (Path(__file__).resolve().parent.parent
+              / "frontend" / "src" / "lib" / "labels.ts").read_text()
+    block = re.search(r"DOWNLOAD_LABEL[^{]*\{(.*?)\n\}", labels, re.S)
+    assert block, "could not find DOWNLOAD_LABEL in labels.ts — has it been renamed?"
+    labelled = set(re.findall(r"['\"]([\w.]+\.(?:csv|json))['\"]\s*:", block.group(1)))
+
+    missing = sorted(produced - labelled)
+    assert not missing, (f"{missing} can be downloaded but has no entry in DOWNLOAD_LABEL, so the "
+                         f"button will show the raw filename")

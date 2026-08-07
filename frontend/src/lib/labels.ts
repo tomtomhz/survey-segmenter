@@ -37,6 +37,10 @@ export const DOWNLOAD_LABEL: Record<string, string> = {
   'typing_rule.json': 'Scoring rule (JSON)',
   'group_names.csv': 'Your group names (CSV)',
   'scored_new_people.csv': 'Newly scored people (CSV)',
+  // Best-worst studies only. Named for the question they answer rather than for how they were
+  // computed: nobody downloading these is looking for the word "utility".
+  'item_utilities.csv': 'What matters most, ranked (CSV)',
+  'respondent_utilities.csv': 'Each person’s preferences (CSV)',
 }
 
 export const COLUMN_ROLE: Record<ColumnRole, string> = {

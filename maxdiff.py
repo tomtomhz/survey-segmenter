@@ -55,12 +55,48 @@ class MaxDiffResult:
     acceptance_rate: float         # Metropolis acceptance; healthy is roughly 0.2-0.5
     n_draws: int
     n_burn: int
+    #: 95% credible interval on the population ranking, same scale and centring as
+    #: `population_mean`. Two items whose intervals overlap are not separated by this study.
+    population_low: np.ndarray = field(default=None, repr=False)
+    population_high: np.ndarray = field(default=None, repr=False)
     rescaled: np.ndarray = field(default=None, repr=False)  # 0-100 per respondent, for reading
 
     def as_frame(self):
         """Utilities as a respondent-by-item table, ready to hand to the segmenter."""
         import pandas as pd
         return pd.DataFrame(self.utilities, index=self.respondent_ids, columns=self.item_names)
+
+    def ranking(self):
+        """The study's headline answer: items ordered by how much the sample wants them.
+
+        Returns a DataFrame with one row per item, best first, carrying the credible interval and
+        a `separated_from_next` flag. That flag is the honest part — a ranking prints an order
+        whether or not the data supports one, and adjacent items with overlapping intervals are
+        printed in an order the study did not establish.
+        """
+        import pandas as pd
+        lo = self.population_low
+        hi = self.population_high
+        out = pd.DataFrame({
+            "item": self.item_names,
+            "utility": self.population_mean,
+            "low": lo if lo is not None else np.nan,
+            "high": hi if hi is not None else np.nan,
+        }).sort_values("utility", ascending=False).reset_index(drop=True)
+        if lo is not None:
+            # Separated from the item below it when this item's lower bound clears that item's
+            # upper bound. Comparing the intervals directly is the conservative reading and the
+            # one a non-statistician will make on sight of the table.
+            # Nullable boolean, not plain bool: the last row has no item below it, so its value is
+            # genuinely missing rather than False. pandas 3 refuses to put NA into a bool column,
+            # which is the correct objection — "not separated" and "nothing to separate from" are
+            # different claims and the dtype should not let them blur.
+            nxt_high = out["high"].shift(-1)
+            sep = (out["low"] > nxt_high).astype("boolean")
+            sep.iloc[-1] = pd.NA
+            out["separated_from_next"] = sep
+        out.insert(0, "rank", np.arange(1, len(out) + 1))
+        return out
 
 
 def _loglik(beta, design, best_pos, worst_pos, mask):
@@ -192,8 +228,21 @@ def estimate_hb(design, best_pos, worst_pos, item_names, respondent_ids,
     # after sampling, so it cannot make the covariance the sampler used singular.
     utilities = expand(np.mean(kept, axis=0))
     utilities -= utilities.mean(axis=1, keepdims=True)
-    pop_mean = np.concatenate([np.mean(kept_mu, axis=0), [0.0]])
-    pop_mean -= pop_mean.mean()
+
+    # The population ranking, kept WITH its uncertainty rather than collapsed to a point. Every
+    # retained draw of mu is expanded and centred exactly as the mean was, so the interval is on
+    # the same scale as the number it brackets. Centring is linear, so the mean of the centred
+    # draws is identical to the centred mean this previously computed — the ranking does not move;
+    # the spread simply stops being thrown away.
+    #
+    # This matters because the whole point of Hierarchical Bayes here is that it knows how sure it
+    # is. Two items half a point apart with intervals that overlap completely are not ranked, and a
+    # report that prints them in order without saying so invites a decision the data cannot carry.
+    mu_draws = np.concatenate([np.asarray(kept_mu, dtype=float),
+                               np.zeros((len(kept_mu), 1))], axis=1)
+    mu_draws -= mu_draws.mean(axis=1, keepdims=True)
+    pop_mean = mu_draws.mean(axis=0)
+    pop_low, pop_high = np.percentile(mu_draws, [2.5, 97.5], axis=0)
 
     # A 0-100 rescale per respondent, purely for human reading; clustering uses the raw utilities.
     lo = utilities.min(axis=1, keepdims=True)
@@ -205,6 +254,8 @@ def estimate_hb(design, best_pos, worst_pos, item_names, respondent_ids,
         item_names=list(item_names),
         respondent_ids=list(respondent_ids),
         population_mean=pop_mean,
+        population_low=pop_low,
+        population_high=pop_high,
         acceptance_rate=accepted / max(proposed, 1),
         n_draws=n_draws,
         n_burn=n_burn,
