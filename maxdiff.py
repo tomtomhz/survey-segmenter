@@ -313,18 +313,67 @@ def _inv_wishart(scale, df, rng):
 # and it is a shape any analyst can produce with a pivot.
 
 _MAXDIFF_COLUMNS = {
-    "respondent": ("respondent_id", "respondent", "resp_id", "id", "sys_respnum"),
-    "set":        ("set", "task", "block", "screen", "question", "set_id"),
-    "item":       ("item", "item_id", "concept", "attribute", "statement"),
-    "choice":     ("choice", "selection", "answer", "response", "best_worst", "bw"),
+    "respondent": ("respondent_id", "respondent", "resp_id", "id", "sys_respnum", "person",
+                   "panelist", "uid"),
+    "set":        ("set", "task", "block", "screen", "question", "set_id", "trial"),
+    # "issue" comes from real published data: the bwsTools example asks which issues facing the
+    # country matter most and least, and named its column that. The others are the words a
+    # questionnaire uses for whatever is being compared.
+    "item":       ("item", "item_id", "concept", "attribute", "statement", "issue", "option",
+                   "feature", "brand", "message", "alternative"),
+    # "value" and "code" are generic enough to appear in tables that are not best-worst at all,
+    # which is why detection now also reads what is IN the column — see `looks_like_maxdiff`.
+    "choice":     ("choice", "selection", "answer", "response", "best_worst", "bw", "value",
+                   "code", "pick", "chosen"),
 }
 
 
+def _normalise_choice(series):
+    """The choice column as 'best' / 'worst' / '', whichever way the export encoded it.
+
+    Two encodings are in the wild and only one was handled. Words — best/worst, most/least, and
+    their Nordic equivalents — are in `_CHOICE_WORDS`. The other is numeric, and it is what real
+    published data uses: the bwsTools example dataset codes **1 for best, -1 for worst and 0 for
+    merely shown**, and being unable to read it meant a genuine best-worst study was refused with
+    an error naming no cause.
+
+    Numeric coding is only accepted when it is unambiguous — the values are a subset of {-1, 0, 1}
+    and BOTH 1 and -1 appear. A column of 1s and 2s is left alone: 2 could mean worst, or second
+    choice, or a rating, and guessing would fabricate preference data out of an ordinary number.
+    """
+    import pandas as pd
+    numeric = pd.to_numeric(series, errors="coerce")
+    seen = set(numeric.dropna().unique())
+    if seen and seen <= {-1.0, 0.0, 1.0} and {1.0, -1.0} <= seen:
+        return numeric.map({1.0: "best", -1.0: "worst"}).fillna("")
+    return series.astype(str).str.strip().str.lower().map(_CHOICE_WORDS).fillna("")
+
+
 def looks_like_maxdiff(df) -> bool:
-    """True when the table is a tidy best-worst export rather than a rating grid."""
+    """True when the table is a tidy best-worst export rather than a rating grid.
+
+    Two conditions, not one. The four columns must be identifiable, AND the choice column must
+    actually contain best-worst answers. The content check exists because the aliases had to widen
+    to read real exports — 'value', 'code', 'issue' — and those words appear in plenty of tables
+    that are not best-worst at all. A false positive here is expensive: an ordinary survey would be
+    put through a preference sampler and come back as confident nonsense.
+    """
     cols = {str(c).strip().lower() for c in df.columns}
-    have = sum(any(a in cols for a in alts) for alts in _MAXDIFF_COLUMNS.values())
-    return have == 4
+    if sum(any(a in cols for a in alts) for alts in _MAXDIFF_COLUMNS.values()) != 4:
+        return False
+    lower = {str(c).strip().lower(): c for c in df.columns}
+    choice = next(lower[a] for a in _MAXDIFF_COLUMNS["choice"] if a in lower)
+    marks = set(_normalise_choice(df[choice]).unique()) - {""}
+    if marks:
+        return True
+    # Nothing recognisable in the column. If it is EMPTY, this is still a best-worst file — a
+    # broken one — and saying so is far more useful than silently treating it as a rating grid:
+    # the reader's own message names the missing bests and worsts. If instead the column is full of
+    # something else, such as 1-5 ratings, it is not a best-worst file and must not be scored as
+    # one. Requiring recognisable marks unconditionally cost that error message, which is the
+    # regression this distinction exists to avoid.
+    raw = df[choice].astype(str).str.strip().str.lower()
+    return bool((~raw.isin(["", "nan", "none"])).sum() == 0)
 
 
 # What a best-worst export actually writes in its choice column. Only the literal English "best"
@@ -369,7 +418,7 @@ def read_maxdiff(df):
 
     d = df[[pick["respondent"], pick["set"], pick["item"], pick["choice"]]].copy()
     d.columns = ["respondent", "set", "item", "choice"]
-    d["choice"] = d["choice"].astype(str).str.strip().str.lower().map(_CHOICE_WORDS).fillna("")
+    d["choice"] = _normalise_choice(d["choice"])
 
     items = sorted(d["item"].astype(str).unique())
     item_ix = {n: i for i, n in enumerate(items)}

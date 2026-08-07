@@ -169,7 +169,7 @@ for _m in ("divide by zero encountered in matmul", "overflow encountered in matm
            "invalid value encountered in matmul"):
     warnings.filterwarnings("ignore", message=_m, category=RuntimeWarning)
 
-__version__ = "1.6.0"    # keep in sync with pyproject.toml
+__version__ = "1.6.1"    # keep in sync with pyproject.toml
 
 # Optional "ask Claude about your segments" add-on. Imported here (not lazily) so the packaged app
 # bundles it; wrapped so a missing file/SDK never stops the core segmentation tool from loading.
@@ -3852,6 +3852,24 @@ def _explain_run_error(msg):
                 "choices. Mixing it with word answers would invent one category per person and "
                 "produce a confident-looking but meaningless result.\n\nEither pick questions that "
                 "are ALL numbers, or pick ones that are all multiple-choice.")
+    if msg.startswith("_MAXDIFF_MISSING:"):
+        # Reached a user verbatim, as "Technical detail: _MAXDIFF_MISSING:item", alongside generic
+        # advice to check the file has one row per person — which is the opposite of what a
+        # best-worst export looks like. Found by feeding a real published dataset whose item column
+        # was called 'issue'.
+        role = msg.split(":", 1)[1]
+        wanted = {"respondent": "which person answered (respondent_id, id, person)",
+                  "set": "which screen or set the row belongs to (set, task, block, question)",
+                  "item": "what was being compared (item, statement, issue, option, brand)",
+                  "choice": "what they picked (choice, answer, value, best_worst)"}
+        return (f"That file looks like a best-worst (MaxDiff) export, but I could not find the "
+                f"column saying {wanted.get(role, role)}.\n\n"
+                "A best-worst file needs one row per item SHOWN — not one row per person — with "
+                "four columns: who answered, which screen they saw it on, the item itself, and "
+                "whether they picked it best or worst. The pick can be words (best/worst, "
+                "most/least) or numbers (1 for best, -1 for worst, 0 for the rest).\n\n"
+                "Rename that column and try again. If this is an ordinary rating survey rather "
+                "than a best-worst exercise, it needs none of these columns.")
     if msg.startswith("_UNSCORABLE_ITEM:"):
         return (f"The answers in '{msg.split(':', 1)[1]}' are not in a form I can score. That "
                 "question needs the same answer options as the original survey (either numbers, or "

@@ -3,6 +3,46 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.6.1] — 2026-08-07
+
+Found by feeding the tool a **real published best-worst dataset** for the first time: the
+`bwsTools` example data from CRAN, 350 respondents asked which issues facing the country matter
+most and least.
+
+### Fixed
+
+- **A genuine best-worst export was refused outright.** Real data names its columns for the subject
+  rather than the method — the item column was `issue`, the set column `block`, the choice column
+  `value` — and codes the pick as **1 / -1 / 0** instead of the words "best" and "worst". Neither
+  the aliases nor the numeric coding were handled, so the file failed with an error naming no
+  cause. Both are now read.
+
+  Numeric coding is accepted only when unambiguous: values within {-1, 0, 1} with both 1 and -1
+  present. A column of 1s and 2s is left alone, because 2 could mean worst, or second choice, or a
+  two-point rating, and guessing would invent preferences out of an ordinary number.
+
+- **An internal sentinel was being shown to users.** The refusal above arrived as *"Technical
+  detail: `_MAXDIFF_MISSING:item`"* beside generic advice to check the file has one row per person
+  — the opposite of what a best-worst export looks like. It now names the missing column, says
+  which words it accepts, and states that these files have one row per item *shown*.
+
+- **Detection now reads the choice column, not just its name.** Widening the aliases to include
+  words as generic as `value` and `code` made a false positive possible, and a false positive is
+  expensive: an ordinary survey would go through a preference sampler and come back as confident
+  nonsense. A column of 1-5 ratings is refused; an empty one is still recognised as a broken
+  best-worst file, so the reader can explain itself rather than falling back to advice about
+  columns.
+
+### Verified, not changed
+
+- **The estimator agrees with the standard method on real human data.** Against the classical
+  best-minus-worst score on the same 350 respondents: **Spearman rank correlation 1.0000**, Pearson
+  0.9986. Healthcare and the economy came top, media bias last. The tool independently found three
+  segments, which is the number the package's own authors report for this data.
+- **The MaxDiff path scales.** 2,000 respondents x 40 items x 15 tasks — 150,000 rows — in 110
+  seconds at 1.04 GB, recovering the planted order at correlation 0.983. A deliberately sparse
+  design (60 items, 8 tasks each) still recovers at 0.978.
+
 ## [1.6.0] — 2026-08-07
 
 ### Added

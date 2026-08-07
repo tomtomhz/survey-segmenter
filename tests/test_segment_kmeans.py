@@ -5549,3 +5549,101 @@ def test_the_ai_digest_stays_aggregate_on_a_best_worst_study_too():
     # names are questionnaire wording rather than anything belonging to a person.
     assert "What matters most" in payload
     assert all(i in payload for i in items)
+
+
+def _real_world_shaped_export(n_resp=60, seed=3):
+    """A best-worst export in the shape real published data actually takes.
+
+    Column names and coding copied from the `bwsTools` example dataset (350 respondents asked
+    which issues facing the country matter most and least): the item column is called `issue`, the
+    set column `block`, the choice column `value`, and the pick is coded **1 / -1 / 0** rather than
+    the words best and worst. That file was refused outright before this shape was handled.
+    """
+    rng = np.random.default_rng(seed)
+    issues = ["healthcare", "economy", "education", "guns", "taxes", "crime"]
+    strength = np.array([2.0, 1.5, 0.5, -0.4, -1.2, -2.0])
+    rows = []
+    for person in range(n_resp):
+        for block in range(8):
+            shown = rng.choice(len(issues), 4, replace=False)
+            u = strength[shown] + rng.gumbel(0, 1, 4)
+            best, worst = shown[u.argmax()], shown[u.argmin()]
+            for i in shown:
+                rows.append({"id": person, "block": block, "issue": issues[i],
+                             "value": 1 if i == best else (-1 if i == worst else 0)})
+    return pd.DataFrame(rows), issues, strength
+
+
+def test_a_best_worst_export_coded_with_numbers_is_read():
+    """Real published best-worst data codes the pick as 1 / -1 / 0, and names its columns for the
+    subject rather than for the method. Only the English words best/worst were recognised, and only
+    a fixed alias list of column names, so a genuine dataset was refused with an error naming no
+    cause."""
+    md = pytest.importorskip("maxdiff")
+    df, issues, strength = _real_world_shaped_export()
+
+    assert md.looks_like_maxdiff(df), "a real-world best-worst export was not recognised as one"
+    with contextlib.redirect_stdout(io.StringIO()):
+        est = md.utilities_from_export(df, n_draws=1200, n_burn=400, progress=False)
+    assert len(est.respondent_ids) == 60, "respondents were dropped while reading a valid file"
+
+    order = list(est.ranking()["item"])
+    assert order == [n for _, n in sorted(zip(-strength, issues))], (
+        f"read the file but recovered the wrong order: {order}")
+
+
+def test_numeric_choice_coding_is_only_read_when_it_is_unambiguous():
+    """1 and -1 mean best and worst. 1 and 2 might mean best and worst, or first and second
+    choice, or an ordinary two-point rating — and inventing preferences out of a number nobody
+    said was a preference is worse than refusing the file."""
+    md = pytest.importorskip("maxdiff")
+    df, _issues, _s = _real_world_shaped_export(n_resp=20)
+
+    recoded = df.copy()
+    recoded["value"] = recoded["value"].map({1: 1, -1: 2, 0: 0})
+    assert not md.looks_like_maxdiff(recoded), (
+        "read 1/2 as best/worst, which is a guess about what a number means")
+
+
+def test_widening_the_column_aliases_did_not_make_detection_fire_on_ordinary_surveys():
+    """`value`, `code` and `issue` had to be accepted to read real exports, and those words appear
+    in plenty of tables that are nothing to do with best-worst. Detection therefore reads what is
+    IN the choice column, not only what it is called — a false positive here would put an ordinary
+    survey through a preference sampler and return confident nonsense."""
+    md = pytest.importorskip("maxdiff")
+    rng = np.random.default_rng(8)
+
+    # Every column name matches, but `value` holds ordinary 1-5 ratings.
+    ratings = pd.DataFrame({"id": rng.integers(0, 50, 300), "block": rng.integers(0, 5, 300),
+                            "issue": rng.choice(["a", "b", "c"], 300),
+                            "value": rng.integers(1, 6, 300)})
+    assert not md.looks_like_maxdiff(ratings), "a table of 1-5 ratings was read as best-worst data"
+
+    # And the plain rating grid, which has none of the columns.
+    grid = pd.DataFrame({"respondent_id": ["R1", "R2"], "q1": [4, 2], "q2": [1, 5]})
+    assert not md.looks_like_maxdiff(grid)
+
+    # But a best-worst file whose choice column is EMPTY is still a best-worst file — a broken one.
+    # Demanding recognisable marks unconditionally sent it down the rating-grid path instead, where
+    # the reader's specific "no complete sets" message is replaced by generic advice about columns.
+    blank = pd.DataFrame({"respondent_id": ["R1", "R1"], "set": [1, 1],
+                          "item": ["a", "b"], "choice": ["", ""]})
+    assert md.looks_like_maxdiff(blank), (
+        "an empty best-worst export is no longer recognised, so the reader cannot explain itself")
+
+
+def test_a_best_worst_file_missing_a_column_is_explained_not_signalled():
+    """The sentinel reached a user verbatim — "Technical detail: _MAXDIFF_MISSING:item" — next to
+    generic advice to check the file has one row per person, which is the opposite of what a
+    best-worst export looks like. Found by feeding a real published dataset."""
+    md = pytest.importorskip("maxdiff")
+    df, _issues, _s = _real_world_shaped_export(n_resp=10)
+    with pytest.raises(ValueError) as caught:
+        with contextlib.redirect_stdout(io.StringIO()):
+            md.utilities_from_export(df.rename(columns={"issue": "subject_matter"}))
+
+    explained = sk._explain_run_error(str(caught.value))
+    assert "_MAXDIFF" not in explained, "an internal sentinel is being shown to the reader"
+    assert "best-worst" in explained and "one row per item" in explained.lower()
+    assert "one row per person" not in explained.split("not one row per person")[0], (
+        "still telling the reader a best-worst file should have one row per person")
