@@ -392,6 +392,51 @@ one at a time until `typing_tool` went 0.24 GB to 11.11 GB in one call.
 A negative result from an incomplete instrument is not evidence of absence, and "no single big
 allocation" was a conclusion about my wrapper list, not about the program.
 
+## Reading a report as its reader (2026-08-06)
+
+Nobody had ever read one end to end as the marketer it is written for. Generated on 420 students
+whose three mind-sets the tool recovered at an Adjusted Rand Index of **0.954** — every segment
+genuinely real — the report argued with itself in four places.
+
+**A real segment was condemned.** The persistence table scored each segment against the solutions
+with one group fewer and one more, and reported the weaker of the two. Asking for one MORE group
+forces the solution to split something, so whichever segment gets subdivided scores about 0.5 in
+that direction whether or not it is genuine. The largest, cleanest segment — 168 of its 170
+planted members recovered — held together perfectly under merging (1.00), scored 0.56 under
+splitting, and the report said: *"Do not build a campaign on the ones marked 'dissolves'."*
+
+The two directions are now reported separately, because only one of them is evidence:
+
+| Direction | What a low score means |
+|---|---|
+| Fewer groups (merge) | The segment's members go to different places — it was never a unit. **Evidence it is not real.** |
+| More groups (split) | The segment contains recognisable sub-groups. **An opportunity, not a defect** — some segment must split. |
+
+At k=2 the merge direction does not exist (k-1 is a single group), so the metric now says nothing
+about realness there rather than borrowing the split direction. That question is answered above it
+by Hopkins, the dip test, split-half replication and per-segment Jaccard.
+
+**Three smaller contradictions, all in the plain-language box:**
+
+- *"Start with the biggest, most distinct group"* — nothing in the analysis establishes that the
+  biggest is the most distinct, and here the biggest was the one the table below condemned. It now
+  points at the stability tables and says the largest is not always the soundest.
+- *"about 1 in 3 (40%)"* — a claim and its own contradiction inside one set of brackets. The
+  fraction phrasing is only used when it is accurate to within three points.
+- The green light said the groups *"are clear"*, five lines above a Hopkins statistic of 0.59
+  described as *"essentially random"*. The light is built from stability numbers and now claims
+  only that: the same groups come back when the analysis is repeated.
+
+**And the names.** Every segment appeared throughout the report as something like *"planning things
+rather + want meet people outside"* — stopwords stripped and truncated mid-phrase, on a dangling
+conjunction. These are placeholders the team is told to replace, so their one job is to be
+recognisable as the question behind them, which the original words do and a stub does not.
+
+The pattern across all five: **the summary asserted things the evidence under it did not support.**
+Every test in the suite asked whether the pipeline ran, not whether the document agreed with
+itself — which is also how the k-selection defect in v1.5.2 and the wide-questionnaire defect
+survived. Two tests now read the generated report and check it against its own tables.
+
 ## The claim that failed: confidently wrong on a wide questionnaire (2026-08-06)
 
 The property this tool is built around, stated in the section above and pinned by a test, is that

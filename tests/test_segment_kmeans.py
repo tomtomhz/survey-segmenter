@@ -434,10 +434,30 @@ def test_try_likert_recodes_and_rejects():
     assert sk._try_likert(pd.Series(["red", "blue", "green", "red"])) is None   # not a scale
 
 
-def test_short_label_uses_whole_words():
+def test_short_label_reads_like_the_question_it_came_from():
+    """These names appear all over a report as placeholders the team is told to replace, so their
+    one job is to be recognisable as the question behind them.
+
+    They used to have every stopword stripped, which reads as a telegram once two are joined with
+    a "+": "I like planning things rather than deciding last minute" became "planning things
+    rather", and a real report named a segment "planning things rather + want meet people outside".
+    """
     lbl = sk._short_label("I want to meet people in real life")
-    assert lbl.endswith(("people", "real", "life")) and "want" in lbl        # no mid-word cut
-    assert not lbl.endswith("rea")
+    assert "want" in lbl and "meet" in lbl
+    assert not lbl.endswith("rea"), "cut a word in half"
+    assert "  " not in lbl
+
+    # Ordinary English is kept, not filleted.
+    assert sk._short_label("Most social apps feel fake to me").startswith("Most social apps feel")
+
+    # A shortened label must look shortened, and must not trail off on a word that was leading
+    # somewhere — "...feel fake to" and "...planning things rather" read as abandoned sentences.
+    long = sk._short_label("I like planning things rather than deciding last minute")
+    assert long.endswith("…"), long
+    assert long.rstrip("…").split()[-1].lower() not in sk._TRAILING_FILLER, long
+
+    # Short questions are left exactly as they are, with no ellipsis and no leading "I".
+    assert sk._short_label("I go out often") == "go out often"
 
 
 def test_auto_prepare_picks_kmeans_for_ratings_and_finds_id():
@@ -784,8 +804,11 @@ def test_segments_are_checked_against_a_different_number_of_segments():
     got = sk.stability_across_solutions(X, range(2, 4), 2, labels, 5, np.random.default_rng(0))
     assert set(got) == {0, 1}
     # k-1 is 1, which is not a segmentation, so only k=3 is compared against. One of the two
-    # triples must split to make a third group; the other survives whole.
-    assert max(got.values()) == 1.0 and min(got.values()) >= 2 / 3
+    # triples must split to make a third group; the other survives whole. Both are reported under
+    # "splits", because that is the direction being measured here.
+    assert all("splits" in v for v in got.values())
+    splits = [v["splits"] for v in got.values()]
+    assert max(splits) == 1.0 and min(splits) >= 2 / 3
 
     # A segment index with no members must not produce a score or a division by zero.
     lopsided = sk.stability_across_solutions(X, range(2, 4), 3, labels, 5, np.random.default_rng(0))
@@ -795,9 +818,24 @@ def test_segments_are_checked_against_a_different_number_of_segments():
     assert sk.stability_across_solutions(X, [2], 2, labels, 5, np.random.default_rng(0)) == {}
 
     assert sk.persistence_paragraph({}, []) == ""
-    holds = sk.persistence_paragraph({0: 0.95, 1: 0.88}, ["Loyal", "Curious"])
-    assert "holds its shape" in holds and "Loyal" in holds
-    assert "does not survive" in sk.persistence_paragraph({0: 0.95, 1: 0.2}, ["A", "B"])
+    holds = sk.persistence_paragraph({0: {"merges": 0.95}, 1: {"merges": 0.88}},
+                                     ["Loyal", "Curious"])
+    assert "holds together" in holds and "Loyal" in holds
+    assert "scatters" in sk.persistence_paragraph({0: {"merges": 0.95}, 1: {"merges": 0.2}},
+                                                  ["A", "B"])
+
+    # THE FALSE ALARM THIS METRIC USED TO RAISE. Asking for one more group forces the solution to
+    # split something, so whichever segment is subdivided scores about 0.5 in that direction
+    # whether or not it is genuine. Taking the weaker of the two directions then condemned it.
+    # Measured on 420 students whose three mind-sets were recovered at ARI 0.954 — every segment
+    # real — the largest held together perfectly when merged (1.00), scored 0.56 when split, and
+    # the report told the reader not to build a campaign on it.
+    both = sk.persistence_paragraph({0: {"merges": 1.0, "splits": 0.56},
+                                     1: {"merges": 1.0, "splits": 1.0}}, ["Big", "Small"])
+    assert "holds together" in both, both
+    assert "scatters" not in both, "a segment that survives merging must not be called unreal"
+    assert "Every segment stays together" in both
+    assert "finer detail is available" in both, "splitting should be offered as an opportunity"
 
     # End to end, and the part that matters: it discriminates. Measured on this machine, three
     # planted segments score 0.78 and above while pure noise reaches only 0.69.
@@ -811,13 +849,24 @@ def test_segments_are_checked_against_a_different_number_of_segments():
     centres = np.array([[5, 1, 5, 1, 3], [1, 5, 1, 5, 3], [3, 3, 5, 5, 1]], float)
     who = rng.integers(0, 3, 400)
     real = analyse(_likert(centres[who] + rng.normal(0, 0.5, (400, 5))))
-    assert "survive a different number" in real["digest"]
-    assert min(real["persistence"].values()) >= 0.7, real["persistence"]
-    assert "Every segment survives" in real["digest"]
+    assert "ask for a different number" in real["digest"]
+    held = [v["merges"] for v in real["persistence"].values() if "merges" in v]
+    assert held and min(held) >= 0.7, real["persistence"]
+    assert "Every segment stays together" in real["digest"]
 
+    # Structureless data lands on k=2, where there IS no merge direction: k-1 is a single group,
+    # which is not a segmentation. The metric therefore has nothing to say about whether those two
+    # segments are real, and must say nothing rather than borrowing the split direction — which is
+    # what it used to do, and how a genuine segment came to be reported as one that dissolves.
+    # Realness at k=2 is decided by the Hopkins statistic, the dip test, split-half replication and
+    # per-segment Jaccard, all of which appear above this table in the report.
     noise = analyse(_likert(rng.normal(3, 1.1, (400, 5))))
-    assert min(noise["persistence"].values()) < 0.7, (
-        "segments found in structureless data should not survive a change in k")
+    noise_held = [v["merges"] for v in noise["persistence"].values() if "merges" in v]
+    if noise_held:
+        assert min(noise_held) < 0.7, "noise segments should not survive being merged"
+    else:
+        assert "Every segment stays together" not in noise["digest"], (
+            "claimed the segments hold together with no evidence that they do")
 
 
 def test_the_report_says_which_of_the_three_kinds_of_segmentation_this_is():
@@ -4495,3 +4544,78 @@ def test_more_questions_than_the_sample_can_support_is_never_called_high_confide
         "every criterion agrees on a wrong answer")
     assert "too few to pin down" in r["digest"] or "questions and only" in r["digest"], \
         "the report does not say why it is holding back"
+
+
+def test_the_summary_does_not_contradict_the_tables_under_it():
+    """Found by reading a report end to end as its reader, on 420 students whose three mind-sets
+    the tool recovered at an Adjusted Rand Index of 0.954 — every segment genuinely real.
+
+    Three things in the plain-language box argued with the evidence below it:
+
+    - it said to "start with the biggest, most distinct group", and the largest segment was the one
+      the table below told the reader not to build a campaign on;
+    - it called a 40% share "about 1 in 3 (40%)", putting a claim and its contradiction inside one
+      set of brackets;
+    - the green light said the groups "are clear", five lines above a Hopkins statistic of 0.59
+      described as "essentially random".
+    """
+    rng = np.random.default_rng(31)
+    Q = ["I want to meet people outside my own course",
+         "I would use an app to find people for a night out",
+         "Most social apps feel fake to me",
+         "I prefer meeting people through friends I already have",
+         "I go out more than twice a week",
+         "I like planning things rather than deciding last minute"]
+    centres = [[4.6, 4.5, 2.2, 2.0, 4.4, 2.4], [2.1, 2.3, 4.4, 4.5, 2.2, 3.9],
+               [3.9, 3.4, 3.2, 3.1, 3.0, 4.2]]
+    rows, truth = [], []
+    for g, (m, c) in enumerate(zip([170, 140, 110], centres)):
+        rows.append(np.clip(np.rint(rng.normal(c, 0.75, size=(m, len(Q)))), 1, 5))
+        truth += [g] * m
+    df = pd.DataFrame(np.vstack(rows).astype(int), columns=Q)
+    df.insert(0, "respondent_id", [f"S{i}" for i in range(len(df))])
+
+    r = sk.run_analysis(df.to_csv(index=False).encode(),
+                        cfg=sk.SegmentationConfig(k_min=2, k_max=6, **FAST))
+    digest = r["digest"]
+
+    assert "most distinct" not in digest, (
+        "the summary asserts the biggest group is the most distinct, which nothing here tested")
+    assert "Do not build a campaign" not in digest, (
+        "a segment is being condemned on the split direction, which every solution forces")
+
+    # No share may be described as a fraction it is not. Checked directly on the helper, over
+    # every whole percentage, rather than hoping this run happens to produce a 40% segment.
+    for pct in range(1, 100):
+        phrase = sk._fraction_phrase(pct / 100)
+        if "1 in " in phrase:
+            d = int(phrase.split("1 in ")[1].split(" ")[0])
+            assert abs(pct / 100 - 1 / d) <= 0.03, f"{pct}% described as {phrase}"
+
+    # The green light may only claim what it measured: reproducibility, not separation.
+    if "🟢" in digest:
+        assert "groups are clear" not in digest, (
+            "the confidence light claims the groups are separated; it is built from stability")
+
+
+def test_a_segment_is_not_condemned_for_dividing_when_asked_for_more_groups():
+    """At any k, asking for one more group forces the solution to split something. Whichever
+    segment it splits scored about 0.5 in that direction, the weaker of the two directions was
+    reported, and a genuine segment was labelled 'dissolves'.
+
+    Measured: the largest and cleanest of three real mind-sets held together perfectly under
+    merging (1.00), scored 0.56 under splitting, and the report told the reader not to spend money
+    on it.
+    """
+    para = sk.persistence_paragraph(
+        {0: {"merges": 1.0, "splits": 0.51}, 1: {"merges": 1.0, "splits": 1.0}},
+        ["Night-out crowd", "Homebodies"])
+    assert "holds together" in para
+    assert "scatters" not in para and "dissolves" not in para, (
+        "a segment that survives merging intact is being called unreal because k+1 split it")
+    assert "finer detail is available" in para
+
+    # And the direction that IS evidence still works: a segment whose members scatter when groups
+    # are merged was never a unit, and must be called out.
+    weak = sk.persistence_paragraph({0: {"merges": 0.30}, 1: {"merges": 0.95}}, ["Fragile", "Solid"])
+    assert "scatters" in weak

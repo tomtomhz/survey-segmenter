@@ -1437,17 +1437,41 @@ _LABEL_STOP = {"i", "to", "the", "a", "an", "my", "in", "of", "you", "for", "it"
                "your", "am", "be", "or", "at", "as", "would", "like"}
 
 
-def _short_label(text, max_chars=26):
-    """Turn a raw column header ('I want to meet people in real life') into a short, human label
-    ('want meet people real') without cutting a word in half — the auto-names a non-expert sees."""
-    t = str(text).replace("_", " ").strip().rstrip("?").strip()
-    words = [w for w in t.split() if w.lower() not in _LABEL_STOP] or t.split()
+_TRAILING_FILLER = {"to", "for", "of", "in", "on", "at", "a", "an", "the", "and", "or",
+                    "rather", "than", "with", "by", "from", "that", "as", "is", "are", "my",
+                    "own", "it", "about", "would", "will", "can"}
+
+
+def _short_label(text, max_chars=30):
+    """Shorten a question into a label a person can recognise, keeping it English.
+
+    This used to drop every stopword first, which reads as a telegram once two of them are joined
+    with a "+": "I like planning things rather than deciding last minute" came out as "planning
+    things rather" — a fragment ending on a dangling conjunction — and the segment it named
+    appeared throughout a report as "planning things rather + want meet people outside". These
+    names are placeholders the team is told to replace, so their one job is to be recognisable as
+    the question they came from, which the original words do and a stopword-stripped stub does not.
+
+    A leading "I " is dropped because every question in a battery has one, and the label is cut at
+    a word boundary with an ellipsis so a shortened phrase looks shortened rather than finished.
+    """
+    t = " ".join(str(text).replace("_", " ").split()).strip().rstrip("?").strip()
+    if t[:2].lower() == "i " and len(t) > 2:
+        t = t[2:].lstrip()
+    if len(t) <= max_chars:
+        return t
     out = ""
-    for w in words:
+    for w in t.split():
         if out and len(out) + len(w) + 1 > max_chars:
             break
         out = (out + " " + w).strip()
-    return out or t[:max_chars]
+    # Do not end a shortened label on a word that was leading somewhere: "...feel fake to" and
+    # "...planning things rather" both read as a sentence someone gave up on.
+    words = out.split()
+    while len(words) > 1 and words[-1].lower() in _TRAILING_FILLER:
+        words.pop()
+    out = " ".join(words)
+    return (out + "…") if out else t[:max_chars]
 
 
 def _plural(unit):
@@ -1461,6 +1485,10 @@ def _fraction_phrase(share):
     if share >= 0.45:
         return f"about half ({pct}%)"
     d = min(range(3, 11), key=lambda d: abs(share - 1 / d))
+    # Only say "1 in d" when it is actually that. 40% was being read out as "about 1 in 3 (40%)",
+    # which puts a claim and its own contradiction in the same set of brackets.
+    if abs(share - 1 / d) > 0.03:
+        return f"{pct}%"
     return f"about 1 in {d} ({pct}%)"
 
 
@@ -1550,8 +1578,13 @@ def executive_summary(n_resp, names, shares, wants, min_jaccard, repro, unit="gr
     too_wide = n_items is not None and n_resp < 2 * n_items
     if min_jaccard >= 0.75 and repro >= 0.6 and not k_contested and not methods_disagree \
             and not too_wide:
-        light, label, meaning = "🟢", "High", ("the groups are clear and they reproduce reliably "
-                                               "when the analysis is repeated.")
+        # "the groups are clear" was a claim about SEPARATION, which this light does not measure —
+        # it is built from stability numbers. On a real run it sat five lines above a Hopkins
+        # statistic of 0.59 described as "essentially random", and the reader had to reconcile
+        # them. The light now claims what it actually tested.
+        light, label, meaning = "🟢", "High", ("the same groups come back reliably when the "
+                                               "analysis is repeated, and each one holds together "
+                                               "under resampling.")
     elif min_jaccard >= 0.6 and repro >= 0.4:
         light, label, meaning = "🟡", "Moderate", ("the groups mostly hold up, but " + (
             f"there are {n_items} questions and only {n_resp:,} people, which is too few to pin "
@@ -1583,9 +1616,14 @@ def executive_summary(n_resp, names, shares, wants, min_jaccard, repro, unit="gr
          f"We looked at **{n_resp:,} people** and found **{len(names)} {_plural(unit)}**:\n"]
     for i in sorted(range(len(names)), key=lambda i: -shares[i]):
         L.append(f"- **{names[i]}** ({_fraction_phrase(shares[i])} of people) stand out for: {wants[i]}.")
-    L.append(f"\n**What to do next.** Start with the biggest, most distinct {unit}. Give the "
-             f"{_plural(unit)} names your team recognises (the ones above are generated automatically). "
-             "Everything below is the supporting detail and the confidence checks.")
+    # This used to say "start with the biggest, most distinct group". Two things wrong with that:
+    # nothing here establishes the biggest group is the most distinct, and on a real run the
+    # largest segment was the one the stability table below told the reader not to spend money on.
+    # The summary must not hand out an instruction the rest of the report contradicts.
+    L.append(f"\n**What to do next.** Give the {_plural(unit)} names your team recognises (the ones "
+             "above are generated automatically). Then read the two stability tables below before "
+             f"committing a budget: they say which {_plural(unit)} hold together and which have "
+             "fuzzy edges, and the largest is not always the soundest.")
     if label != "High":
         L.append(f"\n> Because confidence is {label}, treat these {_plural(unit)} as a direction to test "
                  "with a few interviews, not a settled fact.")
@@ -1713,11 +1751,22 @@ def stability_across_solutions(X, k_range, chosen_k, labels, n_init, rng, cfg=No
     lands together — and falls only when a segment genuinely fragments. Measured again with it:
     three real segments 0.78, five real 0.79, two adjacent 0.82, pure noise 0.47.
 
-    The reported number is the weaker of the two neighbours, because surviving in one direction
-    only is weak evidence.
+    **The two directions are reported separately, and only one of them is evidence about whether
+    a segment is real.** Taking the weaker of the two — which this did — produces a false alarm on
+    exactly the segments most worth having. Asking for one MORE group forces the solution to split
+    something, so whichever segment gets subdivided scores about 0.5 in that direction whether or
+    not it is genuine. Measured on 420 students whose three mind-sets the tool recovered at an
+    Adjusted Rand Index of 0.954 — every segment real — the largest and cleanest of them held
+    together perfectly under merging (1.00) and scored 0.56 under splitting, and the report told
+    the reader not to build a campaign on it.
 
-    Returns {segment index: persistence in 0..1}, or {} if there are no neighbouring solutions to
-    compare against.
+    Merging is the informative direction. When the solution is asked for one FEWER group, a real
+    segment moves into a bigger group intact; one that was never a unit scatters across several.
+    Splitting says something useful too, but a different thing: that the segment contains
+    recognisable sub-groups if the team wants finer detail. That is an opportunity, not a defect.
+
+    Returns {segment index: {"merges": float, "splits": float}} — either key absent when that
+    neighbouring solution does not exist — or {} when there are no neighbours at all.
     """
     labels = np.asarray(labels)
     chosen = {c: set(np.flatnonzero(labels == c)) for c in range(int(chosen_k))}
@@ -1725,46 +1774,82 @@ def stability_across_solutions(X, k_range, chosen_k, labels, n_init, rng, cfg=No
     if not neighbours or not chosen:
         return {}
 
-    scores = {c: [] for c in chosen}
+    scores = {c: {} for c in chosen}
     for k in neighbours:
         try:
             other = _fit(X, k, cfg, n_init, rng.integers(1e9)).labels_
         except Exception:
             continue
+        where = "merges" if k < chosen_k else "splits"
         for c, members in chosen.items():
             if not members:
                 continue
             counts = np.bincount(other[sorted(members)], minlength=k)
-            scores[c].append(float(counts.max() / len(members)))
-    return {c: float(min(v)) for c, v in scores.items() if v}
+            scores[c][where] = float(counts.max() / len(members))
+    return {c: v for c, v in scores.items() if v}
 
 
 def persistence_paragraph(persistence, names):
-    """Report which segments survive a change in the number of segments."""
+    """Report what happens to each segment when a different number of groups is asked for.
+
+    Two questions, kept apart because they have different answers and different consequences:
+    does the segment stay together when the solution is coarser, and does it subdivide when the
+    solution is finer. Only the first says whether the segment is a real unit. The second is a
+    finding a marketer can use — "this group has two flavours in it if you want them".
+    """
     if not persistence:
         return ""
-    rows = [{"segment": names[c] if c < len(names) else f"Segment {c}",
-             "survives a different k": round(v, 2),
-             "reading": ("holds its shape" if v >= 0.7 else
-                         "partly holds" if v >= 0.55 else "dissolves")}
-            for c, v in sorted(persistence.items())]
-    weakest = min(persistence.values())
-    if weakest >= 0.7:
-        verdict = ("Every segment survives being asked for a different number of groups, which is "
-                   "the strongest sign that they are features of your customers rather than of "
-                   "the number you happened to choose.")
+    if not isinstance(next(iter(persistence.values())), dict):   # older single-number form
+        persistence = {c: {"merges": v} for c, v in persistence.items()}
+
+    rows = []
+    for c, v in sorted(persistence.items()):
+        row = {"segment": names[c] if c < len(names) else f"Segment {c}"}
+        if "merges" in v:
+            row["stays together with fewer groups"] = round(v["merges"], 2)
+            row["reading"] = ("holds together" if v["merges"] >= 0.7 else
+                              "partly holds" if v["merges"] >= 0.55 else "scatters")
+        if "splits" in v:
+            row["survives asking for more groups"] = round(v["splits"], 2)
+            row["if you asked for more"] = ("stays one group" if v["splits"] >= 0.7 else
+                                            "divides into sub-groups")
+        rows.append(row)
+
+    holds = [v["merges"] for v in persistence.values() if "merges" in v]
+    weakest = min(holds) if holds else None
+    if weakest is None:
+        verdict = ""
+    elif weakest >= 0.7:
+        verdict = ("Every segment stays together when the analysis is asked for fewer groups, "
+                   "which is the strongest sign that they are features of your customers rather "
+                   "than of the number you happened to choose.")
     elif weakest >= 0.55:
-        verdict = ("At least one segment changes shape when a different number of groups is "
-                   "requested. Its centre is real, but its boundaries are a choice — be careful "
-                   "quoting its exact size.")
+        verdict = ("At least one segment partly breaks up when fewer groups are requested. Its "
+                   "centre is real, but its boundaries are a choice — be careful quoting its "
+                   "exact size.")
     else:
-        verdict = ("At least one segment does not survive asking for a different number of groups: "
-                   "it exists because you asked for this many, not because it is there. Do not "
-                   "build a campaign on the ones marked 'dissolves'.")
-    return ("\n**Would these segments survive a different number?** Each one re-checked against "
-            "the solutions with one group fewer and one more, scored by what share "
-            "of its members stay together (1 = the segment survives whole, 0 = it scatters). "
-            "Dolnicar & Leisch call this segment "
+        verdict = ("At least one segment scatters when fewer groups are requested: its members go "
+                   "to different places, which is what happens when it was never a single group. "
+                   "Treat the ones marked 'scatters' as the weakest part of this segmentation.")
+
+    # Quoted, because these names are themselves sentences: unquoted, the line read "would divide
+    # would use an app to find... into smaller ones".
+    splitters = ['"%s"' % (names[c] if c < len(names) else f"Segment {c}")
+                 for c, v in sorted(persistence.items())
+                 if v.get("splits") is not None and v["splits"] < 0.7]
+    if splitters:
+        verdict += ("\n\nAsking for one more group would divide "
+                    + (", ".join(splitters[:2]) if len(splitters) <= 2 else
+                       f"{len(splitters)} of the segments")
+                    + " into smaller ones. That is not a fault: with any number of groups, asking "
+                      "for one more has to split something. It means finer detail is available "
+                      "there if the team wants it.")
+    return ("\n**What happens if you ask for a different number of groups?** Each segment is "
+            "re-checked against the solutions with one group fewer and one more, scored by the "
+            "share of its members that stay together (1 = the whole segment lands in one place). "
+            "The two directions answer different questions: staying together with FEWER groups is "
+            "what says a segment is a real unit, while dividing when asked for MORE groups is "
+            "normal and simply means it has sub-groups in it. Dolnicar & Leisch call this segment "
             "level stability across solutions.\n"
             + _md(pd.DataFrame(rows)) + "\n" + verdict + "\n")
 
