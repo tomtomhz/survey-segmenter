@@ -392,6 +392,46 @@ one at a time until `typing_tool` went 0.24 GB to 11.11 GB in one call.
 A negative result from an incomplete instrument is not evidence of absence, and "no single big
 allocation" was a conclusion about my wrapper list, not about the program.
 
+## A full audit against the packaged binary (2026-08-07)
+
+Everything below was run against the **built app**, not the source tree, because the worst defect
+of the day hid precisely in that gap: the source had `tabulate`, so every test passed on every
+machine anyone was looking at, while every packaged release produced reports with no tables at all.
+
+### Found and fixed
+
+| | |
+|---|---|
+| **No tables in any packaged report** | `to_markdown` needs `tabulate`, which pandas imports lazily; PyInstaller never saw it. 0 tables before, 8 after |
+| **The categorical path gave 2 of 11 pieces of evidence** | Split-half replication, the kind of segmentation, and the neighbours table (computed and discarded) |
+| **"No answer" codes scored silently** | A 99 in one question moved 35 of 60 affected people into the wrong segment; agreement with the truth fell 0.967 → 0.593 |
+| **A recommended k below the cutoff the report quotes** | k=6 chosen at prediction strength 0.74, under the 0.80 the report calls decisive, with no mention |
+
+### Verified working, and recorded so nobody re-audits them
+
+| Area | Evidence |
+|---|---|
+| `.xlsx` reading in the app | Title-row file read correctly: k=3, n=300 — openpyxl *is* bundled |
+| Nine file shapes through the binary | UTF-16, semicolon multiselect, 60% missing, ragged, emoji headers, 2,800×25, 5,381 categorical, mixed-type, n=5 — all with tables and charts |
+| Survey weights | A deliberately skewed 60/20/20 sample recovers a 20/40/40 population |
+| Concurrency | Eight simultaneous analyses, each with its own correct row count, tables and charts, no errors — the module-level state fault behind an earlier 3-of-9 failure has not returned |
+| Bad uploads | Empty file, prose, a PNG, one respondent, zero-variance, free text, HTML, gzip — all answered with a clear, actionable message |
+| MaxDiff | Hierarchical Bayes recovered two planted mind-sets at rank correlations of 1.000 and 0.986 |
+| Downloads vs report | 340 rows, 3 segments, every segment size in the download appears in the report table, ids unique |
+| The AI add-on with no key | A friendly error, surfaced by the app with a `kind` the interface can act on |
+
+### Three false positives, caught before they became "fixes"
+
+Worth recording because each looked convincing:
+
+- **Grepping the `.app` for report strings finds none of them**, old or new — the code is in a
+  compressed archive. That method proves nothing, and it nearly produced a second "missing
+  dependency" report about `openpyxl`, which is bundled correctly.
+- **A "hang" at 0% CPU** on a 2,800-respondent file was my own probe: it read the app's stdout only
+  until the port appeared, the 64 KB pipe buffer filled, and the app blocked on its next print.
+- **Every bad upload returning HTTP 200** looked like missing error handling. The errors were in the
+  response body all along; my probe printed the wrong field.
+
 ## The categorical path was a poor relation (2026-08-07)
 
 A survey made entirely of pick-any questions goes down the latent-class path. Compared against the
