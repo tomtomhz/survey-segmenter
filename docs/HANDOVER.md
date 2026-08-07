@@ -8,7 +8,7 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-07 (end of day) · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ **v1.5.9 + 1 commit**, 189 Python + 102 frontend tests, CI green
+**Last updated:** 2026-08-07 (end of day) · repo `github.com/tomtomhz/survey-segmenter` (private) · `main` @ **v1.5.9 + 1 commit**, 189 Python + 102 frontend tests green locally on Python 3.9 **and** 3.12 · **GitHub Actions is not running — see below**
 
 ---
 
@@ -16,7 +16,32 @@ this says where it stands, what was decided and why, and what to do next.
 
 **Released today: v1.5.1 → v1.5.9.** The team copy at `~/Desktop/Survey Segmenter (app for the
 team)/` is on **1.5.9** — verified by asking the shipped binary itself, over HTTP, which version it
-stamps into a report, not by trusting the source tree. CI green. Tree clean.
+stamps into a report, not by trusting the source tree. Tree clean.
+
+### GitHub Actions has not run since 15:24 today — billing, not code
+
+Every run from `Re-measure the central accuracy claim` (15:33) onward failed **before starting a
+single step**, with the same annotation on all five jobs:
+
+> The job was not started because recent account payments have failed or your spending limit needs
+> to be increased.
+
+So **nothing in v1.5.9 was tested by CI**, and no Windows build artifact exists for it. This was
+recorded as "CI green" for several hours on the strength of a stale reading; the lesson is that a
+green memory is not a green run, and `gh run list` costs one command.
+
+What was done instead, locally, and what it does and does not cover:
+
+| | Covered |
+|---|---|
+| Python 3.9.6 (oldest in the CI matrix) | 189 passed |
+| Python 3.12.13, numpy 2.5.1, pandas 3.0.5 (newest) | 189 passed, no skips, all extras installed |
+| Python 3.11 | not run — bracketed by the two above, not directly tested |
+| Ubuntu | **not covered at all.** Both local runs are macOS/arm64 |
+| Windows build | **not covered at all.** No artifact was produced |
+
+Fixing the billing and re-running CI is the single highest-value action available on this repo, and
+it is Tom's to do — it needs payment details, which the assistant must not handle.
 
 **v1.5.9 is the audit release.** Nothing in it came from a user report; all of it came from pointing
 the tool at data it had never seen and checking whether what it said was true. The one behaviour
@@ -41,8 +66,8 @@ verdict below is bounded rather than unconditional.
 2. **HB MaxDiff has never seen a real best-worst export.** It is verified against synthetic data
    with known utilities (rank correlation 1.000 and 0.986 under misspecification) and against seven
    malformed exports, but no genuine Qualtrics best-worst file has gone through it.
-3. **Nobody has hand-clicked the Windows build.** CI builds it and the smoke test drives it over
-   HTTP; no human has opened it.
+3. **Nobody has hand-clicked the Windows build** — and as of today nobody can, because CI is not
+   running and no v1.5.9 Windows artifact exists. Blocked on the billing fix above.
 
 ### The working rules this session established
 
