@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-07 (end of day) · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.5.9 + 1 commit**, 189 Python + 102 frontend tests green locally on Python 3.9 **and** 3.12 · **GitHub Actions is not running — see below**
+**Last updated:** 2026-08-07 (end of day) · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.6.0**, 198 Python + 111 frontend tests green locally on Python 3.9 **and** 3.12 · **GitHub Actions is not running — see below**
 
 ---
 
 ## Session state — 2026-08-07, end of day (read this first)
 
-**Released today: v1.5.1 → v1.5.9.** The team copy at `~/Desktop/Survey Segmenter (app for the
-team)/` is on **1.5.9** — verified by asking the shipped binary itself, over HTTP, which version it
+**Released today: v1.5.1 → v1.6.0.** The team copy at `~/Desktop/Survey Segmenter (app for the
+team)/` is on **1.6.0** — verified by asking the shipped binary itself, over HTTP, which version it
 stamps into a report, not by trusting the source tree. Tree clean.
 
 ### GitHub Actions has not run since 15:24 today — billing, not code
@@ -25,7 +25,7 @@ single step**: while the repo was private, Actions minutes were metered against 
 allowance, running the full matrix on every push exhausted August's allowance in seven days, and
 GitHub then halts jobs rather than billing.
 
-So **nothing in v1.5.9 was tested by CI**, and no Windows build artifact exists for it. This was
+So **nothing since v1.5.8 has been tested by CI**, and no Windows build artifact exists for it. This was
 recorded as "CI green" for several hours on the strength of a stale reading; the lesson is that a
 green memory is not a green run, and `gh run list` costs one command. The workflow has since been
 trimmed so an ordinary push runs two jobs rather than five — see the header of `ci.yml`.
@@ -34,8 +34,8 @@ What was done instead, locally, and what it does and does not cover:
 
 | | Covered |
 |---|---|
-| Python 3.9.6 (oldest in the CI matrix) | 189 passed |
-| Python 3.12.13, numpy 2.5.1, pandas 3.0.5 (newest) | 189 passed, no skips, all extras installed |
+| Python 3.9.6 (oldest in the CI matrix) | 198 passed |
+| Python 3.12.13, numpy 2.5.1, pandas 3.0.5 (newest) | 198 passed, no skips, all extras installed |
 | Python 3.11 | not run — bracketed by the two above, not directly tested |
 | Ubuntu | **not covered at all.** Both local runs are macOS/arm64 |
 | Windows build | **not covered at all.** No artifact was produced |
@@ -43,7 +43,15 @@ What was done instead, locally, and what it does and does not cover:
 Re-running the full matrix on Ubuntu, and producing a Windows artifact somebody actually opens, is
 the single highest-value action outstanding on this repo.
 
-**v1.5.9 is the audit release.** Nothing in it came from a user report; all of it came from pointing
+**v1.6.0 reports the answer a best-worst study was fielded for.** The tool already scored MaxDiff
+exports and grouped people on the utilities — and then described the groups without ever saying
+which items the sample preferred. The ranking was computed in the sampler and discarded. It now
+appears as a card, a report section and two downloads, each row carrying the probability that it
+really beats the row below it. The build's smoke test now puts a best-worst file through the
+PACKAGED app as well: without `maxdiff.py` bundled, the engine silently clusters the raw choice
+rows instead, and reports two groups on 800 rows where there are 40 people.
+
+**v1.5.9 was the audit release.** Nothing in it came from a user report; all of it came from pointing
 the tool at data it had never seen and checking whether what it said was true. The one behaviour
 change is the distinct-patterns cap — a short survey can no longer be cut into more groups than its
 answers can distinguish. **That changes results on five-question surveys**, which is the most common
@@ -67,7 +75,8 @@ verdict below is bounded rather than unconditional.
    with known utilities (rank correlation 1.000 and 0.986 under misspecification) and against seven
    malformed exports, but no genuine Qualtrics best-worst file has gone through it.
 3. **Nobody has hand-clicked the Windows build** — and as of today nobody can, because CI is not
-   running and no v1.5.9 Windows artifact exists. Blocked on the billing fix above.
+   running and no Windows artifact exists for anything after v1.5.8. Blocked on the billing fix
+   above.
 
 ### The working rules this session established
 
@@ -92,8 +101,7 @@ Nothing broken that I know of. The remaining gaps are all blocked on something o
 |---|---|
 | Live Claude API round-trip | Deliberately unverified — no key is used. The no-key path gives a clean error |
 | HB MaxDiff on real responses | Recovers planted utilities at rank correlation 1.000 / 0.986; never seen a real best-worst export |
-| The Windows build | CI-verified only; nobody has hand-clicked it |
-| `group_profiles.csv` naming | The open finding above |
+| The Windows build | CI-verified only up to v1.5.8; nobody has hand-clicked it |
 
 ## Session state — 2026-08-07 (earlier)
 

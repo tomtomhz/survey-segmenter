@@ -5262,17 +5262,31 @@ def test_a_best_worst_export_is_read_in_the_words_real_exports_use():
     assert not explained.startswith("_"), "the reader is being shown an internal sentinel"
 
 
-def test_the_two_places_the_version_is_written_by_hand_agree():
-    """A release edits `__version__` and `pyproject.toml` separately, and nothing was checking that
-    both moved. The failure is quiet and it survives the smoke test: the app runs perfectly and
-    stamps the wrong number into every report footer and `run_manifest.json`, so a result cannot be
-    traced back to the code that produced it — which is the whole reason the version is recorded."""
-    pyproject = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text()
-    declared = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.M)
-    assert declared, "pyproject.toml has no version line to compare against"
-    assert declared.group(1) == sk.__version__, (
-        f"pyproject.toml says {declared.group(1)} but segment_kmeans.__version__ says "
-        f"{sk.__version__}; a release moved one and not the other")
+def test_the_places_the_version_is_written_by_hand_all_agree():
+    """A release edits the version in three separate files, and nothing was checking that all three
+    moved. The failure is quiet and it survives the smoke test: the app runs perfectly and stamps
+    the wrong number into every report footer and `run_manifest.json`, so a result cannot be traced
+    back to the code that produced it — which is the whole reason the version is recorded.
+
+    The first version of this test covered two of the three. `frontend/package.json` was already a
+    full release behind by the time the third was noticed, which is the argument for checking every
+    file that carries the number rather than the ones that came to mind.
+    """
+    root = Path(__file__).resolve().parent.parent
+    declared = {}
+
+    found = re.search(r'^version\s*=\s*"([^"]+)"', (root / "pyproject.toml").read_text(), re.M)
+    assert found, "pyproject.toml has no version line to compare against"
+    declared["pyproject.toml"] = found.group(1)
+
+    found = re.search(r'"version"\s*:\s*"([^"]+)"',
+                      (root / "frontend" / "package.json").read_text())
+    assert found, "frontend/package.json has no version field to compare against"
+    declared["frontend/package.json"] = found.group(1)
+
+    wrong = {f: v for f, v in declared.items() if v != sk.__version__}
+    assert not wrong, (f"segment_kmeans.__version__ is {sk.__version__} but {wrong}; a release "
+                       f"moved some of them and not the others")
 
 
 def _homogeneous_best_worst(order, n_resp=140, n_task=9, seed=5):

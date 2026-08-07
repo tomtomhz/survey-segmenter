@@ -108,6 +108,7 @@ def _smoke_test():
     import csv
     import io
     import json
+    import math
     import time
     import urllib.request
 
@@ -256,6 +257,53 @@ def _smoke_test():
         if specs < len(result["charts"]):
             missing.append(f"only {specs} of {len(result['charts'])} charts carry the data behind "
                            "them, so the interactive versions will fall back to pictures")
+        # A second survey, of a different KIND. `maxdiff.py` is a separate top-level module and the
+        # engine imports it inside a try/except, because scoring best-worst data is optional. If it
+        # does not survive bundling, `_maxdiff` is None, the detector never fires, and a best-worst
+        # export is clustered on its raw choice codes — a confident-looking segmentation of
+        # nonsense, with no error anywhere. That is the same silent shape as the missing tables,
+        # and the source tree cannot reveal it because the module is always importable there.
+        # Two seconds of sampling on forty people is the whole cost.
+        bw = [["respondent_id", "task", "item", "choice"]]
+        items = ["a", "b", "c", "d", "e"]
+        strength = [1.5, 0.8, 0.0, -0.8, -1.5]
+        rnd2 = random.Random(11)
+        for person in range(40):
+            for task in range(5):
+                shown = rnd2.sample(range(len(items)), 4)
+                draw = [strength[i] - math.log(-math.log(max(rnd2.random(), 1e-12)))
+                        for i in shown]
+                best = shown[draw.index(max(draw))]
+                worst = shown[draw.index(min(draw))]
+                for i in shown:
+                    bw.append([f"R{person}", task, items[i],
+                               "Best" if i == best else ("Worst" if i == worst else "")])
+        buf2 = io.StringIO()
+        csv.writer(buf2).writerows(bw)
+        body2, boundary2 = _multipart(buf2.getvalue(), filename="best_worst.csv")
+        req2 = urllib.request.Request(
+            "http://127.0.0.1:8765/analyze", data=body2,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary2}"})
+        try:
+            bw_result = json.loads(urllib.request.urlopen(req2, timeout=600).read())
+        except Exception as e:
+            print(f"\nBUILD IS BROKEN — the app could not analyse a best-worst export "
+                  f"({type(e).__name__}: {e}).")
+            _discard_archive()
+        if not bw_result.get("ok"):
+            print(f"\nBUILD IS BROKEN — a best-worst export was refused: "
+                  f"{bw_result.get('error') or bw_result}")
+            _discard_archive()
+        if "Hierarchical Bayes" not in bw_result.get("report_html", ""):
+            print("\nBUILD IS BROKEN — a best-worst export was NOT scored as one. maxdiff.py did "
+                  "not survive bundling, so the choice codes were clustered as if they were "
+                  "ratings. The app reports groups and gives no indication anything is wrong.")
+            _discard_archive()
+        if not bw_result.get("ranking"):
+            print("\nBUILD IS BROKEN — a best-worst export was scored but its ranking is missing, "
+                  "so the app shows segments without the answer the study was fielded for.")
+            _discard_archive()
+
         if missing:
             print("\nBUILD IS BROKEN — it runs, but quietly does less than it should:")
             for reason in missing:
@@ -264,7 +312,8 @@ def _smoke_test():
 
         print(f"Smoke test passed: the built app found {result['k']} groups in "
               f"{result['n_people']} people, drew {len(result['charts'])} charts with the data "
-              f"behind all of them, and ran both cluster-tendency tests.")
+              f"behind all of them, ran both cluster-tendency tests, and ranked "
+              f"{len(bw_result['ranking'])} items from a best-worst export.")
     finally:
         proc.terminate()
         try:

@@ -3,6 +3,48 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.6.0] — 2026-08-07
+
+### Added
+
+- **A best-worst (MaxDiff) study now reports the answer it was fielded to produce.** The tool
+  already detected these exports, estimated individual utilities by Hierarchical Bayes, and grouped
+  people on them — and then described the groups while never saying which items the sample actually
+  preferred. The ranking was computed inside the sampler and discarded on the way out. For a
+  best-worst study that ranking *is* the finding; the segments are what you do about it.
+
+  It now appears as a card above the charts, as a section at the top of the report, and as
+  `item_utilities.csv` and `respondent_utilities.csv` — so a follow-up analysis never has to re-run
+  the sampler, which is the expensive part.
+
+- **The ranking says how sure it is, item by item.** Each row carries the probability that it
+  really does beat the row below it, taken from the posterior draws the sampler was already
+  producing. Anything under 95% is marked on the row itself.
+
+  This replaced a yes/no flag, and the reason is worth recording: on a thin study the flag returned
+  "too close to call" for a pair at 58% and for a pair at 93% — a coin flip and a finding most
+  people would act on, reported in identical words. The rule behind it was also the wrong
+  comparison, reading two *marginal* intervals as if they were independent when these utilities are
+  centred and therefore correlated by construction.
+
+### Fixed
+
+- **The ranking's opening sentence no longer claims more than its own table.** Sorting items with
+  no real differences still produces a first row, and the section announced "*X* comes out
+  strongest" before explaining that nothing had been separated. It now reads the same evidence the
+  table does.
+- **A row without a credible interval no longer crashes the card.** `low !== null` is true when the
+  key is simply absent, which reached `row.low.toFixed(2)`.
+- **`frontend/package.json` had been a full release behind since 1.5.9.** The check that the
+  version agrees everywhere covered two of the three files that carry it; it now covers all three.
+
+### Verified, not changed
+
+The privacy guarantee — only aggregates are sent to Claude — was an executable check for rating
+grids only. A best-worst export takes a different route entirely, including respondent ids
+travelling through a table index rather than a column. It holds there too: zero identifiers and
+zero free-text answers out of 90 respondents, now tested rather than assumed.
+
 ## [1.5.9] — 2026-08-07
 
 The audit release. Nothing here came from a user report — all of it came from pointing the tool at
