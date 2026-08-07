@@ -5260,3 +5260,16 @@ def test_a_best_worst_export_is_read_in_the_words_real_exports_use():
     explained = sk._explain_run_error(str(caught.value))
     assert "choice column" in explained and "best" in explained, explained
     assert not explained.startswith("_"), "the reader is being shown an internal sentinel"
+
+
+def test_the_two_places_the_version_is_written_by_hand_agree():
+    """A release edits `__version__` and `pyproject.toml` separately, and nothing was checking that
+    both moved. The failure is quiet and it survives the smoke test: the app runs perfectly and
+    stamps the wrong number into every report footer and `run_manifest.json`, so a result cannot be
+    traced back to the code that produced it — which is the whole reason the version is recorded."""
+    pyproject = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text()
+    declared = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.M)
+    assert declared, "pyproject.toml has no version line to compare against"
+    assert declared.group(1) == sk.__version__, (
+        f"pyproject.toml says {declared.group(1)} but segment_kmeans.__version__ says "
+        f"{sk.__version__}; a release moved one and not the other")
