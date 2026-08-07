@@ -9,6 +9,7 @@ The two tests that matter most:
 A segmentation tool that fails either of those is worse than useless, because it will mislead.
 """
 import io
+import subprocess
 import time
 import json
 import re
@@ -25,6 +26,8 @@ import pytest
 # rather than relying on the working directory pytest happened to be invoked from.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import segment_kmeans as sk
+
+ROOT = Path(__file__).resolve().parent.parent
 import charts
 import clusterability
 import kprototypes as kp
@@ -4933,3 +4936,55 @@ def test_it_says_when_the_chosen_k_fails_the_cutoff_it_quotes():
     ]
     pick2, rationale2, _ = sk.recommend_k(pd.DataFrame(fine, columns=cols), cfg)
     assert pick2 == 2 and "Prediction strength at k" not in rationale2
+
+
+def test_a_large_study_stays_within_a_sane_memory_budget(tmp_path):
+    """A guard against the shape of defect that made a 48,842-person file need 11 GB.
+
+    That one was a single line mapping each answer to its nearest known level by comparing it
+    against every level at once: nothing on a five-point scale, and 19 GB per column once a
+    continuous measurement had been typed as an ordinal one with tens of thousands of distinct
+    values. Nothing failed — the run completed, slowly, and would have taken a 16 GB laptop down.
+
+    The file below reproduces exactly that shape (four rating questions, one continuous
+    measurement with a distinct value per respondent, one pick-any answer, which routes to the
+    mixed-type path) at a size where the old code would allocate well over a gigabyte per column
+    and the current code allocates none of it.
+
+    Measured in a subprocess, because peak RSS is a high-water mark for the whole process and the
+    test suite has already run a lot by this point.
+    """
+    n = 12_000
+    script = tmp_path / "run.py"
+    script.write_text(
+        "import sys, resource, warnings, numpy as np, pandas as pd\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        "warnings.filterwarnings('ignore')\n"
+        "import segment_kmeans as sk\n"
+        "r = np.random.default_rng(0)\n"
+        f"n = {n}\n"
+        "centres = np.array([[5,1,5,1],[1,5,1,5],[3,3,5,5]], float)\n"
+        "w = r.integers(0, 3, n)\n"
+        "X = np.clip(np.rint(centres[w] + r.normal(0, .6, (n, 4))), 1, 5).astype(int)\n"
+        "d = pd.DataFrame(X, columns=['q1','q2','q3','q4'])\n"
+        "d['spend'] = np.round(r.uniform(0, 5000, n), 2)      # a distinct value per respondent\n"
+        "d['brand'] = np.where(w == 0, 'Alpha', np.where(w == 1, 'Beta', 'Gamma'))\n"
+        "d.insert(0, 'respondent_id', [f'R{i}' for i in range(n)])\n"
+        "sk.run_analysis(d.to_csv(index=False).encode(),\n"
+        "                cfg=sk.SegmentationConfig(k_min=2, k_max=3, gap_B=4, stability_B=4,\n"
+        "                                          ps_splits=3, jaccard_B=8, n_init_final=3,\n"
+        "                                          n_init_search=3, run_consensus=False,\n"
+        "                                          check_variable_selection=False))\n"
+        "peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss\n"
+        "print(peak / (1e9 if sys.platform == 'darwin' else 1e6))\n")
+    out = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=1800)
+    assert out.returncode == 0, out.stderr[-1500:]
+    peak_gb = float(out.stdout.strip().splitlines()[-1])
+    # 1.2 GB, chosen by measuring both sides rather than picked: the current code peaks at about
+    # 0.48 GB here, and restoring the old per-level scan peaks at 2.39 GB. The first threshold
+    # tried was 2.5 GB, which the OLD code passed — a guard that would have let the very defect it
+    # was written for straight through.
+    assert peak_gb < 1.2, (
+        f"{n:,} respondents needed {peak_gb:.2f} GB, against about 0.48 GB expected. Something is "
+        "allocating per respondent per level again — see kprototypes.encode, which once did "
+        "exactly that and cost 11 GB on a 48,842-person file")
