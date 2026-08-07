@@ -5143,3 +5143,74 @@ def test_the_multiple_comparison_correction_matches_the_definition():
     assert stepup == {"x": True, "y": True}, stepup
     assert sk._fdr_bh({"only": 0.04}) == {"only": True}
     assert sk._fdr_bh({"only": 0.06}) == {"only": False}
+
+
+def test_a_useless_pick_any_question_is_flagged_like_a_useless_rating():
+    """Variable importance decides which questions the report tells a team to drop, so the two
+    measures behind it have to agree on what "useless" looks like.
+
+    A rating is scored by eta-squared, a share of variance. A pick-any question cannot be, because
+    eta-squared on its codes would depend on the arbitrary order the answers were listed in, so it
+    is scored by Cramér's V — which is correlation-like, one square away from a variance share. Left
+    unsquared, a random pick-any column scores about 0.06 and clears the 0.05 near-noise floor, so
+    a genuinely useless question could never be flagged as one.
+
+    The existing coverage tests the rating path only, which is not where that fault was.
+    """
+    rng = np.random.default_rng(9)
+    n = 600
+    g = rng.integers(0, 3, n)
+    centres = np.array([[5, 1], [1, 5], [3, 3]], float)
+    real = np.clip(np.rint(centres[g] + rng.normal(0, 0.6, (n, 2))), 1, 5).astype(int)
+    brands = np.array(["Alpha", "Beta", "Gamma"])
+    raw = pd.DataFrame({
+        "q_real": real[:, 0],
+        "q_noise": rng.integers(1, 6, n),
+        "brand_real": np.where(rng.random(n) < 0.85, brands[g], rng.choice(brands, n)),
+        "brand_noise": rng.choice(brands, n),
+    })
+    # Code the pick-any columns the way the pipeline does, and tell it which they are.
+    coded = raw.copy()
+    levels = {}
+    for col in ("brand_real", "brand_noise"):
+        cats = sorted(raw[col].unique())
+        levels[col] = {i: c for i, c in enumerate(cats)}
+        coded[col] = raw[col].map({c: i for i, c in enumerate(cats)}).astype(float)
+    cfg = sk.SegmentationConfig(var_kinds={"brand_real": kp.NOMINAL, "brand_noise": kp.NOMINAL,
+                                           "q_real": kp.ORDINAL, "q_noise": kp.ORDINAL},
+                                level_labels=levels)
+
+    vi = sk.variable_importance(coded, g, cfg).set_index("item")
+    assert vi.loc["brand_real", "measure"].startswith("Cramer"), "the pick-any path was not used"
+
+    # THE INVARIANT, stated exactly: the number reported for a pick-any question is Cramér's V
+    # SQUARED. Asserting only that noise scores low and signal scores high has no teeth here —
+    # measured, a bias-corrected V already crushes random data to about 0.02, and at strong signal
+    # 0.87 unsquared and 0.76 squared both look plausible beside an eta-squared of 0.90. The first
+    # version of this test passed with and without the squaring, which is no test at all.
+    for col in ("brand_real", "brand_noise"):
+        raw_v = sk._cramers_v(coded[col].to_numpy(float), g)
+        assert vi.loc[col, "eta_squared"] == round(raw_v ** 2, 3), (
+            f"{col} reports {vi.loc[col, 'eta_squared']} where V squared is {raw_v ** 2:.3f} "
+            f"(V itself is {raw_v:.3f}) — the two measures are one square apart and the bands do "
+            "not transfer between them")
+
+    # Where it actually bites: a question with middling association. Unsquared it looks like a
+    # driver, squared it reads as the weak signal it is, and the two land in different bands.
+    middling = np.where(rng.random(n) < 0.45, brands[g], rng.choice(brands, n))
+    mid = pd.DataFrame({"brand_mid": pd.Series(middling).map(
+        {c: i for i, c in enumerate(sorted(brands))}).astype(float)})
+    v_mid = sk._cramers_v(mid["brand_mid"].to_numpy(float), g)
+    assert 0.2 < v_mid < 0.75, f"fixture drifted: V = {v_mid:.3f}, retune the agreement rate"
+    reported = sk.variable_importance(
+        mid, g, sk.SegmentationConfig(var_kinds={"brand_mid": kp.NOMINAL},
+                                      level_labels={"brand_mid": levels["brand_real"]})
+    ).set_index("item").loc["brand_mid", "eta_squared"]
+    assert reported == round(v_mid ** 2, 3)
+    assert reported < v_mid, "the reported figure is not the squared one"
+
+    # And the sanity checks: real questions drive, useless ones are flagged for dropping.
+    assert vi.loc["brand_real", "eta_squared"] > 0.5 and "drives" in vi.loc["brand_real", "role"]
+    assert vi.loc["brand_noise", "eta_squared"] < 0.05
+    assert "near-noise" in vi.loc["brand_noise", "role"]
+    assert vi.loc["q_noise", "eta_squared"] < 0.05
