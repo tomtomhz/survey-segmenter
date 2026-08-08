@@ -138,7 +138,8 @@ def _use_utf8_for_output():
     target = os.environ.get("SEG_LOG")
     if target or sys.stdout is None or sys.stderr is None:
         try:
-            sink = open(target, "a", buffering=1) if target else open(os.devnull, "w")
+            sink = (open(target, "a", buffering=1, encoding="utf-8", errors="replace")
+                if target else open(os.devnull, "w"))
         except Exception:
             sink = io.StringIO()
         # SEG_LOG redirects unconditionally, not only when the streams are missing: the whole
@@ -169,7 +170,7 @@ for _m in ("divide by zero encountered in matmul", "overflow encountered in matm
            "invalid value encountered in matmul"):
     warnings.filterwarnings("ignore", message=_m, category=RuntimeWarning)
 
-__version__ = "1.7.2"    # keep in sync with pyproject.toml
+__version__ = "1.7.3"    # keep in sync with pyproject.toml
 
 # Optional "ask Claude about your segments" add-on. Imported here (not lazily) so the packaged app
 # bundles it; wrapped so a missing file/SDK never stops the core segmentation tool from loading.
@@ -2391,7 +2392,7 @@ def _html_document(markdown_text, title="Segmentation report"):
 
 def write_html_report(markdown_text, path, title="Segmentation report"):
     """Render the Markdown report as a self-contained, styled HTML page anyone can open."""
-    Path(path).write_text(_html_document(markdown_text, title))
+    Path(path).write_text(_html_document(markdown_text, title), encoding="utf-8")
     return str(path)
 
 
@@ -3269,13 +3270,13 @@ class LatentClassSegmenter:
                       "mean_jaccard": list(self.jaccard.values())}).to_csv(
             outdir / "class_stability_jaccard.csv", index=False)
         self.profiles_frame().to_csv(outdir / "latent_class_profiles.csv", index=False)
-        (outdir / "latent_class_report.md").write_text(self.report_markdown)
+        (outdir / "latent_class_report.md").write_text(self.report_markdown, encoding="utf-8")
         write_html_report(self.report_markdown, outdir / "latent_class_report.html",
                           "Latent class segmentation report")
         # Typing rule: the portable classifier for NEW respondents.
         # Apply with --classify ... --rule <this file>.
         (outdir / "latent_class_typing_rule.json").write_text(
-            json.dumps(self.typing_rule_dict(), indent=2))
+            json.dumps(self.typing_rule_dict(), indent=2), encoding="utf-8")
         import sklearn
         manifest = {
             "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -3290,7 +3291,8 @@ class LatentClassSegmenter:
             "library_versions": {"numpy": np.__version__, "pandas": pd.__version__,
                                  "scikit-learn": sklearn.__version__},
         }
-        (outdir / "run_manifest.json").write_text(json.dumps(manifest, indent=2))
+        (outdir / "run_manifest.json").write_text(json.dumps(manifest, indent=2),
+                                                  encoding="utf-8")
         print(f"\nSaved to {outdir}/: assignments, class profiles, selection diagnostics, "
               f"per-class Jaccard, report (.md + .html), latent_class_typing_rule.json, "
               f"run_manifest.json")
@@ -4533,12 +4535,13 @@ class Segmenter:
                       "mean_jaccard": list(self.jaccard.values())}).to_csv(
             outdir / "segment_stability_jaccard.csv", index=False)
         self.var_importance.to_csv(outdir / "variable_importance.csv", index=False)
-        (outdir / "segmentation_report.md").write_text(self.report_markdown)
+        (outdir / "segmentation_report.md").write_text(self.report_markdown, encoding="utf-8")
         write_html_report(self.report_markdown, outdir / "segmentation_report.html",
                           "Segmentation report")
         # Typing rule: the portable classifier for NEW respondents.
         # Apply with: --classify new.csv --rule typing_rule.json
-        (outdir / "typing_rule.json").write_text(json.dumps(self.typing_rule_dict(), indent=2))
+        (outdir / "typing_rule.json").write_text(json.dumps(self.typing_rule_dict(), indent=2),
+                                                 encoding="utf-8")
         fig = maybe_plot(self.diagnostics, X, self.labels, self.recommended_k, outdir,
                          self.cfg)
         # Reproducibility manifest: everything needed to reproduce this exact run.
@@ -4564,13 +4567,40 @@ class Segmenter:
             "library_versions": {"numpy": np.__version__, "pandas": pd.__version__,
                                  "scikit-learn": sklearn.__version__},
         }
-        (outdir / "run_manifest.json").write_text(json.dumps(manifest, indent=2))
+        (outdir / "run_manifest.json").write_text(json.dumps(manifest, indent=2),
+                                                  encoding="utf-8")
         print(f"\nSaved to {outdir}/: assignments, centroids, diagnostics, per-segment Jaccard "
               f"stability, variable importance, report, typing_rule.json, run_manifest.json"
               + (", diagnostics.png" if fig else " (no figure — matplotlib missing)"))
 
 
+def _make_output_unicode_safe():
+    """Let a console that cannot show a character print a question mark instead of dying.
+
+    Python takes its stdout encoding from the locale, and a machine with no LANG — a container, a
+    cron job, a minimal CI image — reports ASCII. Everything this tool prints is full of em-dashes,
+    Nordic characters and a red/amber/green confidence circle.
+
+    **This is not what fixed the crash that prompted it, and the distinction matters.** Under a
+    bare locale the run died with "'ascii' codec can't encode character '\U0001f534'", and that
+    came from WRITING THE REPORT FILE: `write_text` with no encoding also falls back to the locale.
+    The fix was to name utf-8 at every call site that writes a file, and removing this function
+    changes nothing about that failure — verified by reverting each separately.
+
+    What this covers is the neighbouring path: printing to a console that genuinely cannot
+    represent the character. `errors="replace"` turns that into a cosmetic loss rather than the end
+    of a run whose results were already computed.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if (stream.encoding or "").lower().replace("-", "") not in ("utf8", "utf8mb4"):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass          # a stream that cannot be reconfigured is not worth failing the run over
+
+
 def _cli():
+    _make_output_unicode_safe()
     p = argparse.ArgumentParser(description="Market-segmentation-grade k-means segmentation of "
                                             "respondents on their preference utilities.")
     p.add_argument("--version", action="version", version=f"segment_kmeans {__version__}")
@@ -4621,7 +4651,7 @@ def _cli():
     if a.classify:
         if not a.rule:
             p.error("--classify requires --rule pointing to a typing_rule.json")
-        rule = json.loads(Path(a.rule).read_text())
+        rule = json.loads(Path(a.rule).read_text(encoding="utf-8"))
         classifier = classify_new_lca if rule.get("method") == "lca" else classify_new
         out = classifier(rule, _read_table(a.classify), id_col=a.id_col)
         if a.outdir:

@@ -146,7 +146,7 @@ def have_sdk() -> bool:
 
 def _read_config() -> dict:
     try:
-        data = json.loads(_CONFIG_FILE.read_text())
+        data = json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
@@ -195,7 +195,7 @@ def save_api_key(key: str) -> None:
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     cfg = _read_config()
     cfg["api_key"] = key
-    _CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
+    _CONFIG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     try:
         os.chmod(_CONFIG_FILE, 0o600)     # owner read/write only
     except Exception:
@@ -208,7 +208,7 @@ def clear_api_key() -> None:
         cfg.pop("api_key", None)
         try:
             _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            _CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
+            _CONFIG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         except Exception:
             pass
 

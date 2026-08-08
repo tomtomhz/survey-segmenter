@@ -16,14 +16,25 @@ venv/
 build/
 dist/
 *.spec
+# The built archive, wherever it is produced. dist/ is covered above, but the zip gets copied
+# around by hand — to a team folder, to a desktop — and one stray copy inside the repo would put
+# 78 MB into history permanently.
+*.zip
 
 # Analysis output written next to an input file
 *_results/
 results/
 
 # Secrets. The Anthropic key belongs in ~/.survey_segmenter/config.json (chmod 600), never here.
+# config.json is named explicitly because it is the EXACT filename the key lives in: copying that
+# file into the repo to reproduce something is an obvious thing to do, and it would otherwise be
+# committed. The same for anything obviously key-shaped.
 .env
 *.key
+config.json
+*api*key*.txt
+*secret*
+credentials*
 
 # Real survey data must never be committed — it is personal data. Only the synthetic file in
 # examples/ is tracked; anything else you drop in for testing stays local.
@@ -34,6 +45,7 @@ results/
 # Node. node_modules is 5,885 files; webui/ is the build output and IS committed on purpose —
 # it is what the Python app serves, so a clone runs without Node and PyInstaller has something
 # to bundle. CI rebuilds it and fails if the committed copy has drifted from frontend/.
+node_modules/
 frontend/node_modules/
 frontend/.vite/
 frontend/*.tsbuildinfo

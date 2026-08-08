@@ -171,7 +171,7 @@ class ProjectStore:
             if isinstance(text_or_bytes, bytes):
                 tmp.write_bytes(text_or_bytes)
             else:
-                tmp.write_text(text_or_bytes)
+                tmp.write_text(text_or_bytes, encoding="utf-8")
             tmp.replace(path)                                     # atomic on POSIX and Windows
         except Exception:
             # Never leave scratch files behind for a save that failed; the store is a directory
@@ -204,7 +204,7 @@ class ProjectStore:
         if not p or not p.exists():
             return None
         try:
-            saved = json.loads(p.read_text())
+            saved = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             return None
         data = self._path(pid, ".data")
@@ -228,7 +228,7 @@ class ProjectStore:
         out = []
         for f in self.root.glob("*.meta.json"):
             try:
-                d = json.loads(f.read_text())
+                d = json.loads(f.read_text(encoding="utf-8"))
             except Exception:
                 continue
             out.append({"id": d.get("id", f.name.split(".")[0]),

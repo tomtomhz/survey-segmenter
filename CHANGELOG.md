@@ -3,6 +3,39 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.7.3] — 2026-08-08
+
+Found while auditing the repository the way a stranger meets it, before making it public.
+
+### Fixed
+
+- **The tool did not run at all on a machine with no locale set.** Python takes its encoding from
+  the locale, and a Linux box without `LANG` — a container, a cron job, a minimal CI image —
+  reports ASCII. Writing the report then failed with `'ascii' codec can't encode character
+  '\U0001f534'`: the red confidence light. The analysis had already finished; the results were
+  destroyed on the way to disk.
+
+  Every file this tool writes now names `utf-8` explicitly. Console output is separately made
+  tolerant, so a terminal that genuinely cannot show a character prints a question mark instead of
+  ending the run — that part fixes a neighbouring path, not this crash, and the code says so.
+
+  Nothing on macOS reveals this, because macOS always reports UTF-8. It is the exact shape of
+  defect that passes every local test and fails on somebody else's machine, so the regression test
+  runs the real command with the locale stripped out and then reads the report back as UTF-8.
+
+- **`.gitignore` would not have stopped the obvious accidents.** `config.json` — the exact filename
+  the Anthropic key lives in — was not ignored, nor was `api_key.txt`, a stray `.zip` of the 78 MB
+  build, or a root-level `node_modules/`. Copying a config file into the repo to reproduce
+  something is an ordinary thing to do; it should not be able to commit a key.
+
+### Changed
+
+- The README's examples now run. They named `utilities.csv`, `demos.csv` and `my_survey.csv`, none
+  of which exist here, so the first command a visitor copied would fail; they now use the example
+  survey that ships in the repository, verified from a fresh clone. "Download the app" linked to
+  nothing and the newest published release was seven versions old — both fixed. And the two charts
+  the tool's whole argument rests on are now shown rather than described.
+
 ## [1.7.2] — 2026-08-08
 
 ### Fixed

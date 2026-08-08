@@ -9,6 +9,7 @@ The two tests that matter most:
 A segmentation tool that fails either of those is worse than useless, because it will mislead.
 """
 import io
+import os
 import subprocess
 import time
 import json
@@ -5794,3 +5795,40 @@ def test_sampling_length_is_chosen_by_measurement_not_by_a_constant():
         pinned = md.utilities_from_export(small, n_draws=800, n_burn=300, progress=False)
     assert pinned.n_draws == 800, "an explicitly requested chain length was overridden"
     assert pinned.rhat is not None, "a pinned run still needs its diagnostic reported"
+
+
+def test_the_tool_runs_on_a_machine_with_no_locale_set(tmp_path):
+    """A Linux box with no LANG — a container, a cron job, a minimal CI image — reports its
+    encoding as ASCII. The report opens with a red/amber/green confidence circle and is full of
+    em-dashes and Nordic characters, so the FIRST thing printed used to raise UnicodeEncodeError
+    and destroy a run that had already finished computing:
+
+        'ascii' codec can't encode character '\\U0001f534' in position 77
+
+    Nothing on macOS shows this, because macOS always reports UTF-8. It is exactly the class of
+    defect that survives every local test and fails on somebody else's machine, so it is tested
+    the only way that means anything: by running the real command with the locale stripped out.
+    """
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("LANG", "LC_ALL", "LC_CTYPE", "PYTHONUTF8", "PYTHONIOENCODING")}
+    env["PYTHONCOERCECLOCALE"] = "0"          # stop Python quietly upgrading C to UTF-8 for us
+    env["PYTHONUTF8"] = "0"
+    root = Path(__file__).resolve().parent.parent
+    out = tmp_path / "out"
+    proc = subprocess.run(
+        [sys.executable, str(root / "segment_kmeans.py"),
+         str(root / "examples" / "example_survey.csv"), "--outdir", str(out)],
+        capture_output=True, text=True, env=env, cwd=str(root), timeout=900)
+
+    assert proc.returncode == 0, (
+        f"the tool died under a bare locale:\n{proc.stdout[-1500:]}\n{proc.stderr[-800:]}")
+    assert "codec can't encode" not in (proc.stdout + proc.stderr)
+
+    # And the FILES must be UTF-8 whatever the console could manage: a report is read later, by a
+    # browser, on a different machine, and mojibake there would be permanent.
+    report = out / "segmentation_report.md"
+    assert report.exists(), "no report was written"
+    text = report.read_bytes().decode("utf-8")          # raises if it is not valid UTF-8
+    assert any(ch in text for ch in "🔴🟡🟢"), (
+        "the confidence light did not survive into the report, so the characters were stripped "
+        "rather than written")
