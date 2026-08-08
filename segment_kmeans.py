@@ -170,7 +170,7 @@ for _m in ("divide by zero encountered in matmul", "overflow encountered in matm
            "invalid value encountered in matmul"):
     warnings.filterwarnings("ignore", message=_m, category=RuntimeWarning)
 
-__version__ = "1.7.3"    # keep in sync with pyproject.toml
+__version__ = "1.8.0"    # keep in sync with pyproject.toml
 
 # Optional "ask Claude about your segments" add-on. Imported here (not lazily) so the packaged app
 # bundles it; wrapped so a missing file/SDK never stops the core segmentation tool from loading.
@@ -4638,7 +4638,31 @@ def _cli():
     p.add_argument("--app", action="store_true",
                    help="run as the desktop app (like --serve, but picks a free port automatically)")
     p.add_argument("--port", type=int, default=8000, help="port for --serve (default 8000)")
+    p.add_argument("--plan", action="store_true",
+                   help="how many respondents do you need? Simulates the study you are about to "
+                        "run and reports what each sample size can and cannot find. Needs no data")
+    p.add_argument("--questions", type=int, default=6,
+                   help="with --plan: how many questions the planned survey will have")
+    p.add_argument("--segments", type=int, default=3,
+                   help="with --plan: how many segments you expect to find")
+    p.add_argument("--sizes", nargs="*", type=int, default=None,
+                   help="with --plan: sample sizes to try (default 100 200 300 400 600 800)")
     a = p.parse_args()
+
+    if a.plan:                       # planning mode: no data, because there is none yet
+        import planner
+        sizes = tuple(a.sizes) if a.sizes else planner.DEFAULT_SIZES
+        print(f"Simulating {len(planner.REGIMES) * len(sizes) * planner.DEFAULT_SEEDS} studies "
+              f"through the full analysis. This takes a few minutes.\n")
+
+        def _tick(done, total, cell):
+            print(f"  [{done:>2}/{total}] {cell['regime']:<9} {cell['n_people']:>5} people: "
+                  f"found the right number {cell['right_k']} of {cell['runs']} times")
+
+        plan = planner.plan_study(n_questions=a.questions, n_segments=a.segments,
+                                  sizes=sizes, progress=_tick)
+        print("\n" + planner.render(plan))
+        return
 
     if a.app:                        # packaged desktop app: auto free port + open browser
         app()

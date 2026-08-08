@@ -5832,3 +5832,106 @@ def test_the_tool_runs_on_a_machine_with_no_locale_set(tmp_path):
     assert any(ch in text for ch in "🔴🟡🟢"), (
         "the confidence light did not survive into the report, so the characters were stripped "
         "rather than written")
+
+
+# --------------------------------------------------------------------------------------------
+# Study planner: how many respondents does a planned survey need?
+# --------------------------------------------------------------------------------------------
+
+def _plan_fixture(moderate_hits, subtle_hits=(0, 0, 0), sizes=(100, 200, 400), wrong_at=None):
+    """A plan dict shaped like `plan_study` returns, without paying for the simulations.
+
+    The advice functions are where the reasoning lives and they are pure, so they can be checked
+    against hand-made evidence in milliseconds. Running the real sweep to test a sentence would
+    cost minutes and would test the sampler instead of the sentence.
+    """
+    import planner
+    cells = []
+    for regime, hits in (("obvious", (4,) * len(sizes)), ("moderate", moderate_hits),
+                         ("subtle", subtle_hits)):
+        for n_people, right in zip(sizes, hits):
+            cells.append({"regime": regime,
+                          "separation": dict(planner.REGIMES)[regime],
+                          "n_people": n_people, "runs": 4, "right_k": right,
+                          "hit_rate": right / 4, "mean_ari": 0.5,
+                          "confidently_wrong": 1 if wrong_at == n_people else 0})
+    return {"cells": cells, "n_questions": 6, "n_segments": 3, "scale": 5,
+            "sizes": list(sizes), "seeds": 4}
+
+
+def test_the_planner_recommends_the_smallest_sample_that_actually_works():
+    """The recommendation is the point of the whole exercise, so it is checked against evidence
+    where the right answer is known by construction rather than against a live simulation."""
+    planner = pytest.importorskip("planner")
+    # Moderately distinct segments start being found reliably at 200.
+    advice = planner.recommend(_plan_fixture(moderate_hits=(2, 4, 4)))
+    assert advice["recommended_n"] == 200, "did not pick the smallest size that met the bar"
+
+    # Nothing works at any size: it must say so rather than recommending the largest tried.
+    none_work = planner.recommend(_plan_fixture(moderate_hits=(1, 2, 2)))
+    assert none_work["recommended_n"] is None
+
+
+def test_the_planner_says_when_more_people_would_not_help():
+    """The most valuable thing it can say. If the differences are below the method's resolution,
+    a bigger sample measures a weak signal more precisely — it does not make it strong — and
+    someone about to spend a budget needs to hear that rather than a number."""
+    planner = pytest.importorskip("planner")
+    hopeless = _plan_fixture(moderate_hits=(2, 4, 4), subtle_hits=(0, 0, 0))
+    prose = planner.render(hopeless)
+    assert "will not rescue subtle differences" in prose
+    assert "sharper questions" in prose
+
+    # And when subtle IS reachable, that warning must not fire — a caveat that always appears
+    # teaches the reader to skip it.
+    reachable = _plan_fixture(moderate_hits=(2, 4, 4), subtle_hits=(0, 4, 4))
+    assert "will not rescue subtle differences" not in planner.render(reachable)
+
+
+def test_the_planner_warns_where_the_tool_can_be_confidently_wrong():
+    """Measured while building this: at 100 people with subtle differences, roughly one simulated
+    study in ten reported the WRONG number of segments and still called it high confidence. The
+    tool judges whether a grouping REPRODUCES, and on heavily overlapping data a merged pair
+    reproduces perfectly well — so this is a limit to disclose, not a contradiction to hide."""
+    planner = pytest.importorskip("planner")
+    prose = planner.render(_plan_fixture(moderate_hits=(2, 4, 4), wrong_at=100))
+    assert "WRONG number of segments" in prose and "100 people" in prose
+    assert "provisional" in prose
+    # Silent when it did not happen.
+    assert "WRONG number of segments" not in planner.render(_plan_fixture(moderate_hits=(2, 4, 4)))
+
+
+def test_the_planner_never_promises_to_know_whether_your_segments_exist():
+    """The one thing it cannot do, and the thing a sample-size number most invites people to
+    assume. It must be stated in every rendering, not only when the news is bad."""
+    planner = pytest.importorskip("planner")
+    for hits in [(4, 4, 4), (0, 0, 0), (2, 4, 4)]:
+        prose = planner.render(_plan_fixture(moderate_hits=hits))
+        assert "cannot tell you whether your segments exist" in prose
+
+
+def test_planted_separation_behaves_the_way_the_regimes_claim():
+    """The three regimes are only meaningful if they are actually ordered in difficulty. This
+    checks the DATA rather than the pipeline — cheap, and it catches a generator that silently
+    stopped varying separation, which would make every column of the table identical."""
+    planner = pytest.importorskip("planner")
+    from sklearn.metrics import silhouette_score
+    scores = []
+    for _label, separation in planner.REGIMES:
+        frame, truth = planner.simulate_study(separation, 300, seed=1)
+        items = frame.drop(columns=["respondent_id"]).to_numpy(float)
+        scores.append(silhouette_score(items, truth))
+    assert scores[0] > scores[1] > scores[2], (
+        f"the regimes are not ordered by how separable they are: {scores}")
+    assert scores[0] > 0.3, "the 'obvious' regime is not obviously separated"
+
+
+def test_the_planner_runs_end_to_end_on_a_small_sweep():
+    """One real sweep, kept deliberately tiny, so the wiring between the simulator, the pipeline
+    and the renderer is exercised rather than assumed."""
+    planner = pytest.importorskip("planner")
+    plan = planner.plan_study(n_questions=5, n_segments=3, sizes=(120,), seeds=1)
+    assert len(plan["cells"]) == len(planner.REGIMES)
+    obvious = next(c for c in plan["cells"] if c["regime"] == "obvious")
+    assert obvious["right_k"] == 1, "failed to find three clearly separated segments"
+    assert "Planning a study" in planner.render(plan)

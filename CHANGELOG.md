@@ -3,6 +3,35 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.8.0] — 2026-08-08
+
+### Added
+
+- **A study planner: how many respondents do you need?** `segment-kmeans --plan` needs no data,
+  because you have not fielded yet. It plants a known number of segments in surveys of the shape
+  you describe, runs **the real pipeline** over them at a range of sample sizes, and reports how
+  often the right answer came back.
+
+  It simulates rather than using a power formula on purpose. A closed-form calculation has to
+  assume the clusters are spherical, equal-sized and well separated; this tool's own measured
+  weakness is precisely overlapping segments, so a formula would confidently under-quote the sample
+  needed. Running the pipeline inherits the method's real behaviour instead.
+
+  Three distinctness regimes, chosen by measurement rather than by picking round numbers — a sweep
+  of effect size against sample size showed that only the middle one is a question about sample
+  size at all. Segments two standard deviations apart were recovered at every size tried; segments
+  0.6 apart were recovered at none, **including the largest**. That last finding is the most useful
+  thing the planner says: where more respondents cannot help, it says so and points the budget at
+  the questionnaire instead.
+
+  It also discloses a limit found while building it: at 100 people with subtle differences, about
+  one simulated study in ten reported the wrong number of segments while still calling the result
+  high confidence. The tool judges whether a grouping *reproduces*, and on heavily overlapping data
+  a merged pair reproduces perfectly well — so small-sample segment counts are flagged as
+  provisional rather than the contradiction being hidden.
+
+  Deliberately not covered: fielding cost, incidence and screen-out, and best-worst designs.
+
 ## [1.7.3] — 2026-08-08
 
 Found while auditing the repository the way a stranger meets it, before making it public.

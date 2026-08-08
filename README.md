@@ -121,6 +121,34 @@ drop a survey file onto the page that opens. It is fully self-contained — reci
 
 Everything below is for analysts who want to control the method, scaling, validation, and outputs.
 
+## Before you field: how many people do you need?
+
+```bash
+segment-kmeans --plan --questions 6 --segments 3
+```
+
+Needs no data — you have not run the survey yet. It builds surveys with a known number of segments
+planted in them, at the shape you describe, puts them through **the real analysis** at a range of
+sample sizes, and reports how often the right answer came back:
+
+```
+   people     obvious    moderate      subtle
+  -------------------------------------------
+      100         4/4         3/4         0/4
+      400         4/4         4/4         1/4
+```
+
+Then it says what to do, and what not to bother doing. The most useful line is usually the last
+column: if your segments differ only subtly, **more respondents will not rescue them** — a bigger
+sample measures a weak signal more precisely rather than making it strong, and the budget is better
+spent on questions people genuinely disagree about.
+
+It answers "how many people does this tool need to FIND segments of a given distinctness". It
+cannot tell you whether your segments exist; nothing can, before you field. A closed-form power
+formula would have to assume the clusters are spherical, equal-sized and well separated — this
+tool's own measured weakness is precisely overlapping segments, so the simulation runs the real
+pipeline instead and inherits its real behaviour.
+
 ## Install and run (for analysts)
 
 ```bash
