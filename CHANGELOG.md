@@ -3,6 +3,22 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.11.1] — 2026-08-08
+
+### Fixed
+
+- **The packaged app shipped without TURF or the design generator.** Both modules are imported
+  inside functions rather than at the top of a file — TURF from the report builder, the design
+  generator from the command line — so PyInstaller's static analysis never saw either one and
+  neither was bundled. The app still launched, still segmented, still ranked; a best-worst study
+  simply came back with no "which few to launch" section, and `--design` failed on a module that
+  was not there.
+
+  This is the fourth time this exact blindness has shipped something missing — the dip test,
+  tabulate, matplotlib's SVG writer, and now these two — so the build's smoke test no longer takes
+  the build's word for it: it runs a best-worst export through the packaged binary and fails the
+  build if the TURF section is absent. A check that costs nothing and would have caught all four.
+
 ## [1.11.0] — 2026-08-08
 
 ### Added

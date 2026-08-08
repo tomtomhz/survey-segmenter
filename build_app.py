@@ -89,7 +89,13 @@ cmd = [sys.executable, "-m", "PyInstaller", "--name", "Survey Segmenter", "--win
        # static analysis never sees it — the same lazy-import blindness that shipped tabulate and
        # the dip test missing from every release. Named explicitly, and the smoke test proves it
        # actually arrived.
+       # Three modules imported inside functions rather than at module load, so static analysis
+       # sees none of them: the planner from its request handler, TURF from the report builder,
+       # the design generator from the CLI. Same blindness that shipped tabulate and the dip test
+       # missing from every release; the smoke test below proves each one arrived.
        "--hidden-import", "planner",
+       "--hidden-import", "turf",
+       "--hidden-import", "design",
        # The interface itself. Without this the packaged app starts, serves its API, and shows
        # nothing at all — the failure looks like a broken server rather than a missing folder.
        "--add-data", f"webui{os.pathsep}webui",
@@ -307,6 +313,14 @@ def _smoke_test():
         if not bw_result.get("ranking"):
             print("\nBUILD IS BROKEN — a best-worst export was scored but its ranking is missing, "
                   "so the app shows segments without the answer the study was fielded for.")
+            _discard_archive()
+        # TURF, checked on the same best-worst run rather than by a separate request. Without it
+        # bundled the section simply does not appear: the app still works, still reports a ranking,
+        # and quietly stops answering the question a best-worst study is usually commissioned for.
+        if "to launch" not in bw_result.get("report_html", ""):
+            print("\nBUILD IS BROKEN — a best-worst study came back without the 'which few to "
+                  "launch' section, so turf.py did not survive bundling. Everything else about the "
+                  "build looks fine, which is exactly why this is checked.")
             _discard_archive()
 
         # The study planner, checked without running one. Deliberately invalid parameters: the
