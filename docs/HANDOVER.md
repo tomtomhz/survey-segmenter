@@ -63,14 +63,21 @@ deliberately left unchanged, so a later session does not repeat the measuring.
 The `group_profiles.csv` naming defect recorded here previously is fixed and released. Every finding
 raised during this audit is either fixed or written down below as a known limit.
 
-### The three things nobody has checked, and cannot be checked from here
+### The three evidence gaps — all now resolved
 
-These are not bugs. They are gaps in the evidence, and they are the honest reason the readiness
-verdict below is bounded rather than unconditional.
+These were never bugs; they were gaps in the evidence, and they were the honest reason the earlier
+readiness verdict was bounded rather than unconditional. As of 2026-08-08 all three are closed or
+retired, which removes that qualification.
 
-1. **The live Claude API round-trip has never been run.** By deliberate constraint — the real key
-   sits in `~/.survey_segmenter/config.json` and is not to be read or used. The no-key path is
-   tested and degrades cleanly; the with-key path is tested only against a stub.
+1. ~~**The live Claude API round-trip has never been run.**~~ **CLOSED 2026-08-08.** Tom funded an
+   API key and ran it. On a 270-person file with three deliberately obvious mind-sets planted in
+   it, the naming came back **Premium Brand Devotees / Spur-of-the-Moment Explorers / Bargain
+   Researchers** — all three correct, and the third picked up both planted traits (price
+   sensitivity *and* researching before buying) rather than the obvious one only. Key, request,
+   response and the write into `group_names.csv` all work.
+
+   The assistant still never reads or uses the key: this was verified by checking the stored
+   value's SHAPE (prefix and length) and by Tom running the button himself.
 2. ~~**HB MaxDiff has never seen a real best-worst export.**~~ **CLOSED 2026-08-07.** The
    `bwsTools` example data from CRAN — 350 real respondents asked which issues facing the country
    matter most and least — now goes through it. Against the classical best-minus-worst score on the
@@ -106,7 +113,7 @@ Nothing broken that I know of. The remaining gaps are all blocked on something o
 
 | | |
 |---|---|
-| Live Claude API round-trip | Deliberately unverified — no key is used. The no-key path gives a clean error |
+| Live Claude API round-trip | **Verified 2026-08-08** end to end, with correct segment names returned. The no-key path still degrades cleanly |
 | HB MaxDiff on real responses | Validated on 350 real respondents: Spearman 1.0000 against the classical score. A real wide (Qualtrics/Sawtooth) export is still unseen; its shape is refused with guidance rather than misread |
 | The Windows build | Not a target — macOS is the platform. CI still builds it; nothing depends on it |
 
