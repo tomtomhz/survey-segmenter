@@ -8,9 +8,20 @@
 how much to trust them, draws the data so you can check the answer yourself, and gives you the
 files to act on. Everything runs on your own machine — see [PRIVACY.md](docs/PRIVACY.md).
 
+![The segment map: three groups of survey respondents, clearly separated](docs/images/map.png)
+
+*Do the groups actually separate? Every respondent, drawn. Bigger markers are more people at that
+point, and the shaded regions are where each group's territory begins and ends.*
+
+![What makes the groups different: average answers per question, per group](docs/images/profiles.png)
+
+*And what makes them different — the questions where the groups actually disagree, longest bars
+first. Both are ordinary output from the quick start below; nothing here was drawn by hand or
+tidied up for the README.*
+
 | | |
 |---|---|
-| **Non-technical users** | Download the app, double-click, drag your file in. [Setup guide](docs/USING-THE-APP.md). |
+| **Non-technical users** | [**Download the Mac app**](https://github.com/tomtomhz/survey-segmenter/releases/latest) — double-click, drag your file in. [Setup guide](docs/USING-THE-APP.md). |
 | **Analysts** | `pip install ".[ai,excel]"` then `segment-kmeans --serve`. |
 | **What is new** | [CHANGELOG.md](CHANGELOG.md) |
 | **Taking this over** | [ONBOARDING.md](docs/ONBOARDING.md) — scope, the reasoning behind each decision, measured vs asserted, and the mistakes already made here |
@@ -82,8 +93,11 @@ bundled in the desktop app). The statistics are complete with or without it.
 **The one-command way.** If you are comfortable with a terminal, point it straight at a file:
 
 ```bash
-python3 segment_kmeans.py my_survey.csv
+segment-kmeans examples/example_survey.csv --outdir results
 ```
+
+That example file ships with the repository, so the command above runs as-is on a fresh clone.
+Swap in your own export once you have seen what it produces.
 
 Either way, the tool reads the file the way it actually arrives — comma **or semicolon** separated
 (Swedish/European Excel exports), UTF-8 or Latin-1 (so å ä ö survive), and `.xlsx` Excel files
@@ -99,7 +113,8 @@ Read the box at the top of the report: a **green / amber / red confidence light*
 it found, who they are, and what to do next. If you only read one thing, read that box.
 
 **The download-and-double-click way (no Python, no terminal, nothing to install).** There is a
-packaged desktop app for exactly this audience. See `docs/USING-THE-APP.md`. Build it with
+packaged desktop app for exactly this audience: [**download the latest release**](https://github.com/tomtomhz/survey-segmenter/releases/latest) and see [docs/USING-THE-APP.md](docs/USING-THE-APP.md) — including why you should unzip it in
+Applications rather than on the Desktop. To build it yourself, run
 `python3 build_app.py` (produces `dist/Survey Segmenter.app` on Mac, or a `Survey Segmenter` folder
 with an `.exe` on Windows); zip the result and anyone on the team can download it, double-click, and
 drop a survey file onto the page that opens. It is fully self-contained — recipients need no Python.
@@ -111,11 +126,15 @@ Everything below is for analysts who want to control the method, scaling, valida
 ```bash
 pip install .            # or: pip install ".[excel,ai]" for .xlsx files and Claude
 
-python3 segment_kmeans.py utilities.csv --id-col respondent_id --kmin 2 --kmax 8 \
-    --scaling range --method kmeans --demographics demos.csv --outdir results
+# runs as-is on a fresh clone — the example file is in the repository
+segment-kmeans examples/example_survey.csv --id-col respondent_id --kmin 2 --kmax 8 \
+    --scaling range --method kmeans --outdir results
 
 # model-based (finite-mixture / latent-class) instead of heuristic k-means:
-python3 segment_kmeans.py utilities.csv --id-col respondent_id --method gmm --outdir results_gmm
+segment-kmeans examples/example_survey.csv --method gmm --outdir results_gmm
+
+# your own data, with a separate file of background traits:
+segment-kmeans utilities.csv --id-col respondent_id --demographics demos.csv --outdir results
 ```
 
 **Four modelling paradigms, matched to your data.** `--method kmeans` (default) is the fast
