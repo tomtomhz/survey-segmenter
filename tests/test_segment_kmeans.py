@@ -5935,3 +5935,72 @@ def test_the_planner_runs_end_to_end_on_a_small_sweep():
     obvious = next(c for c in plan["cells"] if c["regime"] == "obvious")
     assert obvious["right_k"] == 1, "failed to find three clearly separated segments"
     assert "Planning a study" in planner.render(plan)
+
+
+def test_the_planted_separation_is_the_separation_actually_delivered():
+    """The planner's whole vocabulary rests on this number meaning what it says.
+
+    The first version used the figure directly as a step size and DOCUMENTED it as Cohen's d. It is
+    not: the centre pattern rotates, so one adjacent pair differs by a single step on some
+    questions and by two on others, and the mean difference overshoots. Measured, asking for 2.0
+    delivered 2.83 at three segments and 3.11 at four — and the module docstring, the README and
+    the changelog all inherited the wrong figure.
+    """
+    planner = pytest.importorskip("planner")
+    for n_segments in (2, 3, 4):
+        for asked in (1.0, 0.6):
+            frame, truth = planner.simulate_study(asked, 4000, n_questions=6,
+                                                  n_segments=n_segments, seed=0)
+            items = frame.drop(columns=["respondent_id"]).to_numpy(float)
+            means = np.array([items[truth == c].mean(axis=0) for c in range(n_segments)])
+            within = np.mean([items[truth == c].std(axis=0, ddof=1) for c in range(n_segments)])
+            gaps = [np.abs(means[c] - means[c + 1]).mean() for c in range(n_segments - 1)]
+            delivered = float(np.mean(gaps)) / within
+            assert abs(delivered - asked) / asked < 0.2, (
+                f"asked for d={asked} with {n_segments} segments and the data actually has "
+                f"d={delivered:.2f}")
+
+
+def test_a_design_that_cannot_fit_the_answer_scale_is_reported_not_clipped():
+    """Five segments two standard deviations apart do not fit on a 1-5 scale — there is nowhere to
+    put the outer ones. Clipping them to the ends produced a study far less separable than
+    requested while the table still called it "obvious", which is a wrong answer wearing a
+    confident label. It is a fact about the answer scale, and no sample size changes it."""
+    planner = pytest.importorskip("planner")
+    with pytest.raises(ValueError) as caught:
+        planner.simulate_study(2.0, 200, n_questions=6, n_segments=5, scale=5)
+    assert "_PLAN_TOO_TIGHT" in str(caught.value)
+
+    # And the sweep must survive it — reported as not-applicable, with the reason in words.
+    plan = planner.plan_study(n_segments=5, sizes=(120,), seeds=1)
+    impossible = [c for c in plan["cells"] if c.get("impossible")]
+    assert impossible, "a design that cannot fit the scale was silently simulated anyway"
+    prose = planner.render(plan)
+    assert "n/a" in prose and "nowhere on the scale" in prose
+    assert "not of your sample size" in prose
+
+
+def test_the_recommendation_is_not_a_size_that_only_got_lucky():
+    """Recovery is not monotonic in sample size — measured, one regime went 3/4, 4/4, 3/4 — so
+    taking the first size that clears the bar can name one that got lucky while a LARGER sample
+    does worse just above it. The bar has to hold from there on."""
+    planner = pytest.importorskip("planner")
+    lucky = _plan_fixture(moderate_hits=(4, 2, 4), sizes=(100, 200, 400))
+    assert planner.recommend(lucky)["recommended_n"] == 400, (
+        "recommended a size that passed once and then failed at a larger sample")
+
+    sustained = _plan_fixture(moderate_hits=(2, 4, 4), sizes=(100, 200, 400))
+    assert planner.recommend(sustained)["recommended_n"] == 200
+
+
+def test_the_default_sample_sizes_cover_where_the_answer_changes():
+    """The first version swept 100 to 800 and so measured almost entirely inside the flat part of
+    the curve: every regime gave the same result in six of eight columns, and the table looked
+    authoritative while saying nothing. Recovery actually turns over between roughly 40 and 150."""
+    planner = pytest.importorskip("planner")
+    assert min(planner.DEFAULT_SIZES) <= 75, (
+        "the sweep starts above the range where sample size actually decides the answer")
+    assert any(n <= 150 for n in planner.DEFAULT_SIZES)
+    assert planner.DEFAULT_SEEDS >= 5, (
+        "fewer than five repeats cannot separate 'nearly always' from 'usually', which is exactly "
+        "the distinction the recommendation turns on")

@@ -134,8 +134,9 @@ sample sizes, and reports how often the right answer came back:
 ```
    people     obvious    moderate      subtle
   -------------------------------------------
-      100         4/4         3/4         0/4
-      400         4/4         4/4         1/4
+       50         5/5         0/5         0/5
+      100         5/5         4/5         0/5
+      200         5/5         5/5         0/5
 ```
 
 Then it says what to do, and what not to bother doing. The most useful line is usually the last

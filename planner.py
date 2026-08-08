@@ -16,30 +16,36 @@ answer includes the method's real behaviour, weaknesses and all.
 answers the narrower and answerable question: *if* segments of a given distinctness are there, how
 many respondents does this tool need to find them. The output says so rather than implying more.
 
-**The three regimes, and why these numbers.** Distinctness is expressed as Cohen's d between
-adjacent segment centres on the questions that separate them — a standard effect size, so it can be
-stated plainly rather than as an arbitrary knob. The three values were chosen by measuring, not by
-picking round numbers; a sweep of d against sample size gave (four seeds, six questions, three
-planted segments, share of runs finding the right number):
+**The three regimes, and why these numbers.** Distinctness is Cohen's d between adjacent segment
+centres on the questions that separate them, against the within-segment spread — a standard effect
+size, so it can be stated plainly rather than as an arbitrary knob. `simulate_study` calibrates the
+centres so the d actually realised in the answers is the d asked for; an earlier version used the
+figure directly as a step size and delivered 2.83 when asked for 2.0, because the rotating pattern
+makes adjacent segments differ by one step on some questions and two on others.
 
-        d      n=100   n=200   n=400     mean ARI
-        2.0     4/4     4/4     4/4        0.99
-        1.2     4/4     4/4     4/4        0.87
-        1.0     3/4     4/4     4/4        0.72
-        0.8     2/4     4/4     4/4        0.53
-        0.6     0/4     0/4     1/4        0.24
+Measured with the calibrated generator (six questions, three planted segments, five seeds, share of
+runs finding the right number of segments):
 
-So the useful trio is 2.0, 1.0 and 0.6, because each says something different and only the middle
-one is about sample size:
+        d      n=40   n=60   n=80   n=100  n=150  n=400
+        2.0     5/5    5/5    5/5    5/5    5/5    5/5
+        1.2     1/5    1/5    4/5    5/5    5/5    5/5
+        1.0     2/5    1/5    2/5    4/5    5/5    4/5
+        0.8     0/5     -      -     0/5     -     1/5
+        0.6     0/5     -      -     0/5     -     0/5
 
-* **2.0 — obvious differences.** Recovered at every size tried. If your segments are this distinct,
-  sample size is not your problem and you are choosing it for precision of the profiles, not for
-  finding the groups.
-* **1.0 — moderate.** This is the regime where the number of respondents genuinely decides the
-  answer, and therefore the one the recommendation is built on.
-* **0.6 — subtle.** Not recovered at ANY size tried, including 400. More people does not rescue it.
-  That is the most useful thing the planner says, because it is the case where spending more money
-  buys nothing and the honest advice is to sharpen the questionnaire instead.
+* **2.0 — obvious differences.** Found at every size tried, down to forty people. If your segments
+  are this distinct, sample size is not your problem; you are choosing it for the precision of the
+  profiles rather than for any chance of finding the groups.
+* **1.0 — moderate.** The regime the recommendation is built on, because it is the only one where
+  the number of respondents changes the answer.
+* **0.6 — subtle.** Found at no size tried. More people does not rescue it, and saying so is the
+  most useful thing here: it is the case where more budget buys nothing and the honest advice is to
+  sharpen the questionnaire instead.
+
+**Where sample size actually matters is narrower than it looks.** The transition happens between
+roughly forty and a hundred and fifty respondents; above that every regime is flat. The first
+version of this module swept 100 to 800 and therefore measured almost entirely inside the flat
+part, producing an authoritative-looking table in which nothing changed.
 
 Deliberately not covered: fielding cost, incidence and screen-out rates, and best-worst designs.
 Those are separate jobs and pretending to model them here would be guessing.
@@ -57,15 +63,25 @@ import pandas as pd
 #: questions. See the module docstring for the measurements behind these three values.
 REGIMES = (("obvious", 2.0), ("moderate", 1.0), ("subtle", 0.6))
 
-#: Sample sizes to try. Chosen to bracket the range a real study actually chooses between; the
-#: planner reports the whole curve rather than a single number, because where it flattens is the
-#: information — a size beyond that buys precision, not discovery.
-DEFAULT_SIZES = (100, 200, 300, 400, 600, 800)
+#: Sample sizes to try. These were WRONG in the first version — 100 to 800 — and the mistake is
+#: worth recording, because the table looked authoritative while measuring almost nothing.
+#: Sweeping where sample size actually changes the answer showed the transition happens between
+#: about 40 and 150 respondents; from 150 upward every regime is flat, so six of the original eight
+#: columns reported the same number and the planner appeared to say sample size did not matter.
+#: Measured (three segments, six questions, five seeds, share finding the right number):
+#:
+#:      d      n=40   n=60   n=80   n=100  n=150  n=400
+#:      2.0     5/5    5/5    5/5    5/5    5/5    5/5
+#:      1.2     1/5    1/5    4/5    5/5    5/5    5/5
+#:      1.0     2/5    1/5    2/5    4/5    5/5    4/5
+DEFAULT_SIZES = (50, 75, 100, 150, 200, 300, 400)
 
 #: Repeats per cell. One run of one size tells you almost nothing: the same design and the same
 #: number of people recovers the truth on some samples and not others, which IS the finding, and a
-#: single draw would report whichever way one coin landed.
-DEFAULT_SEEDS = 4
+#: single draw would report whichever way one coin landed. Five rather than four because the
+#: recommendation turns on distinguishing "nearly always" from "usually", and four repeats cannot:
+#: the difference between 3/4 and 4/4 is one unlucky sample.
+DEFAULT_SEEDS = 5
 
 #: A shorter, cheaper validation panel. The planner runs the pipeline dozens of times, and the full
 #: resampling settings would take an hour to answer a question worth four minutes. Measured against
@@ -84,13 +100,35 @@ def simulate_study(separation, n_people, n_questions=6, n_segments=3, scale=5, s
     itself part of what limits how well any method can separate people.
     """
     rng = np.random.default_rng(seed)
-    step = float(separation)
     middle = (scale + 1) / 2.0
-    centres = np.full((n_segments, n_questions), middle)
+
+    # Build the rotation pattern at unit step first, then SCALE it so the effect size actually
+    # delivered is the one asked for.
+    #
+    # The naive version used `separation` directly as the step and documented it as Cohen's d
+    # between adjacent segments. It is not. Because the pattern rotates, one adjacent pair differs
+    # by one step on some questions and by two on others, so the mean difference exceeds the step —
+    # measured, asking for 2.0 delivered 2.83 at three segments and 3.11 at four. Every number in
+    # the module docstring, the README and the changelog inherited that error.
+    pattern = np.empty((n_segments, n_questions))
     for question in range(n_questions):
         for segment in range(n_segments):
-            offset = ((segment + question) % n_segments) - (n_segments - 1) / 2.0
-            centres[segment, question] = middle + step * offset
+            pattern[segment, question] = ((segment + question) % n_segments) - (n_segments - 1) / 2.0
+    # Mean absolute gap between adjacent segments under the unit pattern. Noise is standard normal
+    # (SD 1.0), so dividing by this makes `separation` a true Cohen's d.
+    unit_gap = float(np.mean([np.abs(pattern[c] - pattern[c + 1]).mean()
+                              for c in range(n_segments - 1)])) if n_segments > 1 else 1.0
+    centres = middle + pattern * (float(separation) / max(unit_gap, 1e-9))
+
+    # A design can ask for more room than the answer scale has. Five segments two standard
+    # deviations apart do not fit on a 1-5 scale — there is nowhere to put them — and silently
+    # clipping produced a study far less separable than requested while still calling it "obvious".
+    # That is worth refusing rather than quietly answering the wrong question.
+    reach = float(np.max(np.abs(centres - middle)))
+    if reach > (scale - 1) / 2.0 + 1e-9:
+        raise ValueError(
+            f"_PLAN_TOO_TIGHT:{n_segments}:{separation}:{scale}")
+
     who = rng.integers(0, n_segments, n_people)
     answers = np.clip(np.round(centres[who] + rng.normal(0, 1.0, (n_people, n_questions))),
                       1, scale).astype(int)
@@ -134,11 +172,28 @@ def plan_study(n_questions=6, n_segments=3, scale=5, sizes=DEFAULT_SIZES, seeds=
     done = 0
     for label, separation in REGIMES:
         for n_people in sizes:
-            runs = [_run_once(*simulate_study(separation, n_people, n_questions, n_segments,
-                                              scale, seed=seed), n_segments)
-                    for seed in range(seeds)]
+            # A regime can be impossible rather than merely hard. Segments two standard deviations
+            # apart do not fit on a 1-5 scale once you want four of them — there is nowhere to put
+            # the outer two. That is a fact about the ANSWER SCALE, not about sample size, and it
+            # is worth telling someone planning five segments before they field rather than after.
+            try:
+                runs = [_run_once(*simulate_study(separation, n_people, n_questions, n_segments,
+                                                  scale, seed=seed), n_segments)
+                        for seed in range(seeds)]
+            except ValueError as exc:
+                if not str(exc).startswith("_PLAN_TOO_TIGHT"):
+                    raise
+                cells.append({"regime": label, "separation": separation, "n_people": n_people,
+                              "runs": 0, "right_k": 0, "hit_rate": float("nan"),
+                              "mean_ari": float("nan"), "confidently_wrong": 0,
+                              "impossible": True})
+                done += 1
+                if progress:
+                    progress(done, total, cells[-1])
+                continue
             right = sum(r["right_k"] for r in runs)
             cells.append({
+                "impossible": False,
                 "regime": label,
                 "separation": separation,
                 "n_people": n_people,
@@ -159,7 +214,7 @@ def plan_study(n_questions=6, n_segments=3, scale=5, sizes=DEFAULT_SIZES, seeds=
             "scale": scale, "sizes": list(sizes), "seeds": seeds}
 
 
-def recommend(plan, threshold=0.9):
+def recommend(plan, threshold=0.8):
     """Turn the sweep into the sentence someone planning a study actually needs.
 
     The recommendation is built on the MODERATE regime alone, and that is a deliberate choice. The
@@ -167,11 +222,23 @@ def recommend(plan, threshold=0.9):
     subtle regime is recovered at none, so it would recommend the largest and still not work. Only
     the middle regime is actually a question about sample size.
     """
-    moderate = sorted((c for c in plan["cells"] if c["regime"] == "moderate"),
+    def _usable(regime):
+        return sorted((c for c in plan["cells"]
+                       if c["regime"] == regime and not c.get("impossible")),
                       key=lambda c: c["n_people"])
-    subtle = sorted((c for c in plan["cells"] if c["regime"] == "subtle"),
-                    key=lambda c: c["n_people"])
-    enough = next((c["n_people"] for c in moderate if c["hit_rate"] >= threshold), None)
+
+    moderate = _usable("moderate")
+    subtle = _usable("subtle")
+    # The smallest size that clears the bar AND KEEPS clearing it at every larger size tried.
+    # Recovery is not monotonic in sample size — measured, one regime went 3/4, 4/4, 3/4 — so
+    # "the first size that passes" can name a size that only got lucky, with a larger sample doing
+    # worse just above it. Requiring it to hold from there on is the difference between a
+    # recommendation and a coincidence.
+    enough = None
+    for index, cell in enumerate(moderate):
+        if all(later["hit_rate"] >= threshold for later in moderate[index:]):
+            enough = cell["n_people"]
+            break
     subtle_ever = any(c["hit_rate"] >= threshold for c in subtle)
     risky = [c for c in plan["cells"] if c["confidently_wrong"]]
     return {
@@ -194,7 +261,8 @@ def render(plan):
     lines = [
         f"Planning a study: {plan['n_questions']} questions on a 1-{plan['scale']} scale, "
         f"expecting {plan['n_segments']} segments.",
-        f"Each cell is {plan['seeds']} simulated studies put through the real analysis.",
+        f"Each cell is {plan['seeds']} simulated "
+        f"{'study' if plan['seeds'] == 1 else 'studies'} put through the real analysis.",
         "",
         "How often the tool found the right number of segments:",
         "",
@@ -208,9 +276,16 @@ def render(plan):
         for label, _ in REGIMES:
             cell = next(c for c in plan["cells"]
                         if c["regime"] == label and c["n_people"] == n_people)
-            score = f"{cell['right_k']}/{cell['runs']}"
+            score = "n/a" if cell.get("impossible") else f"{cell['right_k']}/{cell['runs']}"
             row += f"{score:>12}"
         lines.append(row)
+    impossible = sorted({c["regime"] for c in plan["cells"] if c.get("impossible")})
+    if impossible:
+        lines += ["",
+                  f"  n/a = not possible on a 1-{plan['scale']} scale. You asked for "
+                  f"{plan['n_segments']} segments, and segments that distinct will not fit: there "
+                  f"is nowhere on the scale to put the outer ones. This is a limit of the answer "
+                  f"scale, not of your sample size — no number of respondents changes it."]
     lines += ["",
               "  obvious  = segments differ by about 2 standard deviations (you could spot them "
               "by eye)",

@@ -3,6 +3,37 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.8.1] — 2026-08-08
+
+An audit of the study planner shipped hours earlier. Three defects, all of which made it look more
+authoritative than it was.
+
+### Fixed
+
+- **The separation figure was not the effect size it claimed to be.** It was used directly as a
+  step between segment centres and documented as Cohen's d. Because the centre pattern rotates, an
+  adjacent pair differs by one step on some questions and two on others, so the realised effect
+  overshot: asking for 2.0 delivered **2.83** at three segments and **3.11** at four. The centres
+  are now calibrated so the effect actually present in the answers is the one requested, checked
+  across two to four segments.
+
+- **The default sweep measured almost nothing.** It ran 100 to 800 respondents. Recovery actually
+  turns over between roughly **40 and 150** — above that every regime is flat — so six of the eight
+  columns reported the same number and the table appeared to show that sample size did not matter.
+  Now 50 to 400, which is where the answer changes.
+
+- **A design that cannot fit the answer scale was silently clipped.** Five segments two standard
+  deviations apart do not fit on a 1-5 scale; there is nowhere to put the outer ones. The centres
+  were clipped to the ends, producing a study far less separable than requested while the table
+  still called it "obvious". It is now reported as not applicable, with the reason — a limit of the
+  answer scale that no sample size changes.
+
+- **The recommendation could name a size that only got lucky.** Recovery is not monotonic in sample
+  size; one measured regime went 3/4, 4/4, 3/4. Taking the first size to clear the bar could
+  therefore recommend a sample that a larger one then failed to match. The bar must now hold from
+  that size upward. Repeats also went from four to five, because four cannot separate "nearly
+  always" from "usually" and that is the distinction the recommendation turns on.
+
 ## [1.8.0] — 2026-08-08
 
 ### Added
