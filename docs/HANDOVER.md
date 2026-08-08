@@ -8,11 +8,11 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-07 (end of day) · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.9.0**, 224 Python + 115 frontend tests green locally on Python 3.9 **and** 3.12 · **GitHub Actions is not running — see below**
+**Last updated:** 2026-08-08 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.9.0**, 224 Python + 115 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
-## Session state — 2026-08-07, end of day (read this first)
+## Session state — 2026-08-08 (read this first)
 
 **Released: v1.5.1 → v1.9.0.** The team copy at `~/Desktop/Survey Segmenter (app for the
 team)/` is on **1.9.0** — verified by asking the shipped binary itself, over HTTP, which version it
@@ -29,23 +29,16 @@ repository public made minutes free and the block disappeared.
 3.11 and 3.12, plus the frontend and packaging checks. That is the first CI evidence since v1.5.8,
 and the first time this code has ever been tested on the platform it actually ships on.
 
-So **nothing since v1.5.8 has been tested by CI**, and no Windows build artifact exists for it. This was
-recorded as "CI green" for several hours on the strength of a stale reading; the lesson is that a
-green memory is not a green run, and `gh run list` costs one command. The workflow has since been
-trimmed so an ordinary push runs two jobs rather than five — see the header of `ci.yml`.
+While it was down, everything from v1.5.9 to v1.7.2 shipped on local runs alone — and for several
+hours of that this file said "CI green" on the strength of a stale reading. **A green memory is not
+a green run, and `gh run list` costs one command.** The workflow was also trimmed so an ordinary
+push runs two jobs rather than five, which is what keeps it affordable if the repository is ever
+private again; see the header of `ci.yml`.
 
-What was done instead, locally, and what it does and does not cover:
-
-| | Covered |
-|---|---|
-| Python 3.9.6 (oldest in the CI matrix) | 209 passed |
-| Python 3.12.13, numpy 2.5.1, pandas 3.0.5 (newest) | 209 passed, no skips, all extras installed |
-| Python 3.11 | not run — bracketed by the two above, not directly tested |
-| Ubuntu | **not covered at all.** Both local runs are macOS/arm64 |
-| Windows build | **not covered at all.** No artifact was produced |
-
-The table above records what was true while CI was down. It is kept because the lesson is not: a
-green memory is not a green run, and `gh run list` costs one command.
+The matrix now covers both platforms deliberately, and both have earned it. Linux found a locale
+bug that made the tool unrunnable with no `LANG` set — something macOS can never reveal, because it
+always reports UTF-8. And the failures only macOS can show, around case-insensitive paths and the
+signing and quarantine behaviour of the app bundle, had no coverage at all until 2026-08-08.
 
 **v1.6.0 reports the answer a best-worst study was fielded for.** The tool already scored MaxDiff
 exports and grouped people on the utilities — and then described the groups without ever saying
