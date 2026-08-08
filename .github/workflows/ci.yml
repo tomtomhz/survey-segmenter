@@ -37,7 +37,8 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Ubuntu for the matrix, macOS as well wherever it is worth the minutes — see below.
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -46,6 +47,32 @@ jobs:
         python-version: ${{ (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/'))
                             && fromJSON('["3.12"]')
                             || fromJSON('["3.9","3.11","3.12"]') }}
+        # **Why macOS is here at all, given the tests already run on Linux.**
+        #
+        # macOS is the platform this tool actually ships on — the desktop app is a signed .app and
+        # its users are on Macs. Linux was never the target; it is where CI runs because on a
+        # PRIVATE repo macOS runners bill at ten times the Linux rate, so the tests guarding a Mac
+        # tool were running on the one platform nobody uses it on.
+        #
+        # That has caught real defects in BOTH directions. Linux found a locale bug that made the
+        # tool unrunnable with no LANG set, which macOS can never reveal because it always reports
+        # UTF-8. And the failures macOS alone can show — case-insensitive paths, the signing and
+        # quarantine behaviour around the bundle — had no coverage at all.
+        #
+        # So: Linux on every run, macOS only where it earns the minutes. On a public repo minutes
+        # are free and this costs nothing; the restriction is what keeps it affordable if the
+        # repository is ever private again.
+        os: ${{ (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/'))
+                && fromJSON('["ubuntu-latest"]')
+                || fromJSON('["ubuntu-latest","macos-latest"]') }}
+        exclude:
+          # macos-latest is arm64, and setup-python's coverage of 3.9 there has been patchy — a
+          # missing interpreter fails the job for a reason that has nothing to do with this code.
+          # 3.9 is the declared floor and is tested on Linux every time, which is what the floor
+          # needs; macOS is here to exercise the platform the app SHIPS on, and the newest two
+          # versions do that. Drop this exclude if the runner image gains 3.9.
+          - os: macos-latest
+            python-version: "3.9"
 
     steps:
       - uses: actions/checkout@v4
