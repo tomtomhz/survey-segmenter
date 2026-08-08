@@ -8,15 +8,80 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-08 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.9.0**, 224 Python + 115 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-08 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.11.1**, 234 Python + 115 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08 (read this first)
 
-**Released: v1.5.1 → v1.9.0.** The team copy at `~/Desktop/Survey Segmenter (app for the
-team)/` is on **1.9.0** — verified by asking the shipped binary itself, over HTTP, which version it
-stamps into a report, not by trusting the source tree. Tree clean.
+**Released: v1.5.1 → v1.11.1.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.11.1** — verified by unpacking the zip that is actually sitting there and
+reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
+trusting that the copy succeeded.
+
+### The workflow now covers the whole loop
+
+Up to 1.9.0 the tool analysed a study someone else had designed and fielded. It now covers
+**design → plan → field → analyse → rank → decide**, and the two ends added last are the ones that
+were previously outsourced to Sawtooth:
+
+| Step | Where | Since |
+|---|---|---|
+| Build the best-worst questionnaire | `--design` (CLI only) | 1.11.0 |
+| Decide how many respondents to recruit | `--plan`, and a panel in the app | 1.8.0 / 1.9.0 |
+| Score best-worst answers by HB | automatic on detection | 1.6.0 |
+| Rank the items, with beat probabilities | report card + two downloads | 1.6.0 |
+| Which few items to actually launch | TURF, in the report | 1.10.0 |
+| Segment people, profile, name, export | the original tool | — |
+
+**`--design` is CLI-only** — the same half-delivered state the planner was in before 1.9.0, and the
+same argument applies: this tool exists for people who do not use a command line. Mirroring
+`PlanPanel.tsx` + the `/plan` endpoint is the obvious next piece of work.
+
+### v1.10.0 — TURF, and how much of a reach figure is luck
+
+A ranking says what people like on average; it does not say which three to launch, because the
+top three can all appeal to the same people. TURF answers the portfolio question instead, and the
+part worth not re-deriving is the correction: picking the best-scoring combination out of hundreds
+and then reporting that combination's own score is optimistic by construction. **Measured on
+holdout: 9.5 to 22.3 percentage points**, so the reported reach is the held-out one, not the
+in-sample maximum. An earlier draft of the docstring called this "several percentage points" —
+wrong by four times, and it is called out here because the plausible-sounding number was the one
+that was never measured.
+
+### v1.11.0 — build the questionnaire, not only read one
+
+`segment-kmeans --design my_items.txt` writes which items appear on which screen, for whom. The
+design decides what the data can possibly say and is not recoverable afterwards: two items that
+never appear together cannot be compared, however many people answer.
+
+Deliberately **not** a textbook balanced incomplete block design — those exist only for particular
+combinations of item count, set size and screen count, and a real study fixes those from how long
+people will sit still. It searches for the most balanced design of the shape you actually want and
+then reports what it achieved, including plainly when the shape *cannot* be even, which is
+arithmetic rather than a flaw.
+
+**Verified by closing the loop, not by balance statistics** — which are only a proxy. Build a
+design, simulate people answering it from known preferences, run the real estimator, check the
+ranking that comes back is the one that went in: Spearman 1.000, sampler converged.
+
+The balance search is scored incrementally. The first version took 24s for sixty respondents and
+grew with the sample, so a real study would never have finished; a swap moves items between screens
+without changing how often any item appears, so item balance is invariant and only a few dozen pair
+counts can change. 24s became 0.3s, four hundred respondents in 1.7s, identical balance.
+
+### v1.11.1 — the fourth time the packager shipped something missing
+
+`turf` and `design` are imported inside functions, so PyInstaller's static analysis never saw
+either and neither was bundled. The app launched, segmented and ranked perfectly well, and simply
+stopped answering the question a best-worst study is usually commissioned for.
+
+That is now four for four — the dip test, `tabulate`, matplotlib's SVG writer, and these two — all
+the same shape: **a lazy import is invisible until something runs the code path.** So the build's
+smoke test no longer takes the build's word for it; it puts a best-worst export through the
+packaged binary and fails the build if the TURF section is absent. Any new module imported inside
+a function needs a `--hidden-import` line *and* a smoke-test assertion, or it will ship missing and
+nothing will say so.
 
 ### GitHub Actions: RESOLVED 2026-08-08 — the repository is public and CI is green
 
@@ -218,14 +283,14 @@ other than code" — see *Known limitations* below.
 | | |
 |---|---|
 | Repo | `github.com/tomtomhz/survey-segmenter` — **public**, MIT, owner `tomtomhz` |
-| CI | Python 3.9 / 3.11 / 3.12 + a clean-install job, green |
-| Tests | 152 Python (`pytest`) + 99 frontend (`cd frontend && npm test`) |
-| Shipped app | **v1.5.0 release**: macOS `.app` (82 MB) and Windows `.exe`, built and smoke-tested by the **Desktop app** workflow. Never in git history. The team's copy lives in `~/Desktop/Survey Segmenter (app for the team)/`. |
+| CI | Ubuntu 3.9 / 3.11 / 3.12 and macOS 3.11 / 3.12, plus frontend and packaging checks — green |
+| Tests | 234 Python (`pytest`) + 115 frontend (`cd frontend && npm test`) |
+| Shipped app | **v1.11.1**: macOS `.app` (82 MB), built, signed and smoke-tested locally. Never in git history — it lives in GitHub Releases. The team's copy lives in `~/Desktop/Survey Segmenter (app for the team)/`. |
 | Local path | `~/dev/survey-segmenter` — **moved out of iCloud Drive**, see below |
 
 ```bash
 cd ~/dev/survey-segmenter
-pytest                  # 144 tests, ~125s
+pytest                  # 234 tests
 python3 run_app.py      # opens the web app
 python3 build_app.py    # rebuilds + signs + smoke-tests the .app
 ```
@@ -349,16 +414,22 @@ Not a survey, but 17,000 real rows through the whole pipeline on 2026-07-31
 
 ## Next candidates, roughly by value
 
-1. **A second cluster-tendency test.** Hopkins is the only one and it needs a caveat on short
-   surveys. Hartigan's dip test on the pairwise-distance distribution is the usual companion.
-2. **Variable weighting.** The tool reports which questions drive the segmentation and checks
-   whether dropping the noise ones changes the answer, but weights every question equally when
-   clustering. Sparse k-means (Witten & Tibshirani) learns the weights.
+1. **Put `--design` in the app.** The only feature that is CLI-only, in a tool whose entire premise
+   is that the user does not use a command line. `PlanPanel.tsx` and the `/plan` endpoint are the
+   pattern to copy — that work is already done once and went in cleanly.
+2. **Read a real Qualtrics/Sawtooth wide export.** Its shape is recognised and refused with
+   instructions rather than silently misread, which was the dangerous behaviour. Reading one
+   properly is blocked on having a real file: the code polarity cannot be inferred from the data.
 3. **Resolving overlapping segments** — the measured weakness. Worth understanding before
    attempting: merging may be the honest answer, and "improving" it risks trading away the
    never-confidently-wrong property, which is worth more.
 4. **Consolidate `segment-kmeans-tool.md`** in the assistant memory directory; it has grown well
    past 22 KB of appended paragraphs and is due a rewrite rather than another append.
+
+Two former entries are settled and should not be reopened without reading why: a **second
+cluster-tendency test** shipped (Hartigan's dip, alongside Hopkins), and **sparse k-means** was
+built, measured and deliberately rejected — see `references/sparse_kmeans.py` and
+`STATE-OF-THE-ART.md`.
 
 ## How the modules divide up
 
@@ -366,6 +437,12 @@ Not a survey, but 17,000 real rows through the whole pipeline on 2026-07-31
 `webapp.py` delivers it. `maxdiff.py` scores best-worst data before any of that happens, and
 `kprototypes.py` supplies the distance and the prototypes for questionnaires that mix rating
 scales with pick-any questions.
+
+Three modules sit outside that chain because they run before or after a segmentation rather than
+inside one: `design.py` builds the questionnaire, `planner.py` decides how many people to recruit,
+and `turf.py` turns a ranking into a launch shortlist. None of them import the engine and the
+engine does not import them — which is also why all three are imported lazily, and why each needs
+a `--hidden-import` line in `build_app.py`. See v1.11.1 above for what that costs when forgotten.
 
 The direction of the imports is the point: `webapp` imports the engine, and the engine never
 imports `webapp`. `serve()` and `app()` remain on `segment_kmeans` as thin forwarders so the
