@@ -85,6 +85,11 @@ cmd = [sys.executable, "-m", "PyInstaller", "--name", "Survey Segmenter", "--win
        # same shape as matplotlib.backends.backend_svg above: a lazy import is invisible until
        # something runs the code path, and the smoke test now does.
        "--collect-all", "tabulate",
+       # The study planner is imported inside the request handler rather than at module load, so
+       # static analysis never sees it — the same lazy-import blindness that shipped tabulate and
+       # the dip test missing from every release. Named explicitly, and the smoke test proves it
+       # actually arrived.
+       "--hidden-import", "planner",
        # The interface itself. Without this the packaged app starts, serves its API, and shows
        # nothing at all — the failure looks like a broken server rather than a missing folder.
        "--add-data", f"webui{os.pathsep}webui",
@@ -302,6 +307,24 @@ def _smoke_test():
         if not bw_result.get("ranking"):
             print("\nBUILD IS BROKEN — a best-worst export was scored but its ranking is missing, "
                   "so the app shows segments without the answer the study was fielded for.")
+            _discard_archive()
+
+        # The study planner, checked without running one. Deliberately invalid parameters: the
+        # handler resolves its import before validating them, so the validation message coming back
+        # proves the module survived bundling, while a sweep would add ninety seconds to every
+        # build. Without it the app answers "The study planner is not installed" and the planning
+        # panel is dead in a release nobody would notice was broken.
+        req3 = urllib.request.Request(
+            "http://127.0.0.1:8765/plan", data=json.dumps({"questions": 6, "segments": 99}).encode(),
+            headers={"Content-Type": "application/json"})
+        try:
+            planner_reply = json.loads(urllib.request.urlopen(req3, timeout=60).read())
+        except Exception as e:
+            print(f"\nBUILD IS BROKEN — the study planner endpoint failed ({type(e).__name__}).")
+            _discard_archive()
+        if "not installed" in str(planner_reply.get("error", "")):
+            print("\nBUILD IS BROKEN — planner.py did not survive bundling, so the planning panel "
+                  "in the app cannot work. Nothing else about the build looks wrong.")
             _discard_archive()
 
         if missing:

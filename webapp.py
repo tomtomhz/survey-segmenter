@@ -680,6 +680,17 @@ def serve(port=8000):
             between about forty and a hundred and fifty respondents, so these five points carry the
             whole decision. Someone who wants the finer sweep has `segment-kmeans --plan`.
             """
+            # Resolved BEFORE the parameters are checked, on purpose. `planner` is imported here
+            # rather than at module load, and a lazy import is invisible to PyInstaller — the same
+            # blindness that shipped every release without tabulate and without the dip test. Doing
+            # it first means a request with deliberately bad parameters still proves the module is
+            # present, so the build's smoke test can verify bundling in milliseconds rather than by
+            # running a ninety-second sweep.
+            try:
+                import planner
+            except Exception:
+                self._json({"ok": False, "error": "The study planner is not installed."})
+                return
             body = self._read_json()
             try:
                 questions = int(body.get("questions", 6))
@@ -692,11 +703,6 @@ def serve(port=8000):
                 return
             if not 2 <= segments <= 8:
                 self._json({"ok": False, "error": "Plan for between 2 and 8 segments."})
-                return
-            try:
-                import planner
-            except Exception:
-                self._json({"ok": False, "error": "The study planner is not installed."})
                 return
             try:
                 plan = planner.plan_study(n_questions=questions, n_segments=segments,

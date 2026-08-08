@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-07 (end of day) · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.7.3**, 214 Python + 111 frontend tests green locally on Python 3.9 **and** 3.12 · **GitHub Actions is not running — see below**
+**Last updated:** 2026-08-07 (end of day) · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.9.0**, 224 Python + 115 frontend tests green locally on Python 3.9 **and** 3.12 · **GitHub Actions is not running — see below**
 
 ---
 
 ## Session state — 2026-08-07, end of day (read this first)
 
-**Released: v1.5.1 → v1.7.3.** The team copy at `~/Desktop/Survey Segmenter (app for the
-team)/` is on **1.7.3** — verified by asking the shipped binary itself, over HTTP, which version it
+**Released: v1.5.1 → v1.9.0.** The team copy at `~/Desktop/Survey Segmenter (app for the
+team)/` is on **1.9.0** — verified by asking the shipped binary itself, over HTTP, which version it
 stamps into a report, not by trusting the source tree. Tree clean.
 
 ### GitHub Actions: RESOLVED 2026-08-08 — the repository is public and CI is green
@@ -61,6 +61,28 @@ change is the distinct-patterns cap — a short survey can no longer be cut into
 answers can distinguish. **That changes results on five-question surveys**, which is the most common
 shape a short questionnaire takes. See CHANGELOG.md, which also records what was verified and
 deliberately left unchanged, so a later session does not repeat the measuring.
+
+### The study planner (added 1.8.0, in the app since 1.9.0)
+
+`segment-kmeans --plan`, and a panel on the app's start screen. Answers "how many respondents do we
+need" by planting a known number of segments in simulated surveys and running the REAL pipeline
+over them at a range of sample sizes — not by a power formula, which would have to assume the
+clusters are spherical and well separated when this tool's measured weakness is precisely
+overlapping ones.
+
+Three defects were found auditing it hours after it shipped, and they are worth knowing about
+because two of them made it look authoritative while measuring the wrong thing: the separation
+figure was documented as Cohen's d but delivered 2.83 when asked for 2.0; the default sweep ran
+100-800 respondents when recovery actually turns over between 40 and 150, so most columns were
+identical; and a design that cannot fit the answer scale was silently clipped rather than refused.
+A fourth showed up when it reached the app — requiring every larger sample to clear the bar as
+well was too strict for a noisy sweep and suppressed the recommendation entirely.
+
+**Measured and worth not re-deriving:** at 100 people with subtle differences, roughly one
+simulated study in ten reports the wrong number of segments while still calling it high confidence.
+That is not a contradiction — the tool judges whether a grouping REPRODUCES, and on heavily
+overlapping data a merged pair reproduces perfectly well — but it is disclosed in the planner's
+output rather than buried.
 
 ### No open findings
 
