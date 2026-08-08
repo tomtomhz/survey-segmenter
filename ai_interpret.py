@@ -176,6 +176,22 @@ def save_api_key(key: str) -> None:
     key = (key or "").strip()
     if not key:
         raise AIError("Please paste your Anthropic API key first.", kind="nokey")
+    # Check the SHAPE before storing. Anything non-empty used to be accepted, reported back as
+    # "configured", and then failed with an authentication error only after the user had uploaded
+    # a survey, waited for it to run and clicked the button — at which point the message blamed
+    # the key without saying it had never been one. Found in the field: a nine-character string
+    # was sitting in the config file, and status() called it configured.
+    #
+    # Only the prefix and a floor on length are checked. Anything cleverer would be guessing at a
+    # format Anthropic is free to change, and wrongly refusing a real key is worse than passing a
+    # bad one along — the API is the real judge either way.
+    if not key.startswith("sk-ant-") or len(key) < 20:
+        raise AIError(
+            "That does not look like an Anthropic API key. They start with 'sk-ant-' and run to "
+            f"about a hundred characters — this one is {len(key)}.\n\nCopy yours from "
+            "console.anthropic.com under API Keys, and check the whole thing is selected: a "
+            "partial copy is the usual cause.",
+            kind="nokey")
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     cfg = _read_config()
     cfg["api_key"] = key

@@ -1522,8 +1522,11 @@ def test_ai_config_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(ai, "_CONFIG_FILE", tmp_path / "config.json")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     assert ai.load_api_key() is None
-    ai.save_api_key("  sk-ant-abc  ")
-    assert ai.load_api_key() == "sk-ant-abc"                    # trimmed
+    # Realistic length: `save_api_key` now checks the shape, and a ten-character stand-in is
+    # exactly the kind of value it exists to refuse.
+    fake = "sk-ant-api03-" + "x" * 90
+    ai.save_api_key(f"  {fake}  ")
+    assert ai.load_api_key() == fake                            # trimmed
     assert ai.key_source() == "this app's Settings"
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env")
     assert ai.load_api_key() == "sk-ant-env"                    # env wins over the file
@@ -1531,6 +1534,30 @@ def test_ai_config_roundtrip(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     ai.clear_api_key()
     assert ai.load_api_key() is None
+
+
+@pytest.mark.parametrize("junk, why", [
+    ("hello", "no prefix, far too short"),
+    ("sk-ant-", "the prefix and nothing else"),
+    ("sk-ant-abc", "a plausible-looking stub"),
+    ("sk-proj-" + "x" * 90, "the right length but another vendor's prefix"),
+])
+def test_a_value_that_cannot_be_a_key_is_refused_when_it_is_typed(tmp_path, monkeypatch, junk, why):
+    """Found in the field. A nine-character string was sitting in the config file; `status()`
+    reported the app as configured, and the only sign of trouble came after uploading a survey,
+    waiting for it to run and clicking Suggest names — at which point the error blamed the key
+    without saying it had never been one.
+
+    Checking at the moment of typing turns a confusing failure five minutes later into an obvious
+    one straight away.
+    """
+    monkeypatch.setattr(ai, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(ai, "_CONFIG_FILE", tmp_path / "config.json")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with pytest.raises(ai.AIError) as caught:
+        ai.save_api_key(junk)
+    assert "does not look like" in str(caught.value), why
+    assert ai.load_api_key() is None, "a value that was refused still got written to the file"
 
 
 def test_ai_build_messages_embeds_report_then_appends():

@@ -3,6 +3,22 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.7.2] — 2026-08-08
+
+### Fixed
+
+- **A value that could not possibly be an API key was accepted, stored, and reported as
+  configured.** `save_api_key` checked only that the string was non-empty. Found in the field: a
+  nine-character string sat in the config file, `status()` called the app configured, and the only
+  sign of trouble came after uploading a survey, waiting for it to run and clicking *Suggest names*
+  — at which point the error blamed the key without saying it had never been one.
+
+  The shape is now checked as it is typed: it must start with `sk-ant-` and be at least 20
+  characters, with a message that says what a real key looks like and where to copy it from. Only
+  the prefix and a length floor are checked — anything cleverer would guess at a format Anthropic
+  is free to change, and wrongly refusing a real key is worse than passing a bad one to the API,
+  which is the real judge either way.
+
 ## [1.7.1] — 2026-08-08
 
 Found when the app would not open at all.

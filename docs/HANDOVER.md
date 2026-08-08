@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-07 (end of day) · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.7.1**, 209 Python + 111 frontend tests green locally on Python 3.9 **and** 3.12 · **GitHub Actions is not running — see below**
+**Last updated:** 2026-08-07 (end of day) · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.7.2**, 213 Python + 111 frontend tests green locally on Python 3.9 **and** 3.12 · **GitHub Actions is not running — see below**
 
 ---
 
 ## Session state — 2026-08-07, end of day (read this first)
 
-**Released: v1.5.1 → v1.7.1.** The team copy at `~/Desktop/Survey Segmenter (app for the
-team)/` is on **1.7.1** — verified by asking the shipped binary itself, over HTTP, which version it
+**Released: v1.5.1 → v1.7.2.** The team copy at `~/Desktop/Survey Segmenter (app for the
+team)/` is on **1.7.2** — verified by asking the shipped binary itself, over HTTP, which version it
 stamps into a report, not by trusting the source tree. Tree clean.
 
 ### GitHub Actions has not run since 15:24 today — billing, not code
