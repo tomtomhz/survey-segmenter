@@ -5981,13 +5981,26 @@ def test_a_design_that_cannot_fit_the_answer_scale_is_reported_not_clipped():
 
 
 def test_the_recommendation_is_not_a_size_that_only_got_lucky():
-    """Recovery is not monotonic in sample size — measured, one regime went 3/4, 4/4, 3/4 — so
-    taking the first size that clears the bar can name one that got lucky while a LARGER sample
-    does worse just above it. The bar has to hold from there on."""
+    """Recovery is not monotonic in sample size, so "the first size that clears the bar" can name
+    one that got lucky while larger samples do worse above it.
+
+    The rule has to fail in two directions at once, which is why both cases are here. Demanding
+    that EVERY larger size also clears the bar looked right and was too strict: with a handful of
+    repeats per cell, one unlucky draw anywhere above the answer suppressed the recommendation and
+    the tool announced that no sample size was reliable for a perfectly good design. Measured in
+    the app's cheaper sweep, that is exactly what it did.
+    """
     planner = pytest.importorskip("planner")
-    lucky = _plan_fixture(moderate_hits=(4, 2, 4), sizes=(100, 200, 400))
-    assert planner.recommend(lucky)["recommended_n"] == 400, (
-        "recommended a size that passed once and then failed at a larger sample")
+
+    # Genuinely lucky: it passes once and everything above it collapses. Must be refused.
+    lucky = _plan_fixture(moderate_hits=(4, 0, 0), sizes=(100, 200, 400))
+    assert planner.recommend(lucky)["recommended_n"] != 100, (
+        "recommended a size that passed once while every larger sample failed")
+
+    # One dip between two clean results is sampling noise, not a reason to withhold an answer.
+    noisy = _plan_fixture(moderate_hits=(4, 2, 4), sizes=(100, 200, 400))
+    assert planner.recommend(noisy)["recommended_n"] == 100, (
+        "a single unlucky cell above the answer suppressed the recommendation entirely")
 
     sustained = _plan_fixture(moderate_hits=(2, 4, 4), sizes=(100, 200, 400))
     assert planner.recommend(sustained)["recommended_n"] == 200

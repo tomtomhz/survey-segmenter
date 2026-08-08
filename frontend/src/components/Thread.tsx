@@ -18,6 +18,7 @@ export function Thread({
   onRegroup,
   onNeedsKey,
   onAsk,
+  footer,
 }: {
   messages: Message[]
   busy: boolean
@@ -26,6 +27,12 @@ export function Thread({
   onRegroup: (items: string[]) => void
   onNeedsKey: () => void
   onAsk: (question: string) => void
+  /**
+   * Rendered after the messages, inside the scrolling area. Used for the study planner, which
+   * belongs in the conversation on the start screen rather than pinned above the composer where
+   * it would sit over every later result too.
+   */
+  footer?: React.ReactNode
 }) {
   const thread = useRef<HTMLDivElement>(null)
   // Whether the reader was at the bottom *before* this render. Captured in a layout effect so it
@@ -129,6 +136,7 @@ export function Thread({
             </div>
           )
         })}
+        {footer}
       </div>
     </div>
   )

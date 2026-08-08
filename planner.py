@@ -234,9 +234,23 @@ def recommend(plan, threshold=0.8):
     # "the first size that passes" can name a size that only got lucky, with a larger sample doing
     # worse just above it. Requiring it to hold from there on is the difference between a
     # recommendation and a coincidence.
+    # The smallest size that clears the bar and KEEPS clearing it on average from there upward.
+    #
+    # Two failures to avoid, in opposite directions. Taking the first size that passes names one
+    # that only got lucky — recovery is not monotonic, and a larger sample can do worse just above
+    # it. But demanding that EVERY larger size also passes is too strict to survive sampling noise:
+    # with a handful of repeats per cell, one unlucky draw anywhere above the answer suppresses the
+    # recommendation entirely, and the tool then says "no sample size was reliable" about a design
+    # that is perfectly fine. Measured in the app's cheaper sweep, that is what happened.
+    #
+    # Averaging from the candidate upward keeps the protection — a size followed by genuinely worse
+    # ones still fails — while letting a single bad cell be what it is.
     enough = None
     for index, cell in enumerate(moderate):
-        if all(later["hit_rate"] >= threshold for later in moderate[index:]):
+        if cell["hit_rate"] < threshold:
+            continue
+        rest = [later["hit_rate"] for later in moderate[index:]]
+        if sum(rest) / len(rest) >= threshold:
             enough = cell["n_people"]
             break
     subtle_ever = any(c["hit_rate"] >= threshold for c in subtle)

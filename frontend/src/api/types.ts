@@ -159,3 +159,31 @@ export type Result<T> = T | Failure
 export function isFailure<T extends { ok?: true }>(r: T | Failure): r is Failure {
   return r.ok !== true
 }
+
+/** One cell of the study planner's sweep: a distinctness regime at one sample size. */
+export interface PlanCell {
+  regime: string
+  separation: number
+  n_people: number
+  runs: number
+  right_k: number
+  hit_rate: number
+  mean_ari: number
+  confidently_wrong: number
+  /** True when the design cannot fit the answer scale at all, so no sample size would help. */
+  impossible?: boolean
+}
+
+export interface PlanResult {
+  ok: true
+  cells: PlanCell[]
+  sizes: number[]
+  seeds: number
+  questions: number
+  segments: number
+  regimes: { name: string; separation: number }[]
+  /** Smallest sample that reliably found the right number of segments, or null if none did. */
+  recommended_n: number | null
+  subtle_reachable: boolean
+  prose: string
+}

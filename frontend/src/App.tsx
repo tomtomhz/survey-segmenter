@@ -8,6 +8,7 @@ import { SettingsModal } from './components/SettingsModal'
 import { Sidebar } from './components/Sidebar'
 import { Thread } from './components/Thread'
 import { useDropTarget } from './hooks/useDropTarget'
+import { PlanPanel } from './components/PlanPanel'
 import { usePrintExpansion } from './hooks/usePrintExpansion'
 import { droppedADirectory, fileProblem } from './lib/upload'
 import { messageId, replace, withoutSuggestions, type Message } from './lib/thread'
@@ -297,6 +298,12 @@ export function App() {
             onRegroup={(items) => void regroup(items)}
             onNeedsKey={() => openSettings()}
             onAsk={(question) => void ask(question, false)}
+            footer={
+              // Only before there is a result. Once an analysis exists the question has been
+              // answered by the data itself, and leaving a planning panel under every result would
+              // be clutter offering to plan a study already fielded.
+              sessionId === null ? <PlanPanel busy={busy} setBusy={setWorking} /> : null
+            }
           />
           <Composer
             busy={busy}

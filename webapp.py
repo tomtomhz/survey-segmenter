@@ -432,6 +432,8 @@ def serve(port=8000):
                     self._do_regroup()
                 elif route == "/name":
                     self._do_name()
+                elif route == "/plan":
+                    self._do_plan()
                 elif route == "/delete_project":
                     body = self._read_json()
                     store.delete(body.get("session_id", ""))
@@ -668,6 +670,47 @@ def serve(port=8000):
             tr.append({"role": "ai", "html": html})
             remember(body.get("session_id"))
             self._json({"ok": True, "reply_html": html})
+
+        def _do_plan(self):
+            """How many respondents will a planned study need? Runs before there is any data.
+
+            Deliberately a smaller sweep than the command line uses. The CLI answers into a
+            terminal where a four-minute wait is normal; a browser spinner is not, and the sizes
+            below still bracket the range where the answer actually changes — recovery turns over
+            between about forty and a hundred and fifty respondents, so these five points carry the
+            whole decision. Someone who wants the finer sweep has `segment-kmeans --plan`.
+            """
+            body = self._read_json()
+            try:
+                questions = int(body.get("questions", 6))
+                segments = int(body.get("segments", 3))
+            except (TypeError, ValueError):
+                self._json({"ok": False, "error": "Give a whole number of questions and segments."})
+                return
+            if not 2 <= questions <= 60:
+                self._json({"ok": False, "error": "Plan for between 2 and 60 questions."})
+                return
+            if not 2 <= segments <= 8:
+                self._json({"ok": False, "error": "Plan for between 2 and 8 segments."})
+                return
+            try:
+                import planner
+            except Exception:
+                self._json({"ok": False, "error": "The study planner is not installed."})
+                return
+            try:
+                plan = planner.plan_study(n_questions=questions, n_segments=segments,
+                                          sizes=(50, 75, 100, 200, 400), seeds=5)
+            except Exception as e:                       # a planner fault must not kill the app
+                self._json({"ok": False, "error": sk._explain_run_error(str(e))})
+                return
+            advice = planner.recommend(plan)
+            self._json({"ok": True, "cells": plan["cells"], "sizes": plan["sizes"],
+                        "seeds": plan["seeds"], "questions": questions, "segments": segments,
+                        "regimes": [{"name": n, "separation": d} for n, d in planner.REGIMES],
+                        "recommended_n": advice["recommended_n"],
+                        "subtle_reachable": advice["subtle_reachable"],
+                        "prose": planner.render(plan)})
 
         def _do_settings(self):
             if sk._ai is None:

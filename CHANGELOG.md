@@ -3,6 +3,33 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.9.0] — 2026-08-08
+
+### Added
+
+- **The study planner is now in the app**, on the start screen, where the people who plan surveys
+  can reach it. It was command-line only, which for a tool whose whole argument is that
+  non-specialists can use it made the feature half-delivered.
+
+  It is the one thing here that runs with no file, so it lives in the conversation before any
+  result and disappears once there is one — offering to plan a study already fielded would be
+  clutter. About ninety seconds, and the button says so: seventy-five complete segmentations,
+  five sample sizes by three levels of distinctness by five simulated studies each.
+
+### Fixed
+
+- **The recommendation could be suppressed by a single unlucky simulation.** Requiring every larger
+  sample to clear the bar as well looked right and was too strict: with a handful of repeats per
+  cell, one bad draw anywhere above the answer made the tool announce that no sample size was
+  reliable for a perfectly good design. Caught by running the app's cheaper sweep, where it
+  happened immediately — the moderate column read `0/3, 2/3, 2/3, 3/3, 2/3` and the verdict was
+  "nothing worked".
+
+  The bar must now hold on average from the recommended size upward, which still refuses a size
+  that only got lucky (one that passes while everything above it collapses) without being defeated
+  by noise. The app's sweep also went from three repeats to five, because three cannot distinguish
+  "nearly always" from "usually" and that is the distinction the whole recommendation rests on.
+
 ## [1.8.1] — 2026-08-08
 
 An audit of the study planner shipped hours earlier. Three defects, all of which made it look more
