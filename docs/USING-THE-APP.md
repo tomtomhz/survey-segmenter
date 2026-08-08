@@ -22,9 +22,19 @@ You do **not** need Python or any technical setup to run the app. Just download 
 
 ## Mac
 
-1. Download **`Survey Segmenter.zip`** and double-click it to unzip. You will get **`Survey
-   Segmenter.app`**.
-2. Drag `Survey Segmenter.app` into your **Applications** folder (optional, but tidy).
+1. Download **`Survey Segmenter.zip`**.
+2. **Move the .zip to your Applications folder before unzipping it, and unzip it there.**
+
+   > **Not on the Desktop or in Documents, if you use iCloud Drive.** macOS syncs those two
+   > folders by default, and iCloud writes its own hidden metadata onto everything inside them.
+   > On an app bundle that metadata *invalidates the code signature*, and macOS then refuses to
+   > launch it — the app simply will not open, and nothing tells you why. It is not damaged; it is
+   > being edited by the sync service. Unzipping anywhere outside iCloud avoids it entirely.
+   >
+   > If it has already happened, do not try to repair that copy. Delete it and unzip again in
+   > Applications.
+
+   You will get **`Survey Segmenter.app`**.
 3. **The first time only — macOS will block it, and that is expected.** The app is made by your own
    team rather than sold through Apple's App Store, so macOS asks you to approve it once:
 

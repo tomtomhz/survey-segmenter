@@ -3,6 +3,30 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.7.1] — 2026-08-08
+
+Found when the app would not open at all.
+
+### Fixed
+
+- **The app would not launch when unzipped onto an iCloud-synced Desktop.** macOS syncs Desktop and
+  Documents by default, and iCloud writes its own metadata (`com.apple.FinderInfo`,
+  `com.apple.fileprovider.fpfs#P`) onto everything inside them. On an app bundle that metadata
+  **invalidates the code signature**, and macOS then refuses to launch it — silently, with nothing
+  said about why. The archive itself was fine: the same .zip extracted outside iCloud verifies and
+  runs.
+
+  The build already guarded against this when *creating* the archive; nothing warned about it on
+  *extraction*. The instructions now say to unzip in Applications and explain what goes wrong
+  otherwise, because the symptom — an app that just does not open — gives a recipient nothing to
+  go on.
+
+- **The bundle reported its version as 0.0.0.** PyInstaller's default was never replaced, so every
+  release looked identical in Finder's Get Info, and "which version are you running?" could only be
+  answered by launching the app and reading a report footer. The real version is now stamped into
+  `Info.plist` before signing (after, it would break the very signature the signing step exists to
+  protect).
+
 ## [1.7.0] — 2026-08-08
 
 From an audit of the Hierarchical Bayes sampler itself. Its *outputs* had been checked hard —

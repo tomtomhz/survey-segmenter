@@ -384,7 +384,35 @@ def _sign_and_zip_macos():
     print(f"Shareable archive: {out_zip}  ({out_zip.stat().st_size / 1e6:.0f} MB)")
 
 
+def _stamp_macos_version():
+    """Write the real version into the bundle, before it is signed.
+
+    PyInstaller leaves CFBundleShortVersionString at 0.0.0, so every release looked identical in
+    Finder's Get Info and in any inventory tool. Someone holding a copy had no way to tell which
+    build it was without launching it and reading a report footer — and "which version are you
+    running?" is the first question of every support conversation.
+
+    This has to run BEFORE signing, because the signature covers Info.plist: stamping afterwards
+    would break exactly the signature `_sign_and_zip_macos` exists to protect.
+    """
+    plist = Path("dist/Survey Segmenter.app/Contents/Info.plist")
+    if not plist.is_file():
+        return
+    version = None
+    for line in Path("segment_kmeans.py").read_text().splitlines():
+        if line.startswith("__version__"):
+            version = line.split('"')[1]
+            break
+    if not version:
+        return
+    for key in ("CFBundleShortVersionString", "CFBundleVersion"):
+        subprocess.run(["/usr/libexec/PlistBuddy", "-c", f"Set :{key} {version}", str(plist)],
+                       capture_output=True)
+    print(f"Stamped the bundle as version {version}.")
+
+
 if sys.platform == "darwin":
+    _stamp_macos_version()
     _sign_and_zip_macos()
 
 _smoke_test()
