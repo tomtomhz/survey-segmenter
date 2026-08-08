@@ -170,7 +170,7 @@ for _m in ("divide by zero encountered in matmul", "overflow encountered in matm
            "invalid value encountered in matmul"):
     warnings.filterwarnings("ignore", message=_m, category=RuntimeWarning)
 
-__version__ = "1.9.0"    # keep in sync with pyproject.toml
+__version__ = "1.10.0"    # keep in sync with pyproject.toml
 
 # Optional "ask Claude about your segments" add-on. Imported here (not lazily) so the packaged app
 # bundles it; wrapped so a missing file/SDK never stops the core segmentation tool from loading.
@@ -4065,6 +4065,69 @@ def _maxdiff_ranking_section(est):
     return "\n".join(lines)
 
 
+def _turf_section(est, size=3):
+    """Which few items to launch — the decision a best-worst study is usually commissioned for.
+
+    The ranking answers "what do people like"; this answers "what do we put on the menu", and they
+    are different questions whenever tastes divide. The three best-liked items can all appeal to
+    the same crowd while a fourth is the only thing anyone else will take.
+
+    Returns None rather than a section when there is nothing worth saying: too few items to choose
+    between, or too few respondents for the holdout to mean anything.
+    """
+    try:
+        import turf as _turf
+    except Exception:
+        return None
+    if est.utilities is None or len(est.item_names) < size + 2 or len(est.respondent_ids) < 40:
+        return None
+    result = _turf.turf(est.utilities, est.item_names, size=size)
+
+    rows = pd.DataFrame({
+        "#": range(1, len(result["items"]) + 1),
+        "item": result["items"],
+        "reaches on its own": [f"{a * 100:.0f}%" for a in result["alone"]],
+        "adds over the ones above": [f"+{g * 100:.0f} points" for g in result["incremental"]],
+    })
+    lines = [f"## Which {size} to launch", "",
+             "The ranking above says what people like. This says which **set** reaches the most "
+             "people, which is a different question whenever tastes divide — the best-liked items "
+             "can all appeal to the same crowd.", "",
+             f"**{', '.join(result['items'])}** — together reaching "
+             f"**{result['reach'] * 100:.0f}%** of your respondents.", "",
+             rows.to_markdown(index=False, disable_numparse=True), ""]
+
+    weakest = result["incremental"][-1]
+    if weakest < 0.03:
+        lines += [f"> **{result['items'][-1]} is carrying almost nobody the others do not already "
+                  f"carry** — it adds {weakest * 100:.0f} points. If a place on the list is "
+                  f"expensive, that is the one to question.", ""]
+
+    # Only when the gap is material. A warning that fires at zero optimism reads as broken —
+    # "Expect about 100%, not 100%", "the 0-point difference" — and a caveat that appears when
+    # there is nothing to caveat teaches the reader to skip the one that matters.
+    if result["optimism"] == result["optimism"] and result["optimism"] >= 0.01:
+        lines += [f"> **Expect about {result['holdout_reach'] * 100:.0f}%, not "
+                  f"{result['reach'] * 100:.0f}%.** The headline is the best of "
+                  f"{'every' if result['search'] == 'exhaustive' else 'many'} combination tried, "
+                  f"and a maximum chosen on one sample flatters itself. Choosing the set on half "
+                  f"these people and measuring it on the other half — forty times over — gives "
+                  f"{result['holdout_reach'] * 100:.0f}%. The "
+                  f"{result['optimism'] * 100:.0f}-point difference is what the search borrowed "
+                  f"from luck, and it is the number to take to a budget meeting.", ""]
+    elif result["optimism"] == result["optimism"]:
+        lines += [f"> **This one holds up.** Choosing the set on half these people and measuring it "
+                  f"on the other half gives {result['holdout_reach'] * 100:.0f}%, which is what it "
+                  f"scored here — so the figure is not an artefact of searching for the best "
+                  f"combination. That is unusual enough to be worth saying; on smaller studies with "
+                  f"longer item lists the two can differ by twenty points.", ""]
+
+    lines += [f"*Someone counts as reached by an item when it is among their own top "
+              f"{result['top_n']}. A different rule would give a different winner, so it is stated "
+              f"rather than assumed.*", ""]
+    return "\n".join(lines), result
+
+
 def run_analysis(data, cfg=None, force_items=None):
     """Raw survey (bytes or a path) -> a dict with everything the web app and the AI layer need:
     the title, the report as an HTML fragment (auto-detection notes on top), and a plain-text
@@ -4080,6 +4143,9 @@ def run_analysis(data, cfg=None, force_items=None):
     # silently wrong (by clustering the raw choice codes) would look like a working result.
     maxdiff_note = None
     maxdiff_est = None
+    # Computed once, next to the estimate it derives from: the downloads are assembled before the
+    # report body, and running the search twice would double the cost for no reason.
+    _turf_made = None
     # A best-worst export written one row per PERSON carries no sign that it is a preference
     # exercise, so it was read as an ordinary rating grid and its response CODES were clustered as
     # though they were scores — two confident segments out of an 80-person file, no warning
@@ -4099,6 +4165,8 @@ def run_analysis(data, cfg=None, force_items=None):
             f"for {len(est.respondent_ids)} respondents by Hierarchical Bayes, and the groups "
             f"below are built on those utilities. Counting how often each item was picked best "
             f"minus worst would have been too coarse to describe a single person.")
+    if maxdiff_est is not None:
+        _turf_made = _turf_section(maxdiff_est)
     clean, method, id_col, items, plan = auto_prepare(df, force_items=force_items)
     _opts = {"method": method, "var_kinds": plan.get("kinds"),
              "level_labels": plan.get("level_labels")}
@@ -4131,6 +4199,16 @@ def run_analysis(data, cfg=None, force_items=None):
         _per_person = maxdiff_est.as_frame()
         _per_person.index.name = "respondent_id"
         files["respondent_utilities.csv"] = _per_person.to_csv()
+        if _turf_made is not None:
+            _tp = _turf_made[1]
+            files["what_to_launch.csv"] = pd.DataFrame({
+                "rank": range(1, len(_tp["items"]) + 1),
+                "item": _tp["items"],
+                "reach_alone": _tp["alone"],
+                "incremental_reach": _tp["incremental"],
+                "combined_reach": _tp["reach"],
+                "expected_reach_holdout": _tp["holdout_reach"],
+            }).to_csv(index=False)
     if method == "lca":
         files["group_profiles.csv"] = seg.profiles_frame().to_csv(index=False)
     else:
@@ -4155,6 +4233,8 @@ def run_analysis(data, cfg=None, force_items=None):
     _body = seg.report_markdown
     _ranking = None
     if maxdiff_est is not None:
+        if _turf_made is not None:
+            _body = _turf_made[0] + "\n" + _body
         _body = _maxdiff_ranking_section(maxdiff_est) + "\n" + _body
         # Also as structured data, not only as prose inside the report. The report is rendered
         # into a panel that is COLLAPSED by default and sits below the segment map, so a study

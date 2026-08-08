@@ -3,6 +3,41 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.10.0] — 2026-08-08
+
+### Added
+
+- **TURF: which few items should you actually launch?** A best-worst study says what people like on
+  average. That is a different question from which SET to offer, and the difference matters
+  whenever tastes divide — the three best-liked items can all appeal to the same crowd while
+  everyone else is left with nothing. Reach counts people rather than preference.
+
+  Measured on a study with a 60/40 split in taste: the ranking's top three all served the majority,
+  while the reaching set swapped one out for the only item the other 40% wanted.
+
+- **And how much of that reach is luck.** TURF reports the best of every combination it tried, and
+  a maximum chosen on one sample flatters whichever combination happened to suit it. Every result
+  therefore carries a holdout figure: the set is chosen on half the respondents and scored on the
+  other half, forty times over.
+
+  The gap is not a rounding error, which is the assumption worth killing. Measured (percentage
+  points of overstatement, choosing three items):
+
+  | | real taste groups | pure noise |
+  |---|---|---|
+  | 100 people, 10 items | 9.5 | 15.6 |
+  | 100 people, 20 items | 22.3 | 20.7 |
+  | 1,000 people, 10 items | 2.4 | 4.9 |
+
+  It grows with the item list — exactly when TURF is most tempting — and shrinks with sample size,
+  because there is less luck left to find. At a hundred respondents over twenty items the headline
+  overstates reach by more than twenty points, which is the difference between a launch decision
+  and a mistake. The report quotes the holdout figure as the one to take to a budget meeting.
+
+  The search is exhaustive wherever the binomial allows and greedy beyond, and says which it used —
+  a reader is entitled to know whether "best" means best or merely good. Downloadable as
+  `what_to_launch.csv`.
+
 ## [1.9.0] — 2026-08-08
 
 ### Added

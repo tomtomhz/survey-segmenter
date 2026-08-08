@@ -41,6 +41,7 @@ export const DOWNLOAD_LABEL: Record<string, string> = {
   // computed: nobody downloading these is looking for the word "utility".
   'item_utilities.csv': 'What matters most, ranked (CSV)',
   'respondent_utilities.csv': 'Each person’s preferences (CSV)',
+  'what_to_launch.csv': 'Which few to launch (CSV)',
 }
 
 export const COLUMN_ROLE: Record<ColumnRole, string> = {

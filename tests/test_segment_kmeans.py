@@ -6017,3 +6017,116 @@ def test_the_default_sample_sizes_cover_where_the_answer_changes():
     assert planner.DEFAULT_SEEDS >= 5, (
         "fewer than five repeats cannot separate 'nearly always' from 'usually', which is exactly "
         "the distinction the recommendation turns on")
+
+
+# --------------------------------------------------------------------------------------------
+# TURF: which few items to launch
+# --------------------------------------------------------------------------------------------
+
+def test_turf_picks_across_crowds_where_a_ranking_would_not():
+    """The reason TURF exists at all. A ranking says what people like ON AVERAGE; if tastes divide,
+    the three best-liked items can all appeal to the same crowd while everybody else is left with
+    nothing. Reach counts people rather than preference, so it should sacrifice a well-liked item
+    for one that covers the crowd nobody else is serving."""
+    tf = pytest.importorskip("turf")
+    rng = np.random.default_rng(3)
+    names = ["A", "B", "C", "D", "E"]
+    utilities = rng.normal(0, 0.4, (600, 5))
+    majority = rng.random(600) < 0.6
+    utilities[majority, 0] += 3.0            # the big crowd loves A, B and C
+    utilities[majority, 1] += 2.8
+    utilities[majority, 2] += 2.6
+    utilities[~majority, 3] += 3.2           # everyone else only wants D
+    utilities[~majority, 4] += 3.0
+
+    average_favourites = set(np.argsort(-utilities.mean(axis=0))[:2])
+    assert average_favourites == {0, 1}, "the fixture no longer has A and B as the top-rated pair"
+
+    result = tf.turf(utilities, names, size=2, splits=10)
+    assert set(result["indices"]) & {3, 4}, (
+        f"picked {result['items']} — every choice serves the same crowd, which is the mistake "
+        "reach is supposed to prevent")
+
+
+def test_turf_reports_how_much_of_its_headline_is_luck():
+    """A maximum taken over every combination flatters whichever one suited this sample. Measured
+    on a hundred people over twenty items, the in-sample figure overstates reach by more than
+    twenty points — the difference between a launch decision and a mistake — so the holdout is not
+    an optional refinement, it is the number worth quoting."""
+    tf = pytest.importorskip("turf")
+    rng = np.random.default_rng(1)
+    utilities = rng.normal(0, 1.0, (100, 20))          # pure taste noise: every lead is luck
+    result = tf.turf(utilities, [f"i{j}" for j in range(20)], size=3, splits=25)
+
+    assert result["holdout_reach"] < result["in_sample_reach"], (
+        "the holdout matched the in-sample figure on pure noise, which cannot be right")
+    assert result["optimism"] > 0.05, (
+        f"optimism measured at only {result['optimism']:.3f} on noise, where the entire apparent "
+        "advantage of the winning combination is sampling luck")
+
+
+def test_turf_search_is_exact_when_it_can_afford_to_be():
+    """Exhaustive where the binomial allows it, greedy beyond — and the result says which, because
+    a reader is entitled to know whether "best" means best or merely good."""
+    tf = pytest.importorskip("turf")
+    rng = np.random.default_rng(0)
+    small = tf.turf(rng.normal(0, 1, (200, 8)), [f"i{j}" for j in range(8)], size=3, splits=5)
+    assert small["search"] == "exhaustive"
+
+    hit = tf.reach_matrix(rng.normal(0, 1, (200, 8)))
+    combo, reach, _ = tf.best_combination(hit, 3)
+    every = [tf._reach_of(hit, c) for c in __import__("itertools").combinations(range(8), 3)]
+    assert reach == pytest.approx(max(every)), "the exhaustive search did not return the maximum"
+
+
+def test_a_best_worst_study_is_told_which_items_to_launch():
+    """End to end: the section and the download, on a study where tastes genuinely divide."""
+    pytest.importorskip("turf")
+    pytest.importorskip("maxdiff")
+    rng = np.random.default_rng(11)
+    items = ["Fast delivery", "Low price", "Good support", "Wide range", "Eco packaging",
+             "Long warranty", "Known brand", "Easy returns"]
+    crowd_a = np.array([2.5, 2.2, 2.0, 0.0, -1.5, -1.5, -1.5, -2.0])
+    crowd_b = np.array([-1.5, -1.0, -1.5, 0.0, 2.6, 2.4, -1.0, 1.0])
+    rows = []
+    for person in range(200):
+        truth = crowd_a if person % 10 < 6 else crowd_b
+        for task in range(9):
+            shown = rng.choice(len(items), 4, replace=False)
+            u = truth[shown] + rng.gumbel(0, 1, 4)
+            best, worst = shown[u.argmax()], shown[u.argmin()]
+            for i in shown:
+                rows.append({"respondent_id": f"R{person:03d}", "task": task, "item": items[i],
+                             "choice": "best" if i == best else
+                                       ("worst" if i == worst else "")})
+    with contextlib.redirect_stdout(io.StringIO()):
+        r = sk.run_analysis(pd.DataFrame(rows).to_csv(index=False).encode(),
+                            cfg=sk.SegmentationConfig(k_min=2, k_max=3, **FAST))
+
+    assert "## Which 3 to launch" in r["digest"]
+    assert "what_to_launch.csv" in r["files"], "the decision was reported but not downloadable"
+    launch = pd.read_csv(io.StringIO(r["files"]["what_to_launch.csv"]))
+    assert len(launch) == 3 and set(launch["item"]).issubset(items)
+    # The set must span both crowds — that is the entire point.
+    assert set(launch["item"]) & {"Eco packaging", "Long warranty"}, (
+        f"chose {list(launch['item'])}, all of which serve the 60% crowd")
+
+
+def test_the_luck_warning_stays_quiet_when_there_is_no_luck_to_report():
+    """It read "Expect about 100%, not 100%" and "the 0-point difference" whenever the holdout
+    agreed exactly. A caveat that fires with nothing to caveat reads as broken, and teaches the
+    reader to skip the one that matters."""
+    pytest.importorskip("turf")
+    md = pytest.importorskip("maxdiff")
+
+    class _Fixed:
+        """An estimate whose reach cannot be optimistic: two items, everyone reached by both."""
+        item_names = ["A", "B", "C", "D", "E"]
+        respondent_ids = [f"R{i}" for i in range(200)]
+        utilities = np.tile(np.array([5.0, 4.0, 3.0, 2.0, 1.0]), (200, 1))
+
+    prose, result = sk._turf_section(_Fixed())
+    assert result["optimism"] == pytest.approx(0.0, abs=1e-9)
+    assert "not 100%" not in prose and "0-point difference" not in prose
+    assert "holds up" in prose
+    _ = md
