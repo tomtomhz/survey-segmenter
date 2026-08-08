@@ -170,7 +170,7 @@ for _m in ("divide by zero encountered in matmul", "overflow encountered in matm
            "invalid value encountered in matmul"):
     warnings.filterwarnings("ignore", message=_m, category=RuntimeWarning)
 
-__version__ = "1.10.0"    # keep in sync with pyproject.toml
+__version__ = "1.11.0"    # keep in sync with pyproject.toml
 
 # Optional "ask Claude about your segments" add-on. Imported here (not lazily) so the packaged app
 # bundles it; wrapped so a missing file/SDK never stops the core segmentation tool from loading.
@@ -3854,6 +3854,16 @@ def _explain_run_error(msg):
                 "choices. Mixing it with word answers would invent one category per person and "
                 "produce a confident-looking but meaningless result.\n\nEither pick questions that "
                 "are ALL numbers, or pick ones that are all multiple-choice.")
+    if msg.startswith("_DESIGN_TOO_FEW_ITEMS:"):
+        _, n_items, per_set = msg.split(":", 2)
+        return (f"You asked for {per_set} items on each screen but gave only {n_items} items in "
+                f"total. Each screen has to show fewer items than you have, or every screen would "
+                f"be the same and there would be nothing to compare.\n\nUse --per-screen with a "
+                f"smaller number, or add more items.")
+    if msg == "_DESIGN_SET_TOO_SMALL":
+        return ("A best-worst screen needs at least two items on it — people pick a best and a "
+                "worst, which takes two things to choose between. Try --per-screen 4, which is "
+                "the usual choice.")
     if msg.startswith("_MAXDIFF_WIDE:"):
         n = msg.split(":", 1)[1]
         return (f"That looks like a best-worst (MaxDiff) survey saved with one row per PERSON — I "
@@ -4718,6 +4728,16 @@ def _cli():
     p.add_argument("--app", action="store_true",
                    help="run as the desktop app (like --serve, but picks a free port automatically)")
     p.add_argument("--port", type=int, default=8000, help="port for --serve (default 8000)")
+    p.add_argument("--design", metavar="ITEMS_FILE", default=None,
+                   help="build a best-worst (MaxDiff) questionnaire: give a text file with one "
+                        "item per line and it writes the design a survey platform can field. "
+                        "Needs no data — this is what you run BEFORE collecting any")
+    p.add_argument("--per-screen", type=int, default=4,
+                   help="with --design: how many items on each screen (default 4)")
+    p.add_argument("--screens", type=int, default=10,
+                   help="with --design: how many screens each person answers (default 10)")
+    p.add_argument("--people", type=int, default=200,
+                   help="with --design: how many respondents to build versions for (default 200)")
     p.add_argument("--plan", action="store_true",
                    help="how many respondents do you need? Simulates the study you are about to "
                         "run and reports what each sample size can and cannot find. Needs no data")
@@ -4728,6 +4748,30 @@ def _cli():
     p.add_argument("--sizes", nargs="*", type=int, default=None,
                    help="with --plan: sample sizes to try (default 100 200 300 400 600 800)")
     a = p.parse_args()
+
+    if a.design:                     # questionnaire-building mode: run before collecting anything
+        import design as _design
+        names = [line.strip() for line in
+                 Path(a.design).read_text(encoding="utf-8").splitlines() if line.strip()]
+        if len(names) < 3:
+            _friendly_fail(p, "That file needs one item per line, and at least three items — "
+                              "a best-worst exercise compares things, so there have to be things "
+                              "to compare.")
+        try:
+            built, report = _design.make_design(len(names), a.per_screen, a.screens, a.people)
+        except ValueError as e:
+            _friendly_fail(p, _explain_run_error(str(e)))
+        out = Path(a.outdir) if a.outdir else Path(".")
+        out.mkdir(parents=True, exist_ok=True)
+        frame = _design.to_frame(built, names)
+        frame.to_csv(out / "maxdiff_design.csv", index=False, encoding="utf-8")
+        print(_design.render(report))
+        print(f"Written to {out / 'maxdiff_design.csv'} — one row per item shown, which is the "
+              f"shape most survey platforms import.\n")
+        print("Field it, then bring the answers back to this tool: add a 'choice' column saying "
+              "best or worst (or 1 and -1) against the item each person picked, and run the "
+              "analysis on that file.")
+        return
 
     if a.plan:                       # planning mode: no data, because there is none yet
         import planner

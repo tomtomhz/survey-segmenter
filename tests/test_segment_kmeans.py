@@ -6130,3 +6130,102 @@ def test_the_luck_warning_stays_quiet_when_there_is_no_luck_to_report():
     assert "not 100%" not in prose and "0-point difference" not in prose
     assert "holds up" in prose
     _ = md
+
+
+# --------------------------------------------------------------------------------------------
+# Building the best-worst questionnaire itself
+# --------------------------------------------------------------------------------------------
+
+def test_a_design_shows_every_item_and_every_pair():
+    """What a best-worst design has to get right, and what each failure costs.
+
+    An item shown less often is estimated less precisely, so its place in the ranking partly
+    reflects how often it was asked about. A PAIR never shown together is worse: those two items
+    are then compared only through other items, and no amount of analysis afterwards recovers the
+    comparison the questionnaire never made.
+    """
+    d = pytest.importorskip("design")
+    built, report = d.make_design(n_items=8, items_per_set=4, sets_per_respondent=10,
+                                  n_respondents=40, seed=0)
+
+    # 10 x 4 slots divides by 8 items, so exposure can be — and must be — exactly even.
+    low, high = report["times_each_item_shown"]
+    assert report["evenly_divisible"] and low == high, (
+        f"item exposure ran {low}-{high} on a shape that divides evenly")
+    assert report["never_paired"] == 0, (
+        f"{report['never_paired']} pairs never appear together, so those comparisons cannot be made")
+
+    # No screen may show the same item twice — it would ask someone to choose between a thing and
+    # itself, and the reader would silently drop the set as malformed.
+    for person in built:
+        for task in person:
+            assert len(set(task)) == len(task), f"an item appears twice on one screen: {task}"
+
+    # And people must not all get the same questionnaire, or fatigue on screen three becomes an
+    # opinion about whatever is always on screen three.
+    first_screens = {tuple(person[0]) for person in built}
+    assert len(first_screens) > 1, "every respondent was given an identical arrangement"
+
+
+def test_a_design_this_builds_is_one_the_estimator_can_recover_truth_from():
+    """The only test that matters for a design: does a study built this way actually work?
+
+    Balance statistics are a proxy. This closes the loop — build the questionnaire, simulate people
+    answering it from known preferences, run the real estimator, and check the ranking that comes
+    back is the one that went in.
+    """
+    d = pytest.importorskip("design")
+    md = pytest.importorskip("maxdiff")
+    names = [f"item {i + 1}" for i in range(10)]
+    truth = np.linspace(2.0, -2.0, 10)
+    built, _report = d.make_design(10, 4, 10, 200, seed=1)
+
+    rng = np.random.default_rng(7)
+    rows = []
+    for person, tasks in enumerate(built):
+        for task_number, task in enumerate(tasks, start=1):
+            drawn = truth[task] + rng.gumbel(0, 1, len(task))
+            best, worst = task[int(drawn.argmax())], task[int(drawn.argmin())]
+            for item in task:
+                rows.append({"respondent_id": f"R{person:04d}", "task": task_number,
+                             "item": names[item],
+                             "choice": "best" if item == best else
+                                       ("worst" if item == worst else "")})
+    with contextlib.redirect_stdout(io.StringIO()):
+        est = md.utilities_from_export(pd.DataFrame(rows), n_draws=2500, n_burn=800, progress=False)
+
+    recovered = [names.index(name) for name in est.ranking()["item"]]
+    from scipy.stats import spearmanr
+    rho, _p = spearmanr(recovered, range(len(names)))
+    assert rho > 0.9, f"a study built from this design recovered the planted order at only {rho:.3f}"
+
+
+def test_a_design_says_when_its_shape_cannot_be_balanced():
+    """Some shapes cannot be even, and that is arithmetic rather than a flaw. Nine screens of four
+    is thirty-six slots, which does not divide by ten items, so some items MUST be shown once more
+    than others. Saying so is better than a reader assuming perfect balance they did not get."""
+    d = pytest.importorskip("design")
+    _built, report = d.make_design(n_items=10, items_per_set=4, sets_per_respondent=9,
+                                   n_respondents=30, seed=0)
+    assert not report["evenly_divisible"]
+    assert "cannot be perfectly even" in d.render(report)
+
+    _even, even_report = d.make_design(n_items=8, items_per_set=4, sets_per_respondent=10,
+                                       n_respondents=30, seed=0)
+    assert "cannot be perfectly even" not in d.render(even_report), (
+        "warned about uneven exposure on a shape that divides exactly")
+
+
+@pytest.mark.parametrize("kwargs, expect", [
+    (dict(n_items=4, items_per_set=4), "fewer items than you have"),
+    (dict(n_items=10, items_per_set=1), "at least two items"),
+])
+def test_an_impossible_questionnaire_is_explained_in_words(kwargs, expect):
+    """A screen showing everything asks nobody to choose, and a screen of one has nothing to
+    compare. Both are refused before any work happens, in language that says what to change."""
+    d = pytest.importorskip("design")
+    with pytest.raises(ValueError) as caught:
+        d.make_design(sets_per_respondent=5, n_respondents=5, **kwargs)
+    explained = sk._explain_run_error(str(caught.value))
+    assert "_DESIGN" not in explained, "an internal sentinel is being shown to the reader"
+    assert expect in explained

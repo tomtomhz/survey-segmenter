@@ -121,6 +121,26 @@ drop a survey file onto the page that opens. It is fully self-contained — reci
 
 Everything below is for analysts who want to control the method, scaling, validation, and outputs.
 
+## Before you field: build the questionnaire
+
+```bash
+segment-kmeans --design my_items.txt --outdir study
+```
+
+One item per line in, a best-worst questionnaire out — which items appear on which screen, for
+whom. Until this existed the tool could read a MaxDiff study but not help you run one, which is a
+strange place to stop: the design decides what the data can possibly say, and two items that never
+appear together cannot be compared afterwards however many people answer.
+
+It reports what it achieved rather than claiming balance it may not have reached — how often each
+item is shown, how often each pair appears together, and plainly when the shape you asked for
+cannot be even (usually because the slots each person sees are not a multiple of the item count,
+which is arithmetic, not a flaw).
+
+Verified by closing the loop: build a design, simulate people answering it from known preferences,
+run the real estimator, and check the ranking that comes back is the one that went in. It is —
+Spearman 1.000.
+
 ## Before you field: how many people do you need?
 
 ```bash

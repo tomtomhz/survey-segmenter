@@ -3,6 +3,36 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.11.0] — 2026-08-08
+
+### Added
+
+- **Build the best-worst questionnaire itself.** `segment-kmeans --design my_items.txt` takes one
+  item per line and writes the design a survey platform can field: which items appear on which
+  screen, for whom. The tool could previously read a MaxDiff study but not help you run one, which
+  left the front of the workflow to Sawtooth — and the design decides what the data can possibly
+  say. Two items that never appear together cannot be compared afterwards, however many people
+  answer.
+
+  Every respondent gets a different arrangement, so fatigue on screen three does not become an
+  opinion about whatever is always on screen three.
+
+  Not a textbook balanced incomplete block design: those exist only for particular combinations of
+  item count, set size and screen count, and a real study fixes those from how long people will sit
+  still. This searches for the most balanced design of the shape you actually want and then
+  **reports what it achieved** — exposures per item, appearances per pair, and plainly when the
+  shape cannot be even, which is arithmetic rather than a flaw.
+
+  **Verified by closing the loop rather than by balance statistics**, which are only a proxy: build
+  a design, simulate people answering it from known preferences, run the real estimator, and check
+  the ranking that comes back is the one that went in. Spearman 1.000.
+
+  The balance search was rewritten to score incrementally after the first version took
+  twenty-four seconds for sixty respondents and grew with the sample. Swaps move items between
+  screens without changing how often any item appears, so item balance is invariant and only a few
+  dozen pair counts can change: 24s became 0.3s, four hundred respondents in 1.7s, with identical
+  balance (worst pair spread 37-71 down to 51-59).
+
 ## [1.10.0] — 2026-08-08
 
 ### Added
