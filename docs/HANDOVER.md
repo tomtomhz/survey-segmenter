@@ -18,12 +18,16 @@ this says where it stands, what was decided and why, and what to do next.
 team)/` is on **1.7.3** — verified by asking the shipped binary itself, over HTTP, which version it
 stamps into a report, not by trusting the source tree. Tree clean.
 
-### GitHub Actions has not run since 15:24 today — billing, not code
+### GitHub Actions: RESOLVED 2026-08-08 — the repository is public and CI is green
 
-Every run from `Re-measure the central accuracy claim` (15:33) onward failed **before starting a
-single step**: while the repo was private, Actions minutes were metered against a monthly
-allowance, running the full matrix on every push exhausted August's allowance in seven days, and
-GitHub then halts jobs rather than billing.
+For about a day every run failed **before starting a single step**: while the repository was
+private, Actions minutes were metered against a monthly allowance, running the full matrix on every
+push exhausted August's in seven days, and GitHub halts jobs rather than billing. Making the
+repository public made minutes free and the block disappeared.
+
+**First green run: 2026-08-08.** The full matrix passed — Ubuntu on 3.9, 3.11 and 3.12, macOS on
+3.11 and 3.12, plus the frontend and packaging checks. That is the first CI evidence since v1.5.8,
+and the first time this code has ever been tested on the platform it actually ships on.
 
 So **nothing since v1.5.8 has been tested by CI**, and no Windows build artifact exists for it. This was
 recorded as "CI green" for several hours on the strength of a stale reading; the lesson is that a
@@ -40,8 +44,8 @@ What was done instead, locally, and what it does and does not cover:
 | Ubuntu | **not covered at all.** Both local runs are macOS/arm64 |
 | Windows build | **not covered at all.** No artifact was produced |
 
-Re-running the full matrix on Ubuntu, and producing a Windows artifact somebody actually opens, is
-the single highest-value action outstanding on this repo.
+The table above records what was true while CI was down. It is kept because the lesson is not: a
+green memory is not a green run, and `gh run list` costs one command.
 
 **v1.6.0 reports the answer a best-worst study was fielded for.** The tool already scored MaxDiff
 exports and grouped people on the utilities — and then described the groups without ever saying
