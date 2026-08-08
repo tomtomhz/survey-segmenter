@@ -83,6 +83,14 @@ packaged binary and fails the build if the TURF section is absent. Any new modul
 a function needs a `--hidden-import` line *and* a smoke-test assertion, or it will ship missing and
 nothing will say so.
 
+**One loose end from that release, harmless but worth knowing.** The version bump moved
+`pyproject.toml` and `segment_kmeans.py` and missed `frontend/package.json`, so the `v1.11.1` tag
+and the attached artefact carry a frontend version string of 1.11.0. Nothing user-visible depends
+on it — the report footer and the app's own version come from `__version__` — and `main` is
+consistent again. `test_the_places_the_version_is_written_by_hand_all_agree` caught it, which is
+the guard doing its job; it caught it *after* the tag because the bump was pushed on a pyflakes run
+with no pytest behind it. **Run the suite before tagging, not just the linter.**
+
 ### GitHub Actions: RESOLVED 2026-08-08 — the repository is public and CI is green
 
 For about a day every run failed **before starting a single step**: while the repository was
