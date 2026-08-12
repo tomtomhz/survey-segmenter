@@ -680,13 +680,17 @@ Not a survey, but 17,000 real rows through the whole pipeline on 2026-07-31
 2. **Resolving overlapping segments** — the measured weakness. Worth understanding before
    attempting: merging may be the honest answer, and "improving" it risks trading away the
    never-confidently-wrong property, which is worth more.
-3. **Consolidate `segment-kmeans-tool.md`** in the assistant memory directory; it has grown well
-   past 22 KB of appended paragraphs and is due a rewrite rather than another append.
+3. **Duplicate a project** to re-run the same file with a different set of questions. Partly
+   covered already by the column picker's re-group, which is why it is third rather than first.
 
-Two former entries are settled and should not be reopened without reading why: a **second
-cluster-tendency test** shipped (Hartigan's dip, alongside Hopkins), and **sparse k-means** was
-built, measured and deliberately rejected — see `references/sparse_kmeans.py` and
-`STATE-OF-THE-ART.md`.
+Three former entries are settled and should not be reopened without reading why: a **second
+cluster-tendency test** shipped (Hartigan's dip, alongside Hopkins); **sparse k-means** was built,
+measured and deliberately rejected (see `references/sparse_kmeans.py` and `STATE-OF-THE-ART.md`);
+and the assistant memory file **`segment-kmeans-tool.md` has been consolidated** — it had reached
+58 KB of appended paragraphs and had gone stale enough to point at the pre-move directory and claim
+49 tests when there were 279. It is now 3 KB that points here instead. **Do not let it grow back:**
+a memory that restates the repo will always lose to the repo, and the only things worth keeping
+there are the ones this file cannot say about itself.
 
 ## How the modules divide up
 
