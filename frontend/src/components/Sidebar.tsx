@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ProjectSummary } from '../api/types'
 import { relativeTime } from '../lib/labels'
 
@@ -25,6 +25,7 @@ export function Sidebar({
   onNew,
   total,
   open = false,
+  focusSearchAt = 0,
 }: {
   projects: ProjectSummary[]
   activeId: string | null
@@ -39,6 +40,9 @@ export function Sidebar({
   total?: number
   /** Only meaningful on narrow windows, where the column becomes a drawer over the page. */
   open?: boolean
+  /** Bumped by the keyboard shortcut to put the cursor in the search box. A counter rather than a
+   *  boolean so pressing the shortcut twice in a row works the second time as well. */
+  focusSearchAt?: number
 }) {
   // Deleting a project removes the analysis and the original upload from disk, with no undo.
   // A single unlabelled × next to every row is one slip away from destroying an afternoon's work,
@@ -53,6 +57,17 @@ export function Sidebar({
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirmingMany, setConfirmingMany] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const searchRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (!focusSearchAt) return
+    // After the drawer has had a frame to slide in, or the focus lands on something still moving.
+    const timer = window.setTimeout(() => {
+      searchRef.current?.focus()
+      searchRef.current?.select()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [focusSearchAt])
 
   const matches = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -132,11 +147,20 @@ export function Sidebar({
       {projects.length > 6 && (
         <div className="side-search">
           <input
+            ref={searchRef}
             type="search"
             value={query}
             placeholder="Search projects"
             aria-label="Search projects by name"
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              // Escape empties the box rather than closing anything: while the cursor is in a
+              // filter, clearing the filter is what Escape is for.
+              if (e.key === 'Escape' && query) {
+                e.stopPropagation()
+                setQuery('')
+              }
+            }}
           />
           <button
             type="button"

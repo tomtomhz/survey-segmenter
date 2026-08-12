@@ -3,6 +3,17 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.18.0] — 2026-08-13
+
+### Added
+
+- **⌘K (Ctrl-K on Windows) jumps to the project search.** With a hundred and sixty projects the
+  search is the way in, and reaching for it with the mouse is the slow half of the interaction. On
+  a narrow window it opens the projects drawer first, since otherwise there is nothing to focus.
+
+- **Escape clears the search** while the cursor is in it. Emptying the filter is what Escape is for
+  when you are standing in one — and it stops there rather than also closing the drawer behind it.
+
 ## [1.17.1] — 2026-08-13
 
 ### Fixed

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { Sidebar, groupByAge } from './Sidebar'
@@ -377,5 +377,40 @@ describe('the panel as a drawer on narrow windows', () => {
 
     rerender(<Sidebar {...props} projects={[project()]} open />)
     expect(container.querySelector('aside')).toHaveClass('open')
+  })
+})
+
+
+describe('getting to the search box quickly', () => {
+  const many = (n = 8) =>
+    Array.from({ length: n }, (_, i) => project({ id: `p${i}`, title: `study ${i}` }))
+
+  it('puts the cursor in the search box when asked', async () => {
+    const { rerender } = render(<Sidebar {...props} projects={many()} focusSearchAt={0} />)
+    expect(screen.getByLabelText(/Search projects/)).not.toHaveFocus()
+
+    rerender(<Sidebar {...props} projects={many()} focusSearchAt={1} />)
+    await waitFor(() => expect(screen.getByLabelText(/Search projects/)).toHaveFocus())
+  })
+
+  it('works the second time too, which a boolean would not', async () => {
+    const { rerender } = render(<Sidebar {...props} projects={many()} focusSearchAt={1} />)
+    await waitFor(() => expect(screen.getByLabelText(/Search projects/)).toHaveFocus())
+
+    screen.getByRole('button', { name: 'Select' }).focus()
+    rerender(<Sidebar {...props} projects={many()} focusSearchAt={2} />)
+    await waitFor(() => expect(screen.getByLabelText(/Search projects/)).toHaveFocus())
+  })
+
+  it('clears the filter on Escape rather than leaving you stuck in it', async () => {
+    const user = userEvent.setup()
+    render(<Sidebar {...props} projects={many()} />)
+    const box = screen.getByLabelText(/Search projects/)
+
+    await user.type(box, 'study 3')
+    expect(box).toHaveValue('study 3')
+
+    await user.type(box, '{Escape}')
+    expect(box).toHaveValue('')
   })
 })

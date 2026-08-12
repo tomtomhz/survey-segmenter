@@ -84,6 +84,22 @@ export function App() {
   // than in the Sidebar because the header button that opens it lives up here too.
   const [projectsOpen, setProjectsOpen] = useState(false)
 
+  // Cmd-K / Ctrl-K puts the cursor in the project search. With a hundred and sixty projects the
+  // search is the way in, and reaching for it with the mouse is the slow half of the interaction.
+  // On a narrow window the drawer has to open first or there is nothing to focus.
+  const [focusSearchAt, setFocusSearchAt] = useState(0)
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setProjectsOpen(true)
+        setFocusSearchAt((n) => n + 1)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // Escape closes the drawer. Anything that covers the page needs a way out that does not depend
   // on hitting a particular target, and on a narrow window the drawer covers most of it.
   useEffect(() => {
@@ -367,6 +383,7 @@ export function App() {
           projects={projects}
           activeId={sessionId}
           open={projectsOpen}
+          focusSearchAt={focusSearchAt}
           onOpen={(id) => {
             // On a narrow window the drawer sits over the result it was opened to reach, so
             // choosing a project has to close it. On a wide window this does nothing.
