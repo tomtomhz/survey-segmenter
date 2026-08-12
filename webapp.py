@@ -256,6 +256,11 @@ class ProjectStore:
                     pass
 
     def list(self, limit=60):
+        """The projects, newest first with pinned ones lifted to the top.
+
+        `limit=None` returns everything, which is what the sidebar asks for when someone clicks
+        through the "showing 60 of 162" line.
+        """
         out = []
         for f in self.root.glob("*.meta.json"):
             try:
@@ -273,7 +278,7 @@ class ProjectStore:
         # it. Within each group the order is still newest first.
         out.sort(key=lambda d: (not d["pinned"], d["updated"] or ""), reverse=False)
         out.sort(key=lambda d: (d["pinned"], d["updated"] or ""), reverse=True)
-        return out[:limit]
+        return out if limit is None else out[:limit]
 
     def count(self):
         """How many projects exist, which is not always how many the sidebar shows.
@@ -407,7 +412,16 @@ def serve(port=8000):
                 self._do_download()
                 return
             if route == "/projects":
-                self._json({"ok": True, "projects": store.list(), "total": store.count()})
+                # `?all=1` lifts the cap. The list is capped by default because the sidebar is a
+                # shortcut back to recent work, not an archive — but with a hundred and sixty
+                # projects on disk the older ones were unreachable by anything except remembering
+                # their name and searching for it, which is not a way to find something you have
+                # forgotten. Asking for all of them is one request; each row is a few hundred bytes.
+                from urllib.parse import parse_qs, urlparse
+                wants_all = parse_qs(urlparse(self.path).query).get("all", ["0"])[0] == "1"
+                self._json({"ok": True,
+                            "projects": store.list(limit=None if wants_all else 60),
+                            "total": store.count()})
                 return
             if route == "/project":
                 from urllib.parse import parse_qs, urlparse

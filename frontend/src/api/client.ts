@@ -84,7 +84,9 @@ export const api = {
   saveNames: (sessionId: string, names: string[]) =>
     postJSON<NamesResult>('/name', { session_id: sessionId, names }),
 
-  projects: () => request<ProjectList>('/projects'),
+  /** The recent projects. `all` lifts the server's cap, for when someone wants the whole archive
+   *  rather than the shortcut back to recent work. */
+  projects: (all = false) => request<ProjectList>(`/projects${all ? '?all=1' : ''}`),
 
   openProject: (id: string) => request<Project>(`/project?id=${encodeURIComponent(id)}`),
 

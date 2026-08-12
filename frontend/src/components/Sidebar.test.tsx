@@ -27,6 +27,7 @@ const props = {
   onRename: () => {},
   onPin: () => {},
   onDeleteMany: () => {},
+  onShowAll: () => {},
   onNew: () => {},
 }
 
@@ -215,6 +216,16 @@ describe('pinning and the cap', () => {
     const rows = Array.from({ length: 3 }, (_, i) => project({ id: `p${i}`, title: `study ${i}` }))
     render(<Sidebar {...props} projects={rows} total={73} />)
     expect(screen.getByText(/Showing the 3 most recent of 73/)).toBeInTheDocument()
+  })
+
+  it('offers a way to reach the rest, not just an apology for hiding them', async () => {
+    const user = userEvent.setup()
+    const onShowAll = vi.fn()
+    const rows = Array.from({ length: 3 }, (_, i) => project({ id: `p${i}`, title: `study ${i}` }))
+    render(<Sidebar {...props} projects={rows} total={73} onShowAll={onShowAll} />)
+
+    await user.click(screen.getByRole('button', { name: 'Show all 73' }))
+    expect(onShowAll).toHaveBeenCalled()
   })
 
   it('says nothing when the list is the whole of it', () => {

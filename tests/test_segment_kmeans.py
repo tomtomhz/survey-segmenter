@@ -7324,3 +7324,45 @@ def test_a_project_id_cannot_reach_outside_the_project_folder(tmp_path):
 
     assert outside.exists(), "a delete escaped the project folder"
     assert store.count() == 1 and store.list()[0]["title"] == "study"
+
+
+def test_the_project_list_can_be_asked_for_all_of_it(monkeypatch, tmp_path):
+    """The cap is a shortcut, not a limit on what you own.
+
+    The sidebar shows the sixty most recent because it is a way back to recent work. But with a
+    hundred and sixty projects on disk, the older ones were reachable only by remembering a name
+    and searching for it, which is no way to find something you have forgotten.
+    """
+    import json as _json
+    import socket
+    import threading
+    import time
+    import urllib.request
+
+    projects_dir = tmp_path / "projects"
+    monkeypatch.setenv("SURVEY_SEGMENTER_PROJECTS", str(projects_dir))
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: None)
+    store = webapp.ProjectStore(root=projects_dir)
+    for i in range(75):
+        store.save(f"p{i:03d}", {"title": f"study {i}", "k": 2, "n_people": 60})
+
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    threading.Thread(target=sk.serve, kwargs={"port": port}, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(80):
+        try:
+            urllib.request.urlopen(base + "/", timeout=5).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+
+    capped = _json.loads(urllib.request.urlopen(base + "/projects", timeout=60).read().decode())
+    assert len(capped["projects"]) == 60 and capped["total"] == 75
+
+    everything = _json.loads(
+        urllib.request.urlopen(base + "/projects?all=1", timeout=60).read().decode())
+    assert len(everything["projects"]) == 75, "asking for all of them did not return all of them"
+    assert everything["total"] == 75
+    # Same order either way: pinned first, then newest. A different order between the two views
+    # would make "show all" feel like a different list rather than more of the same one.
+    assert [p["id"] for p in everything["projects"]][:60] == [p["id"] for p in capped["projects"]]

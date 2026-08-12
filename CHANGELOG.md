@@ -3,6 +3,23 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.17.0] — 2026-08-13
+
+### Added
+
+- **"Show all" reaches the projects behind the cap.** 1.15.1 made the sixty-project limit visible
+  ("Showing the 60 most recent of 162"), which was the honest half of the fix. This is the useful
+  half: the count is now a button. Until now the older hundred were reachable only by remembering a
+  name and searching for it, which is no way to find something you have forgotten.
+
+  Once the whole archive has been asked for it stays that way for the session — refetching after a
+  rename or a delete would otherwise snap the list back to sixty, which looks exactly like the
+  older projects having just been deleted. That is the confusion the count was added to remove, so
+  reintroducing it through the back door would be worse than not having the button.
+
+  The order is identical in both views — pinned first, then newest — so "show all" reads as more of
+  the same list rather than a different one.
+
 ## [1.16.1] — 2026-08-13
 
 ### Fixed

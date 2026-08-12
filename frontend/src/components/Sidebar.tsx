@@ -21,6 +21,7 @@ export function Sidebar({
   onRename,
   onPin,
   onDeleteMany,
+  onShowAll,
   onNew,
   total,
 }: {
@@ -31,6 +32,7 @@ export function Sidebar({
   onRename: (id: string, title: string) => void
   onPin: (id: string, pinned: boolean) => void
   onDeleteMany: (ids: string[]) => void
+  onShowAll: () => void
   onNew: () => void
   /** How many projects exist. Larger than the list when the cap has bitten. */
   total?: number
@@ -314,7 +316,11 @@ export function Sidebar({
             having been deleted — so it says what it is showing and what exists. */}
         {total != null && total > projects.length && (
           <div className="side-more">
-            Showing the {projects.length} most recent of {total}. Pin one to keep it here.
+            Showing the {projects.length} most recent of {total}.{' '}
+            <button type="button" className="linkbtn" onClick={onShowAll}>
+              Show all {total}
+            </button>
+            <div style={{ marginTop: 4 }}>Or pin one to keep it here.</div>
           </div>
         )}
       </div>

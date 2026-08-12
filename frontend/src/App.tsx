@@ -76,12 +76,18 @@ export function App() {
     }
   }, [setWorking])
 
-  const refreshProjects = useCallback(async () => {
-    const reply = await api.projects()
+  // Once the whole archive has been asked for, stay that way: refetching after a rename or a
+  // delete would otherwise silently snap the list back to sixty and look like the older projects
+  // had just been deleted — the very confusion the count was added to remove.
+  const [showingAll, setShowingAll] = useState(false)
+
+  const refreshProjects = useCallback(async (all = showingAll) => {
+    const reply = await api.projects(all)
     if (isFailure(reply)) return
     setProjects(reply.projects)
     if (reply.total != null) setProjectTotal(reply.total)
-  }, [])
+    setShowingAll(all)
+  }, [showingAll])
 
   useEffect(() => {
     void refreshProjects()
@@ -346,6 +352,7 @@ export function App() {
           onRename={(id, title) => void renameProject(id, title)}
           onPin={(id, pinned) => void pinProject(id, pinned)}
           onDeleteMany={(ids) => void deleteProjects(ids)}
+          onShowAll={() => void refreshProjects(true)}
           total={projectTotal}
           onNew={startNew}
         />
