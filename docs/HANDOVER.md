@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.13.1**, 261 Python + 120 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.13.2**, 261 Python + 120 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.13.1.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.13.1** — verified by unpacking the zip that is actually sitting there and
+**Released: v1.5.1 → v1.13.2.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.13.2** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
@@ -96,7 +96,7 @@ and the attached artefact carry a frontend version string of 1.11.0. Nothing use
 on it — the report footer and the app's own version come from `__version__` — and `main` is
 consistent again. `test_the_places_the_version_is_written_by_hand_all_agree` caught it, which is
 the guard doing its job; it caught it *after* the tag because the bump was pushed on a pyflakes run
-with no pytest behind it. **Run the suite before tagging, not just the linter.**
+with no pytest behind it. **Run the suite before tagging, not just the linter** — and BUILD before tagging too. Tagging first went wrong three times in one session: v1.12.0 and v1.12.1 became tags with no artefact because the build followed a later edit, and v1.13.1 was tagged one commit before the fix that let it build at all. The order is test, build, then tag.
 
 ### v1.12.0 — the designer reaches the people it was built for
 

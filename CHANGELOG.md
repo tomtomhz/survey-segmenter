@@ -3,6 +3,23 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.13.2] — 2026-08-09
+
+### Fixed
+
+- **The v1.13.1 tag could not build itself.** Raising TURF's minimum item count made the build's own
+  smoke test fail on a five-item fixture, and the fixture fix landed one commit *after* the tag, so
+  CI rebuilding that tag hit the failure that `main` had already fixed. The macOS artefact attached
+  to v1.13.1 was built locally from the corrected tree and is sound; the tag simply could not
+  reproduce it.
+
+  This is the third time this session that tagging before building has caused a mess. The order is
+  **test, build, then tag** — a tag is a claim that the commit under it works, and it is not worth
+  making before that has been checked.
+
+  The smoke test's failure message now also names the other possible cause, because it blamed
+  turf.py for not being bundled when turf.py was bundled perfectly well.
+
 ## [1.13.1] — 2026-08-09
 
 ### Fixed
