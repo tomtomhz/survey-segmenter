@@ -8,13 +8,13 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.12.2**, 249 Python + 120 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.13.0**, 258 Python + 120 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.12.2.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+**Released: v1.5.1 → v1.13.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
 the team)/` is on **1.12.2** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
@@ -47,12 +47,14 @@ so it climbs much faster than the numbers look like they should.
 
 A ranking says what people like on average; it does not say which three to launch, because the
 top three can all appeal to the same people. TURF answers the portfolio question instead, and the
-part worth not re-deriving is the correction: picking the best-scoring combination out of hundreds
-and then reporting that combination's own score is optimistic by construction. **Measured on
-holdout: 9.5 to 22.3 percentage points**, so the reported reach is the held-out one, not the
-in-sample maximum. An earlier draft of the docstring called this "several percentage points" —
-wrong by four times, and it is called out here because the plausible-sounding number was the one
-that was never measured.
+correction it carries is that picking the best-scoring combination out of hundreds and then
+reporting that combination's own score is optimistic by construction.
+
+**The numbers in this section were wrong twice, in the same way both times, and 1.13.0 fixed them
+against an outside truth. Read that section before touching turf.py.** A docstring first claimed
+"several percentage points" and was out by four times; the replacement claimed 9.5-22.3 points and
+was measured with the wrong instrument. The current table is checked against a 40,000-person
+population where the true reach is a lookup rather than an estimate.
 
 ### v1.11.0 — build the questionnaire, not only read one
 
@@ -150,6 +152,31 @@ name from a real one. `"AB"` named the two segments **A** and **B**, straight in
 and every export built from it. Fixed in 1.12.2. `/plan` and `/regroup` were probed and are sound —
 the planner's bounds catch a coerced number, and re-grouping drops column names that do not exist
 and refuses when nothing real is left. Worth re-running that probe whenever an endpoint is added.
+
+### v1.13.0 — auditing TURF against an outside truth, and what that is worth
+
+The method that found these is the one worth keeping: **check a statistic against a truth it did
+not produce.** Every earlier check on TURF compared its numbers to each other, which cannot detect
+a definition that is measuring the wrong quantity. Drawing samples from a 40,000-person population
+and looking up what the chosen items really reach turned three defects up in an afternoon.
+
+1. **Ties decided the recommendation, invisibly.** Reach is a count of people, so it lands on
+   multiples of 1/n; hundreds of candidate sets chasing sixty possible values collide constantly.
+   The best reach was shared in 14 of 30 studies at sixty people, and **reordering the item list
+   changed the recommendation in 8 of 25**. Now reported as a tie rather than resolved silently.
+   Do not "improve" the tie-break — every tie-break is arbitrary, which is the point.
+2. **The optimism figure measured a study half the size.** `in_sample - holdout` compares two
+   half-sample quantities; the headline is a full-sample number. The report printed "Expect about
+   93%, not 95%" above "the 3-point difference" — arithmetic a reader can check, and it did not add
+   up. Now `reach - holdout`, which also tracks the real error far better against the population.
+3. **Below nine items the answer was arithmetic.** "In your top three" of five items is 60% of the
+   list, and the best set of three reached 100.0% in every study tried. Refused now.
+
+**The documented optimism table has now been wrong twice** — "several percentage points" (out by
+four times), then 9.5-22.3 points (measured with the wrong instrument). Both were plausible numbers
+that nobody had checked against anything external. The current table records the real error beside
+the reported one so the two can be compared directly; if you change the holdout scheme, re-run that
+comparison rather than reasoning about it.
 
 ### GitHub Actions: RESOLVED 2026-08-08 — the repository is public and CI is green
 

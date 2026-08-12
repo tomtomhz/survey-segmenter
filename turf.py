@@ -16,21 +16,37 @@ best case as though it were the world's average.
 
 So every result here carries a **holdout** estimate as well. The combination is chosen on one half
 of the respondents and its reach is measured on the other half, repeated over many splits. The gap
-between the two is the optimism, stated rather than absorbed.
+between the headline and that holdout is the optimism, stated rather than absorbed.
 
-The gap is far larger than "a rounding error", which is the assumption worth killing. Measured on
-simulated studies, choosing three items (percentage points of overstatement):
+**These numbers are measured against a known truth, not against each other.** Each cell draws a
+sample from a 40,000-person population, runs the whole thing on the sample, and then looks up what
+the chosen combination really reaches in the population — so "real error" is a fact rather than an
+estimate. Ten draws per cell, choosing three items, in percentage points:
 
-                        real taste groups        pure noise
-        100 people, 10 items      9.5                15.6
-        100 people, 20 items     22.3                20.7
-        300 people, 20 items      7.8                11.7
-      1,000 people, 10 items      2.4                 4.9
+                              gap this reports   headline's real error
+    real taste groups
+        100 people, 10 items         3.6                 +4.6
+        100 people, 20 items         5.0                 +2.9
+        300 people, 20 items         2.1                 -1.0
+      1,000 people, 10 items         0.2                 +0.3
+    pure noise
+        100 people, 10 items        10.6                 +9.0
+        100 people, 20 items        14.8                +14.0
+        300 people, 20 items         7.8                 +8.1
+      1,000 people, 10 items         3.5                 +3.2
 
-Two things follow. It gets worse as the item list grows — which is exactly when TURF is most
-tempting — and at a hundred respondents with twenty items the headline overstates reach by more
-than twenty points, which is the difference between a launch decision and a mistake. It shrinks
-with sample size because there is less luck left to find.
+Three things follow. The reported gap tracks the real error rather than merely gesturing at it,
+which is what makes it quotable. It is largest when the structure is weakest — on data with no
+taste groups at all the headline overstates by nine to fourteen points, because there is nothing
+but luck for the search to find. And it shrinks with sample size, for the same reason.
+
+**An earlier version of this table was wrong, and how it was wrong is worth keeping.** It reported
+9.5 to 22.3 points, because the gap was computed as `in_sample - holdout` — both of them
+half-sample figures, so it measured the optimism of a study half this size and attributed it to the
+full-sample headline. The report then printed "Expect about 93%, not 95%" directly above "the
+3-point difference", two sentences that do not agree, with the 96% those 3 points came from
+appearing nowhere. The lesson is the one this project keeps relearning: a plausible number nobody
+checked against an outside truth is not evidence.
 
 **What "reached" means, and why it is a choice rather than a fact.** A person is counted as reached
 by an item when that item is among their own top few. It has to be a rule of that kind: utilities
@@ -79,30 +95,54 @@ def _reach_of(hit, combo):
     return float(hit[:, list(combo)].any(axis=1).mean())
 
 
+#: How many equally-best combinations to keep hold of, so the report can show a few without
+#: carrying thousands of them around when almost everything ties.
+MAX_TIES_KEPT = 12
+
+
 def best_combination(hit, size):
-    """The set of `size` items reaching the most people, and how it was found.
+    """The set of `size` items reaching the most people, how it was found, and what else tied.
 
     Exhaustive while that is affordable, greedy beyond. Greedy is not guaranteed optimal, and the
     result says which was used rather than letting a reader assume the answer is exact.
+
+    **The ties are returned because they are the difference between an answer and a coin toss.**
+    Reach is a count of people, so it lands on multiples of 1/n: with sixty respondents there are
+    only sixty-one possible values and hundreds of candidate combinations, so exact ties at the top
+    are ordinary rather than freakish. Measured on simulated studies with real taste groups, the
+    best reach was shared by more than one combination in 14 of 30 studies at sixty people and ten
+    items, and 10 of 30 at a hundred people and twenty items.
+
+    Whichever tied combination is reported is then decided by the order the items happened to
+    appear in the file — and reordering the list changed the recommendation in 8 of 25 studies.
+    That is not a tie-break worth improving, because every tie-break is arbitrary; the honest move
+    is to say a tie happened and let the reader choose on grounds this data does not contain, like
+    cost or brand fit.
     """
     n_items = hit.shape[1]
     size = max(1, min(int(size), n_items))
     from math import comb
     if comb(n_items, size) <= MAX_EXHAUSTIVE:
-        best, best_reach = None, -1.0
+        best, best_reach, tied = None, -1.0, []
         for combo in itertools.combinations(range(n_items), size):
             score = _reach_of(hit, combo)
             if score > best_reach:
-                best, best_reach = combo, score
-        return list(best), best_reach, "exhaustive"
+                best, best_reach, tied = combo, score, [combo]
+            elif score == best_reach and len(tied) < MAX_TIES_KEPT:
+                tied.append(combo)
+        return list(best), best_reach, "exhaustive", [list(c) for c in tied]
 
     chosen = []
     for _ in range(size):
         candidates = [i for i in range(n_items) if i not in chosen]
-        gains = [(_reach_of(hit, chosen + [i]), i) for i in candidates]
-        gains.sort(reverse=True)
+        # Sorted on (-reach, index) so a tie resolves to the lowest item index, matching what the
+        # exhaustive branch returns. It was `sort(reverse=True)`, which took the HIGHEST index on a
+        # tie, so the two search paths silently disagreed about which of two equal items to pick.
+        gains = sorted(((-_reach_of(hit, chosen + [i]), i) for i in candidates))
         chosen.append(gains[0][1])
-    return sorted(chosen), _reach_of(hit, chosen), "greedy"
+    # Greedy never enumerates the alternatives, so it cannot count the ties. Reported as unknown
+    # rather than as zero: "no ties" and "not looked" are different claims.
+    return sorted(chosen), _reach_of(hit, chosen), "greedy", None
 
 
 def holdout_reach(hit, size, splits=40, seed=0):
@@ -124,7 +164,7 @@ def holdout_reach(hit, size, splits=40, seed=0):
         order = rng.permutation(n_people)
         half = n_people // 2
         pick_on, score_on = hit[order[:half]], hit[order[half:]]
-        combo, in_reach, _ = best_combination(pick_on, size)
+        combo, in_reach, _, _ = best_combination(pick_on, size)
         inside.append(in_reach)
         out.append(_reach_of(score_on, combo))
     return float(np.mean(out)), float(np.mean(inside))
@@ -138,15 +178,17 @@ def turf(utilities, item_names, size=3, top_n=DEFAULT_TOP_N, splits=40, seed=0):
     carrying almost nobody the others do not already carry, and is a candidate to drop.
     """
     hit = reach_matrix(utilities, top_n=top_n)
-    combo, reach, how = best_combination(hit, size)
+    combo, reach, how, tied = best_combination(hit, size)
     held, in_sample = holdout_reach(hit, size, splits=splits, seed=seed)
 
-    # Order the winners by what each adds on top of those already counted.
+    # Order the winners by what each adds on top of those already counted. Sorted on (-total,
+    # index) for the same reason as the greedy search: a tie here decided the ORDER items are
+    # listed in, and "reverse=True" resolved it to the highest index, which is a different
+    # arbitrary answer from the one the search itself gives.
     remaining, ordered, running = list(combo), [], 0.0
     while remaining:
-        gains = [(_reach_of(hit, [i for i, _ in ordered] + [c]), c) for c in remaining]
-        gains.sort(reverse=True)
-        total, pick = gains[0]
+        gains = sorted((-_reach_of(hit, [i for i, _ in ordered] + [c]), c) for c in remaining)
+        total, pick = -gains[0][0], gains[0][1]
         ordered.append((pick, total - running))
         running = total
         remaining.remove(pick)
@@ -159,8 +201,23 @@ def turf(utilities, item_names, size=3, top_n=DEFAULT_TOP_N, splits=40, seed=0):
         "alone": [float(hit[:, i].mean()) for i, _ in ordered],
         "holdout_reach": held,
         "in_sample_reach": in_sample,
-        "optimism": (in_sample - held) if in_sample == in_sample else float("nan"),
+        # The gap between the HEADLINE and the holdout — the two figures the report actually shows.
+        #
+        # It used to be `in_sample - held`, and both of those are half-sample quantities: the
+        # optimism of a study half this size, quietly attributed to a full-sample number that never
+        # had it. The report then printed "Expect about 93%, not 95%" directly above "the 3-point
+        # difference", which do not agree, and the 96% the 3 points were measured from appeared
+        # nowhere. Measured against a known population, `reach - held` is also the closer estimate
+        # of the headline's real error in three of the four shapes tried; see the table above.
+        "optimism": (reach - held) if held == held else float("nan"),
         "search": how,
+        # None when the search was greedy and never looked. 1 means the winner is genuinely alone;
+        # anything more means the reported set is one of several that reach exactly as many people,
+        # and which one was printed came down to the order of the item list.
+        "n_tied": (len(tied) if tied is not None else None),
+        "tied_items": ([[item_names[i] for i in c] for c in tied[:MAX_TIES_KEPT]]
+                       if tied is not None and len(tied) > 1 else []),
+        "tie_capped": bool(tied is not None and len(tied) >= MAX_TIES_KEPT),
         "top_n": top_n,
         "size": len(combo),
         "n_people": int(hit.shape[0]),

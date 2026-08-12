@@ -170,7 +170,7 @@ for _m in ("divide by zero encountered in matmul", "overflow encountered in matm
            "invalid value encountered in matmul"):
     warnings.filterwarnings("ignore", message=_m, category=RuntimeWarning)
 
-__version__ = "1.12.2"    # keep in sync with pyproject.toml
+__version__ = "1.13.0"    # keep in sync with pyproject.toml
 
 # Optional "ask Claude about your segments" add-on. Imported here (not lazily) so the packaged app
 # bundles it; wrapped so a missing file/SDK never stops the core segmentation tool from loading.
@@ -4075,6 +4075,19 @@ def _maxdiff_ranking_section(est):
     return "\n".join(lines)
 
 
+def _turf_module_top_n():
+    """The reach rule TURF will use, asked of the module rather than repeated here.
+
+    A second copy of this number is exactly how a threshold and the guard that depends on it drift
+    apart — the guard below is derived from it, so it has to be the same one.
+    """
+    try:
+        import turf as _turf
+        return int(_turf.DEFAULT_TOP_N)
+    except Exception:
+        return 3
+
+
 def _turf_section(est, size=3):
     """Which few items to launch — the decision a best-worst study is usually commissioned for.
 
@@ -4089,7 +4102,20 @@ def _turf_section(est, size=3):
         import turf as _turf
     except Exception:
         return None
-    if est.utilities is None or len(est.item_names) < size + 2 or len(est.respondent_ids) < 40:
+    # The item list has to be long enough for "reached" to discriminate. Someone counts as reached
+    # when the item is in their top `top_n`, so each person accepts top_n/n_items of the list: at
+    # five items that is 60% of everything, and the best set of three then reaches 100.0% of people
+    # in every study tried, with ten combinations tied for the honour. That is not a finding, it is
+    # arithmetic wearing a finding's clothes.
+    #
+    # Measured, best reach for a set of three over 200 people: 5 items 100.0%, 6 items 99.8%,
+    # 8 items 98.4%, 10 items 95.1%, 20 items 83.9%. The rule below asks that a person accept no
+    # more than a third of the list, which cuts in at nine items for the default top three, and is
+    # where the tied-combination count settles to roughly one.
+    top_n = _turf_module_top_n()
+    if est.utilities is None or len(est.respondent_ids) < 40:
+        return None
+    if len(est.item_names) < max(size + 2, 3 * top_n):
         return None
     result = _turf.turf(est.utilities, est.item_names, size=size)
 
@@ -4107,8 +4133,43 @@ def _turf_section(est, size=3):
              f"**{result['reach'] * 100:.0f}%** of your respondents.", "",
              rows.to_markdown(index=False, disable_numparse=True), ""]
 
+    # A tie is the difference between an answer and a coin toss, and it is common enough to matter:
+    # reach is a count of people, so it lands on multiples of 1/n, and a few hundred candidate
+    # combinations chasing sixty possible values collide often. Left unsaid, the reader takes a set
+    # chosen by the order of their own spreadsheet as the finding.
+    if (result.get("n_tied") or 1) > 1:
+        others = result["tied_items"][1:]
+        shown = "; ".join(", ".join(c) for c in others[:3])
+        more = len(others) > 3 or result.get("tie_capped")
+        lines += [f"> **{result['n_tied']}{'+' if result.get('tie_capped') else ''} different sets "
+                  f"reach exactly these same people.** The one named above is not better than the "
+                  f"others — it came first in the item list. Equally good: {shown}"
+                  f"{', and others' if more else ''}. **Choose between them on grounds this survey "
+                  f"does not contain** — cost, margin, how hard each is to build, whether one fits "
+                  f"the brand. Ties like this are ordinary at this sample size; more respondents "
+                  f"would separate them.", ""]
+
+    # How many of the chosen items are actually pulling their weight. The incremental column shows
+    # this row by row, but a reader looking for the headline needs it said once: if the first item
+    # already reaches everyone the second and third are decoration, and recommending three when one
+    # would do is an expensive way to be right.
+    enough = len(result["incremental"])
+    running = 0.0
+    for position, gain in enumerate(result["incremental"], start=1):
+        running += gain
+        if running >= result["reach"] - 0.01:
+            enough = position
+            break
+    if enough < len(result["items"]):
+        kept = ", ".join(result["items"][:enough])
+        lines += [f"> **{enough} of these {len(result['items'])} would do.** {kept} already "
+                  f"reach{'es' if enough == 1 else ''} "
+                  f"{running * 100:.0f}% — everything after that is adding people who are already "
+                  f"counted. Launch the rest if you want them for other reasons, but not for reach.",
+                  ""]
+
     weakest = result["incremental"][-1]
-    if weakest < 0.03:
+    if enough == len(result["items"]) and weakest < 0.03:
         lines += [f"> **{result['items'][-1]} is carrying almost nobody the others do not already "
                   f"carry** — it adds {weakest * 100:.0f} points. If a place on the list is "
                   f"expensive, that is the one to question.", ""]

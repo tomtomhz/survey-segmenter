@@ -6074,7 +6074,7 @@ def test_turf_search_is_exact_when_it_can_afford_to_be():
     assert small["search"] == "exhaustive"
 
     hit = tf.reach_matrix(rng.normal(0, 1, (200, 8)))
-    combo, reach, _ = tf.best_combination(hit, 3)
+    combo, reach, _, _ = tf.best_combination(hit, 3)
     every = [tf._reach_of(hit, c) for c in __import__("itertools").combinations(range(8), 3)]
     assert reach == pytest.approx(max(every)), "the exhaustive search did not return the maximum"
 
@@ -6084,10 +6084,14 @@ def test_a_best_worst_study_is_told_which_items_to_launch():
     pytest.importorskip("turf")
     pytest.importorskip("maxdiff")
     rng = np.random.default_rng(11)
+    # Ten items rather than eight, because "reached" means "in your own top three" and a person
+    # therefore accepts three of however many are on the list. At eight items that is 38% of
+    # everything and the best set of three reaches 98% of people whatever the tastes are, so the
+    # section is now refused as arithmetic rather than a finding. See _turf_section.
     items = ["Fast delivery", "Low price", "Good support", "Wide range", "Eco packaging",
-             "Long warranty", "Known brand", "Easy returns"]
-    crowd_a = np.array([2.5, 2.2, 2.0, 0.0, -1.5, -1.5, -1.5, -2.0])
-    crowd_b = np.array([-1.5, -1.0, -1.5, 0.0, 2.6, 2.4, -1.0, 1.0])
+             "Long warranty", "Known brand", "Easy returns", "Gift wrapping", "Loyalty points"]
+    crowd_a = np.array([2.5, 2.2, 2.0, 0.0, -1.5, -1.5, -1.5, -2.0, -2.2, -1.8])
+    crowd_b = np.array([-1.5, -1.0, -1.5, 0.0, 2.6, 2.4, -1.0, 1.0, -1.6, -1.4])
     rows = []
     for person in range(200):
         truth = crowd_a if person % 10 < 6 else crowd_b
@@ -6120,10 +6124,16 @@ def test_the_luck_warning_stays_quiet_when_there_is_no_luck_to_report():
     md = pytest.importorskip("maxdiff")
 
     class _Fixed:
-        """An estimate whose reach cannot be optimistic: two items, everyone reached by both."""
-        item_names = ["A", "B", "C", "D", "E"]
+        """An estimate whose reach cannot be optimistic: identical people, so any split agrees.
+
+        Nine items rather than five — not decoration. "Reached" means the item is in that
+        person's own top three, so with five items every person accepts 60% of the list and the
+        best set of three necessarily reaches everybody; the section refuses that shape now
+        because the answer is arithmetic rather than evidence.
+        """
+        item_names = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
         respondent_ids = [f"R{i}" for i in range(200)]
-        utilities = np.tile(np.array([5.0, 4.0, 3.0, 2.0, 1.0]), (200, 1))
+        utilities = np.tile(np.arange(9.0, 0.0, -1.0), (200, 1))
 
     prose, result = sk._turf_section(_Fixed())
     assert result["optimism"] == pytest.approx(0.0, abs=1e-9)
@@ -6520,3 +6530,166 @@ def test_segment_names_that_are_not_names_are_refused(monkeypatch, tmp_path):
     fine = name_with(["Loyal  Fans ", "Price Hunters"])
     assert fine["ok"] is True, fine.get("error")
     assert fine["names"] == ["Loyal Fans", "Price Hunters"], "whitespace was not tidied"
+
+
+def test_turf_says_when_the_winning_set_is_a_coin_toss():
+    """A tie at the top must be reported, not resolved silently by the order of the item list.
+
+    Reach counts people, so it can only land on multiples of 1/n: sixty respondents give sixty-one
+    possible values for hundreds of candidate combinations, and exact ties at the best value are
+    ordinary rather than freakish. Before this, whichever tied set came first in `itertools`
+    order — that is, in the order the items happened to appear in the file — was printed as the
+    finding. Reordering the item list changed the recommendation in 8 of 25 simulated studies at
+    sixty people and ten items, with identical reach both times.
+    """
+    tf = pytest.importorskip("turf")
+
+    def study(n_people, n_items, seed):
+        r = np.random.default_rng(seed)
+        centres = r.normal(0, 1, (3, n_items))
+        return centres[r.integers(0, 3, n_people)] + r.normal(0, 0.8, (n_people, n_items))
+
+    names = [f"item{i}" for i in range(10)]
+
+    # A study whose top is genuinely shared, and one whose top is not: both have to be said
+    # correctly, because a tie warning that never switches off is noise.
+    tied = tf.turf(study(60, 10, 0), names, size=3, splits=5)
+    assert tied["n_tied"] > 1
+    assert len(tied["tied_items"]) == tied["n_tied"]
+    reaches = {round(tf._reach_of(tf.reach_matrix(study(60, 10, 0)),
+                                  [names.index(x) for x in combo]), 12)
+               for combo in tied["tied_items"]}
+    assert len(reaches) == 1, "sets reported as tied do not actually reach the same number"
+
+    alone = tf.turf(study(60, 10, 3), names, size=3, splits=5)
+    assert alone["n_tied"] == 1 and alone["tied_items"] == []
+
+    # And the consequence itself: with the tie reported, a reordered item list still tells the
+    # reader the same thing, even when the single named set differs.
+    utilities = study(60, 10, 0)
+    order = np.random.default_rng(99).permutation(10)
+    shuffled = tf.turf(utilities[:, order], [names[i] for i in order], size=3, splits=5)
+    assert shuffled["reach"] == tied["reach"]
+    assert shuffled["n_tied"] == tied["n_tied"], "the tie count must not depend on item order"
+
+
+def test_both_turf_searches_break_a_tie_the_same_way():
+    """Greedy and exhaustive must not disagree about which of two equal items to take.
+
+    The greedy branch sorted on `(reach, index)` descending, so a tie went to the HIGHEST item
+    index, while the exhaustive branch keeps the first combination it meets, which is the lowest.
+    Two code paths for one question, quietly giving different answers depending only on the item
+    count that decided which path ran.
+    """
+    tf = pytest.importorskip("turf")
+    # Items 0 and 1 are exact duplicates, so any choice between them is a tie by construction.
+    hit = np.zeros((40, 5), dtype=bool)
+    hit[:20, 0] = True
+    hit[:20, 1] = True
+    hit[20:30, 2] = True
+    hit[30:, 3] = True
+
+    exhaustive, _, how, _ = tf.best_combination(hit, 3)
+    assert how == "exhaustive"
+
+    monkey = tf.MAX_EXHAUSTIVE
+    try:
+        tf.MAX_EXHAUSTIVE = 0                      # force the greedy path on the same data
+        greedy, _, how_greedy, ties = tf.best_combination(hit, 3)
+    finally:
+        tf.MAX_EXHAUSTIVE = monkey
+    assert how_greedy == "greedy"
+    assert ties is None, "greedy cannot count ties and must not claim to"
+    assert greedy == exhaustive, "the two searches disagree about a tie"
+
+
+def test_the_turf_optimism_is_the_gap_the_report_actually_shows():
+    """The stated gap must equal headline minus holdout — the two numbers the reader can see.
+
+    It used to be `in_sample - holdout`, where in_sample is the reach on the half the combination
+    was CHOSEN from. Both are half-sample quantities, so it measured the optimism of a study half
+    this size and pinned it on the full-sample headline. The report printed "Expect about 93%, not
+    95%" immediately above "the 3-point difference": arithmetic a reader can check, and it did not
+    add up. The 96% those points were measured from appeared nowhere in the report.
+    """
+    tf = pytest.importorskip("turf")
+    r = np.random.default_rng(3)
+    centres = r.normal(0, 1, (3, 20))
+    utilities = centres[r.integers(0, 3, 100)] + r.normal(0, 0.8, (100, 20))
+    res = tf.turf(utilities, [f"item{i}" for i in range(20)], size=3, splits=20)
+
+    assert res["optimism"] == pytest.approx(res["reach"] - res["holdout_reach"], abs=1e-12)
+    # And it is genuinely a different number from the old definition, so this test would have
+    # failed before rather than passing either way.
+    assert res["optimism"] != pytest.approx(res["in_sample_reach"] - res["holdout_reach"], abs=1e-6)
+
+
+def test_turf_optimism_tracks_the_real_error_against_a_known_population():
+    """The honesty correction has to be checked against an outside truth, not against itself.
+
+    Pure noise is the strongest case to check: with no taste groups at all, everything the search
+    finds is luck, so the headline's error is large and known to be entirely optimism. Draw a
+    sample from a big population, run TURF on the sample, then look up what the chosen combination
+    really reaches in the population.
+    """
+    tf = pytest.importorskip("turf")
+    reported, real = [], []
+    for seed in range(6):
+        population = np.random.default_rng(seed).normal(0, 1, (20000, 20))
+        population_hit = tf.reach_matrix(population)
+        index = np.random.default_rng(500 + seed).choice(len(population), 100, replace=False)
+        res = tf.turf(population[index], [f"i{j}" for j in range(20)], size=3, splits=30)
+        reported.append(res["optimism"])
+        real.append(res["reach"] - tf._reach_of(population_hit, res["indices"]))
+
+    reported, real = float(np.mean(reported)), float(np.mean(real))
+    assert real > 0.05, "the setup is meant to produce a badly optimistic headline"
+    # Within four points of the truth. The old definition was out by roughly double that here, and
+    # in the opposite direction on structured data — it called a pessimistic headline optimistic.
+    assert abs(reported - real) < 0.04, f"reported {reported:.3f} against a real error of {real:.3f}"
+
+
+@pytest.mark.parametrize("n_items,expect_section", [(5, False), (8, False), (9, True), (14, True)])
+def test_turf_refuses_item_lists_too_short_for_reach_to_mean_anything(n_items, expect_section):
+    """Below about nine items the answer is arithmetic wearing a finding's clothes.
+
+    Someone counts as reached when the item is among their own top three, so each person accepts
+    three of however many items are on the list. At five items that is 60% of everything: measured
+    over twelve simulated studies of 200 people, the best set of three reached 100.0% every single
+    time, with ten combinations tied for it. The section used to run at five items and report that
+    100% as a result.
+
+    Best reach for a set of three, measured: 5 items 100.0%, 6 items 99.8%, 8 items 98.4%,
+    10 items 95.1%, 20 items 83.9%.
+    """
+    pytest.importorskip("turf")
+
+    class _Est:
+        item_names = [f"item{i}" for i in range(n_items)]
+        respondent_ids = [f"R{i}" for i in range(200)]
+        utilities = np.random.default_rng(2).normal(0, 1, (200, n_items))
+
+    produced = sk._turf_section(_Est()) is not None
+    assert produced is expect_section
+
+
+def test_turf_says_when_fewer_items_would_reach_the_same_people():
+    """Recommending three when one does the job is an expensive way to be right.
+
+    The incremental column shows this row by row, but the headline still names the full set, and a
+    reader who reads headlines walks away about to fund two items that add nobody.
+    """
+    pytest.importorskip("turf")
+
+    class _Dominant:
+        """One item everybody takes, then eight nobody needs."""
+        item_names = [f"item{i}" for i in range(9)]
+        respondent_ids = [f"R{i}" for i in range(200)]
+        # Item 0 tops everyone's list; the rest are shuffled noise below it.
+        _rng = np.random.default_rng(5)
+        utilities = np.column_stack([np.full(200, 10.0), _rng.normal(0, 1, (200, 8))])
+
+    prose, result = sk._turf_section(_Dominant())
+    assert result["alone"][0] == pytest.approx(1.0), "item 0 should reach everyone by itself"
+    assert "would do" in prose, "the report named three items without saying one was enough"
+    assert "1 of these 3 would do" in prose

@@ -3,6 +3,53 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.13.0] — 2026-08-09
+
+Three defects in the "which few to launch" answer, all found by auditing it against an outside
+truth rather than against itself. Each changes what the report says, so this is a minor version
+rather than a patch.
+
+### Fixed
+
+- **The launch recommendation could be decided by the order of your spreadsheet.** Reach counts
+  people, so it can only land on multiples of 1/n — sixty respondents give sixty-one possible
+  values for hundreds of candidate combinations, and exact ties at the top are ordinary rather than
+  freakish. The best reach was shared by more than one set in **14 of 30** simulated studies at
+  sixty people and ten items. Whichever tied set came first in the item list was printed as the
+  finding: **reordering the item list changed the recommendation in 8 of 25 studies**, with
+  identical reach both times.
+
+  No tie-break fixes this, because every tie-break is arbitrary. The report now says how many sets
+  tie, names some of them, and tells the reader to choose on grounds the survey does not contain —
+  cost, margin, brand fit. The two search paths also disagreed with each other about ties: greedy
+  resolved to the highest item index and exhaustive to the lowest, so which of two equal items you
+  got depended on how long your item list was. They now agree.
+
+- **The "how much of this is luck" figure measured the wrong thing.** It was `in_sample - holdout`,
+  and both of those are half-sample quantities: it measured the optimism of a study half the size
+  and attributed it to the full-sample headline. The report printed *"Expect about 93%, not 95%"*
+  directly above *"the 3-point difference"* — two sentences that do not agree, with the 96% those
+  three points came from appearing nowhere in the report.
+
+  It is now `reach - holdout`: the gap between the two numbers the reader can actually see.
+  Checked against a 40,000-person population where the true reach is known, the corrected gap
+  tracks the headline's real error (pure noise, 100 people, 20 items: reports 14.8 points against a
+  real 14.0). The module's documented table has been re-measured against that truth and replaced —
+  the old one claimed 9.5 to 22.3 points, computed with the wrong instrument.
+
+- **TURF ran on item lists too short for it to mean anything.** Someone counts as reached when the
+  item is in their own top three, so each person accepts three of however many items exist. At five
+  items that is 60% of the list, and the best set of three reached **100.0% in every study tried**,
+  with ten sets tied for it. The section is now refused below nine items, where the answer stops
+  being arithmetic. Measured best reach for a set of three: 5 items 100.0%, 8 items 98.4%,
+  10 items 95.1%, 20 items 83.9%.
+
+### Added
+
+- **"2 of these 3 would do."** When the items after the first already reach everybody the earlier
+  ones do, the report now says so in the headline rather than leaving it implied by a column of
+  `+0 points`. Recommending three items when one does the job is an expensive way to be right.
+
 ## [1.12.2] — 2026-08-09
 
 ### Fixed
