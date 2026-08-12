@@ -308,3 +308,47 @@ describe('clearing out old projects', () => {
     expect(screen.queryByRole('button', { name: /Delete .* selected/ })).not.toBeInTheDocument()
   })
 })
+
+
+describe('reaching the list without a mouse', () => {
+  const many = (n = 8) =>
+    Array.from({ length: n }, (_, i) => project({ id: `p${i}`, title: `study ${i}` }))
+
+  it('can select and delete using only the keyboard', async () => {
+    // Every control added for bulk delete is a native button or checkbox precisely so this works.
+    // A destructive action reachable only by mouse would be a worse regression than not having it.
+    const user = userEvent.setup()
+    const onDeleteMany = vi.fn()
+    render(<Sidebar {...props} projects={many()} onDeleteMany={onDeleteMany} />)
+
+    screen.getByRole('button', { name: 'Select' }).focus()
+    await user.keyboard('{Enter}')
+
+    screen.getByLabelText('Select study 0').focus()
+    await user.keyboard(' ')
+    expect(screen.getByLabelText('Select study 0')).toBeChecked()
+
+    screen.getByRole('button', { name: 'Delete 1 selected' }).focus()
+    await user.keyboard('{Enter}')
+    screen.getByRole('button', { name: 'Delete 1' }).focus()
+    await user.keyboard('{Enter}')
+
+    expect(onDeleteMany).toHaveBeenCalledWith(['p0'])
+  })
+
+  it('names every control for a screen reader rather than relying on the glyph', () => {
+    render(<Sidebar {...props} projects={[project({ title: 'study' })]} />)
+    // ×, ⋯ and ☆ are meaningless read aloud, so each carries its own label.
+    expect(screen.getByLabelText('Delete study')).toBeInTheDocument()
+    expect(screen.getByLabelText('Rename study')).toBeInTheDocument()
+    expect(screen.getByLabelText('Pin study')).toBeInTheDocument()
+  })
+
+  it('reports pinned state to assistive tech, not only as a filled star', () => {
+    const { rerender } = render(<Sidebar {...props} projects={[project({ title: 'study' })]} />)
+    expect(screen.getByLabelText('Pin study')).toHaveAttribute('aria-pressed', 'false')
+
+    rerender(<Sidebar {...props} projects={[project({ title: 'study', pinned: true })]} />)
+    expect(screen.getByLabelText('Unpin study')).toHaveAttribute('aria-pressed', 'true')
+  })
+})

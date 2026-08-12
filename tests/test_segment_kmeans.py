@@ -6899,7 +6899,10 @@ def test_every_text_colour_in_the_interface_clears_wcag_aa():
     # accent on the surfaces it sits on, and each semantic colour on its own tint.
     pairs = [("ink", "card"), ("ink", "bg"), ("ink-soft", "card"), ("muted", "card"),
              ("muted", "sunk"), ("accent", "card"), ("accent", "accent-soft"),
-             ("accent-ink", "accent"), ("ok", "ok-bg"), ("warn", "warn-bg"), ("risk", "risk-bg")]
+             ("accent-ink", "accent"), ("ok", "ok-bg"), ("warn", "warn-bg"), ("risk", "risk-bg"),
+             # The sidebar's own ground: the search hint, the date headings and the "Delete N
+             # selected" link all sit on --surface rather than on a card.
+             ("muted", "surface"), ("risk", "surface"), ("ink", "surface")]
 
     failures = []
     for theme_name, theme in (("light", light), ("dark", dark)):
@@ -7259,3 +7262,65 @@ def test_deleting_many_projects_reports_what_it_actually_removed(monkeypatch, tm
     assert wrong["ok"] is False and "list of ids" in wrong["error"], (
         "a bare string must not be iterated into single-character ids on a DELETE path")
     assert list(projects_dir.glob("keep2*")), "the malformed request deleted something"
+
+
+@pytest.mark.parametrize("route,body", [
+    ("/rename", {"session_id": ["p"], "title": "x"}),
+    ("/rename", {"session_id": 7, "title": "x"}),
+    ("/pin", {"session_id": {"id": "p"}, "pinned": True}),
+    ("/delete_project", {"session_id": ["p"]}),
+])
+def test_a_project_id_that_is_not_a_string_gets_an_answer_about_projects(route, body,
+                                                                        monkeypatch, tmp_path):
+    """Every one of these reaches into the store, which builds a filename from what it is given.
+
+    A list or a number where a string belongs used to fall through to the generic catch-all, so the
+    reply read "Something went wrong while reading or analysing that file" — about a file the
+    caller never sent. Found by probing the endpoints rather than by using the app, which is the
+    only way to find it: the interface cannot produce these shapes.
+    """
+    import json as _json
+    import socket
+    import threading
+    import time
+    import urllib.request
+
+    monkeypatch.setenv("SURVEY_SEGMENTER_PROJECTS", str(tmp_path / "projects"))
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: None)
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    threading.Thread(target=sk.serve, kwargs={"port": port}, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(80):
+        try:
+            urllib.request.urlopen(base + "/", timeout=5).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+
+    request = urllib.request.Request(base + route, data=_json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+    got = _json.loads(urllib.request.urlopen(request, timeout=60).read().decode())
+    assert got["ok"] is False
+    assert "did not name a project" in got["error"], got["error"]
+    assert "analysing that file" not in got["error"], (
+        "a malformed project id is still being explained as a problem with a file")
+
+
+def test_a_project_id_cannot_reach_outside_the_project_folder(tmp_path):
+    """Ids arrive from a request and become filenames, so they are stripped to a safe stem.
+
+    Checked rather than assumed, on every path that touches the disk: the store only ever listens
+    on localhost, but "only local" has never been a good reason to let a path escape its directory.
+    """
+    store = webapp.ProjectStore(root=tmp_path)
+    store.save("keeper", {"title": "study", "k": 2, "n_people": 40}, raw=b"id,q1\n1,5\n")
+    outside = tmp_path.parent / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+
+    for hostile in ("../outside", "../../etc/passwd", "..%2Fkeeper", "/etc/hosts"):
+        store.delete(hostile)
+        assert store.set_pinned(hostile, True) is False
+        assert store.rename(hostile, "renamed") is False
+
+    assert outside.exists(), "a delete escaped the project folder"
+    assert store.count() == 1 and store.list()[0]["title"] == "study"

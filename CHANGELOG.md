@@ -3,6 +3,33 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.16.1] — 2026-08-13
+
+### Fixed
+
+- **A malformed project id was explained as a problem with a file.** Sending a list or a number
+  where the project id belongs fell through to the generic handler, so the reply read *"Something
+  went wrong while reading or analysing that file"* — about a file the caller never sent. All four
+  handlers that reach into the project store now check the id first and answer about projects.
+
+  Found by probing the three endpoints added in 1.15.0 and 1.16.0 rather than by using the app,
+  which is the only way it could be found: the interface cannot produce those shapes. The same
+  probe confirmed the good news — **a project id cannot reach outside the project folder**, on
+  rename, pin, delete and bulk delete alike, and that is now a test rather than a property of one
+  regular expression nobody re-reads.
+
+### Verified
+
+- **The whole bulk-delete flow works with the keyboard alone** — enter select mode, tick rows with
+  space, confirm — and every control that is only a glyph on screen (`×`, `⋯`, `☆`) carries its own
+  spoken label, with the star reporting its state through `aria-pressed` rather than only by being
+  filled in. A destructive action reachable only by mouse would be a worse regression than not
+  having the feature.
+
+- **The contrast check now covers the sidebar's own ground**, not just cards. The search hint, the
+  date headings and the red "Delete N selected" link all sit on `--surface`, which the earlier
+  check never looked at. All pass: 5.44, 6.61 and above against a 4.5 requirement.
+
 ## [1.16.0] — 2026-08-09
 
 ### Added

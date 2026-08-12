@@ -505,9 +505,14 @@ def serve(port=8000):
                     self._do_pin()
                 elif route == "/delete_project":
                     body = self._read_json()
-                    store.delete(body.get("session_id", ""))
-                    sessions.pop(body.get("session_id", ""), None)
-                    self._json({"ok": True, "projects": store.list(), "total": store.count()})
+                    victim = self._project_id(body)
+                    if victim is None:
+                        self._json({"ok": False, "error": "That request did not name a project."})
+                    else:
+                        store.delete(victim)
+                        sessions.pop(victim, None)
+                        self._json({"ok": True, "projects": store.list(),
+                                    "total": store.count()})
                 elif route == "/delete_projects":
                     self._do_delete_many()
                 elif route == "/chat":
@@ -904,6 +909,17 @@ def serve(port=8000):
                         "prose": design_mod.render(report),
                         "csv": design_mod.to_frame(built, unique).to_csv(index=False)})
 
+        def _project_id(self, body):
+            """The project id from a request body, or None if it is not one.
+
+            Every one of these handlers reaches into the store with whatever arrived, and the store
+            builds a filename from it. A list or a number sent where a string belongs used to reach
+            the generic catch-all, which answers "Something went wrong while reading or analysing
+            that file" — about a file the caller never sent. Found by probing rather than by use.
+            """
+            value = body.get("session_id")
+            return value if isinstance(value, str) else None
+
         def _do_rename(self):
             """Rename a saved project.
 
@@ -926,7 +942,10 @@ def serve(port=8000):
                 self._json({"ok": False, "error": f"That name is {len(title)} characters. Keep it "
                                                   f"under 80 so it fits the list."})
                 return
-            session_id = body.get("session_id", "")
+            session_id = self._project_id(body)
+            if session_id is None:
+                self._json({"ok": False, "error": "That request did not name a project."})
+                return
             if not store.rename(session_id, title):
                 self._json({"ok": False, "error": "That project could not be found. It may have "
                                                   "been deleted."})
@@ -983,7 +1002,11 @@ def serve(port=8000):
             if not isinstance(pinned, bool):
                 self._json({"ok": False, "error": "Say whether to pin or unpin."})
                 return
-            if not store.set_pinned(body.get("session_id", ""), pinned):
+            session_id = self._project_id(body)
+            if session_id is None:
+                self._json({"ok": False, "error": "That request did not name a project."})
+                return
+            if not store.set_pinned(session_id, pinned):
                 self._json({"ok": False, "error": "That project could not be found. It may have "
                                                   "been deleted."})
                 return

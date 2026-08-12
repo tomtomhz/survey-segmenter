@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.16.0**, 273 Python + 150 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.16.1**, 278 Python + 153 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.16.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.16.0** — verified by unpacking the zip that is actually sitting there and
+**Released: v1.5.1 → v1.16.1.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.16.1** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
@@ -231,6 +231,22 @@ weak data, and that is the one a tighter threshold would trade against.
 One test was renamed as a result. `test_it_never_claims_high_confidence_for_the_wrong_number_of_
 groups` checked a single centre configuration while its name claimed a universal property the
 sweep falsifies; it is now `test_this_overlapping_shape_drops_to_moderate_when_it_merges`.
+
+### Probe every endpoint you add, the same evening you add it
+
+Three endpoints went in across 1.15.0 and 1.16.0 (`/rename`, `/pin`, `/delete_projects`). Probing
+them with the shapes a caller most easily gets wrong — the discipline established when `/design`
+was added — found one defect and confirmed one guarantee:
+
+* **A non-string project id** reached the generic catch-all, answering "Something went wrong while
+  reading or analysing that file" about a file nobody sent. Fixed in all four store-touching
+  handlers via one shared `_project_id` check, so they cannot drift apart.
+* **Path traversal is already neutralised.** `_stem()` strips an id to alphanumerics before it
+  becomes a filename, so `../../etc/passwd` resolves to nothing on every path including bulk
+  delete. That is now a test rather than a property of one regular expression nobody re-reads.
+
+The probe is cheap and has now found something every time it has been run. Run it on the next
+endpoint too.
 
 ### Bulk delete, and the rules it follows
 
