@@ -48,7 +48,11 @@ export function DesignPanel({ busy, setBusy }: { busy: boolean; setBusy: (b: boo
     // A BOM, because the overwhelmingly likely next step is opening this in Excel, and Excel reads
     // a UTF-8 CSV as the system code page without one — which turns every accented item name into
     // mojibake in the questionnaire itself.
-    const blob = new Blob(['﻿' + result.csv], { type: 'text/csv;charset=utf-8' })
+    //
+    // Written as an escape rather than as the character itself: a literal U+FEFF is invisible in
+    // an editor, so a stray reformat would delete it and nothing would fail until someone in
+    // Stockholm opened the design and found their own items misspelt.
+    const blob = new Blob(['\uFEFF' + result.csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url

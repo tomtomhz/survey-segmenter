@@ -82,6 +82,32 @@ describe('building the questionnaire', () => {
     expect(warning.closest('p')).toHaveClass('warn')
   })
 
+  it('puts a byte-order mark on the download, so Excel does not mangle accented items', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(api, 'design').mockResolvedValue(built())
+    // jsdom has no object URLs; capture the Blob the download hands over instead.
+    let captured: Blob | null = null
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: (blob: Blob) => {
+        captured = blob
+        return 'blob:stub'
+      },
+      revokeObjectURL: () => {},
+    })
+    render(<DesignPanel {...props} />)
+    await user.click(screen.getByText(/Running a best-worst study/))
+
+    await user.type(screen.getByLabelText(/Items to compare/), 'A\nB\nC')
+    await user.click(screen.getByRole('button', { name: /Build the questionnaire/ }))
+    await user.click(await screen.findByRole('button', { name: /Download/ }))
+
+    expect(captured).not.toBeNull()
+    const text = await (captured as unknown as Blob).text()
+    expect(text.charCodeAt(0)).toBe(0xfeff)
+    expect(text.slice(1)).toBe(built().csv)
+  })
+
   it('shows a refusal from the server as an error, not as a broken panel', async () => {
     const user = userEvent.setup()
     vi.spyOn(api, 'design').mockResolvedValue({
