@@ -276,8 +276,14 @@ def _smoke_test():
         # and the source tree cannot reveal it because the module is always importable there.
         # Two seconds of sampling on forty people is the whole cost.
         bw = [["respondent_id", "task", "item", "choice"]]
-        items = ["a", "b", "c", "d", "e"]
-        strength = [1.5, 0.8, 0.0, -0.8, -1.5]
+        # Nine items, not five. "Reached" means the item is in a person's own top three, so with
+        # five items each person accepts 60% of the list, the best set of three necessarily reaches
+        # everybody, and the TURF section is refused as arithmetic rather than a finding. The check
+        # below would then blame turf.py for not being bundled when it was bundled perfectly well.
+        items = ["a", "b", "c", "d", "e", "f", "g", "h", "i"]
+        # One strength per item, or the fixture indexes past the end of this list. Kept
+        # spread out so the ranking that comes back is unambiguous enough to assert on.
+        strength = [1.8, 1.4, 0.9, 0.4, 0.0, -0.4, -0.9, -1.4, -1.8]
         rnd2 = random.Random(11)
         for person in range(40):
             for task in range(5):
@@ -319,8 +325,10 @@ def _smoke_test():
         # and quietly stops answering the question a best-worst study is usually commissioned for.
         if "to launch" not in bw_result.get("report_html", ""):
             print("\nBUILD IS BROKEN — a best-worst study came back without the 'which few to "
-                  "launch' section, so turf.py did not survive bundling. Everything else about the "
-                  "build looks fine, which is exactly why this is checked.")
+                  "launch' section. Usually that means turf.py did not survive bundling, and "
+                  "everything else about the build looks fine, which is exactly why this is "
+                  "checked. If turf.py IS present, check the fixture above still clears the "
+                  "section's own minimum item count — see _turf_section.")
             _discard_archive()
 
         # The study planner, checked without running one. Deliberately invalid parameters: the
