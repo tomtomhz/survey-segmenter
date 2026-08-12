@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.17.0**, 279 Python + 154 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.17.1**, 279 Python + 158 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.17.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.17.0** — verified by unpacking the zip that is actually sitting there and
+**Released: v1.5.1 → v1.17.1.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.17.1** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
@@ -664,7 +664,7 @@ Not a survey, but 17,000 real rows through the whole pipeline on 2026-07-31
   sample" note is the backstop.
 - **Hopkins is unreliable on short surveys** and is now caveated in place rather than corrected —
   duplicate answer patterns inflate it (0.78 on pure noise with 2 Likert questions).
-- **Sidebar hides below 820px.** Offered a toggle; never requested.
+- ~~**Sidebar hides below 820px.** Offered a toggle; never requested.~~ **Fixed in 1.17.1** — and it was worse than a preference by then: four releases of project features (rename, search, pinning, bulk delete, show-all) all live in that panel, so a narrow window meant none of them existed. It is a drawer now, opened from the header, closed by choosing a project, tapping the page, or Escape.
 - **Do not put this checkout back inside iCloud Drive.** It lived under `~/Desktop`, which macOS
   syncs by default, and with ~6,000 files in `node_modules` every read went through the sync
   layer. `npm test` took 37 minutes instead of one second, Vitest workers timed out before they

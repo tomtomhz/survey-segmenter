@@ -24,6 +24,7 @@ export function Sidebar({
   onShowAll,
   onNew,
   total,
+  open = false,
 }: {
   projects: ProjectSummary[]
   activeId: string | null
@@ -36,6 +37,8 @@ export function Sidebar({
   onNew: () => void
   /** How many projects exist. Larger than the list when the cap has bitten. */
   total?: number
+  /** Only meaningful on narrow windows, where the column becomes a drawer over the page. */
+  open?: boolean
 }) {
   // Deleting a project removes the analysis and the original upload from disk, with no undo.
   // A single unlabelled × next to every row is one slip away from destroying an afternoon's work,
@@ -117,7 +120,7 @@ export function Sidebar({
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id))
 
   return (
-    <aside className="side">
+    <aside className={`side${open ? ' open' : ''}`} id="projects-panel">
       <div className="head">
         <span className="eyebrow">Projects</span>
       </div>

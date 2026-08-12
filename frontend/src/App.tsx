@@ -80,6 +80,20 @@ export function App() {
   // delete would otherwise silently snap the list back to sixty and look like the older projects
   // had just been deleted — the very confusion the count was added to remove.
   const [showingAll, setShowingAll] = useState(false)
+  // Only has an effect on the widths where the sidebar collapses into a drawer. Kept in App rather
+  // than in the Sidebar because the header button that opens it lives up here too.
+  const [projectsOpen, setProjectsOpen] = useState(false)
+
+  // Escape closes the drawer. Anything that covers the page needs a way out that does not depend
+  // on hitting a particular target, and on a narrow window the drawer covers most of it.
+  useEffect(() => {
+    if (!projectsOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setProjectsOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [projectsOpen])
 
   const refreshProjects = useCallback(async (all = showingAll) => {
     const reply = await api.projects(all)
@@ -342,12 +356,23 @@ export function App() {
 
   return (
     <Boundary fallback={(error) => <AppFailure error={error} />}>
-      <Header onNew={startNew} onSettings={() => openSettings()} />
+      <Header
+        onNew={startNew}
+        onSettings={() => openSettings()}
+        onToggleProjects={() => setProjectsOpen((wasOpen) => !wasOpen)}
+        projectsOpen={projectsOpen}
+      />
       <div className="body">
         <Sidebar
           projects={projects}
           activeId={sessionId}
-          onOpen={(id) => void openProject(id)}
+          open={projectsOpen}
+          onOpen={(id) => {
+            // On a narrow window the drawer sits over the result it was opened to reach, so
+            // choosing a project has to close it. On a wide window this does nothing.
+            setProjectsOpen(false)
+            void openProject(id)
+          }}
           onDelete={(id) => void deleteProject(id)}
           onRename={(id, title) => void renameProject(id, title)}
           onPin={(id, pinned) => void pinProject(id, pinned)}
@@ -356,6 +381,12 @@ export function App() {
           total={projectTotal}
           onNew={startNew}
         />
+        {/* Tapping the page behind the drawer closes it, which is the gesture everyone tries
+            first. Not focusable and hidden from assistive tech: the header button is the real
+            control, and Escape closes it too (see the effect above). */}
+        {projectsOpen && (
+          <div className="scrim" aria-hidden="true" onClick={() => setProjectsOpen(false)} />
+        )}
         <div className="main">
           <Thread
             messages={messages}

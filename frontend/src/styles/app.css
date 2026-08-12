@@ -353,7 +353,19 @@ header .sp{flex:1}
  .ctabs{display:none}.cpane.hide{display:block}
  .cpane{break-inside:avoid;margin-bottom:14px}.cwrap{border:none;padding:0;overflow:visible}}
 /* A 250px sidebar on a small window leaves no room to read the result, so drop it there. */
-@media(max-width:820px){.side{display:none}}
+/* Below 820px the projects column becomes a drawer over the page rather than disappearing.
+   It used to be `display:none` with nothing to bring it back, so on a narrow window every saved
+   study — and renaming, pinning, searching and deleting them — was simply unreachable. */
+.projtoggle{display:none}
+.scrim{display:none}
+@media(max-width:820px){
+ .projtoggle{display:inline-block;margin-right:4px}
+ .side{position:fixed;top:0;left:0;bottom:0;width:270px;z-index:30;transform:translateX(-102%);
+  transition:transform .18s ease;box-shadow:var(--shadow);border-right:1px solid var(--line)}
+ .side.open{transform:translateX(0)}
+ .scrim{display:block;position:fixed;inset:0;z-index:20;background:rgba(27,36,32,.35)}
+}
+@media(prefers-reduced-motion:reduce){.side{transition:none}}
 @media(max-width:560px){.wrap{padding:18px 14px 40px}.stat{flex:1 1 100%}
  header{padding:10px 14px}}
 

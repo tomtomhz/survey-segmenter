@@ -2,12 +2,28 @@
 export function Header({
   onNew,
   onSettings,
+  onToggleProjects,
+  projectsOpen,
 }: {
   onNew: () => void
   onSettings: () => void
+  onToggleProjects: () => void
+  projectsOpen: boolean
 }) {
   return (
     <header>
+      {/* Shown only on the widths where the sidebar is hidden. Below 820px the projects column
+          was simply removed with nothing to bring it back, so every saved study — and renaming,
+          pinning, searching and deleting them — was unreachable on a narrow window. */}
+      <button
+        type="button"
+        className="hbtn ghost projtoggle"
+        aria-expanded={projectsOpen}
+        aria-controls="projects-panel"
+        onClick={onToggleProjects}
+      >
+        ☰ Projects
+      </button>
       <div className="brand">
         <svg className="mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M12 2l2.6 6.8L21.5 12l-6.9 3.2L12 22l-2.6-6.8L2.5 12l6.9-3.2z" />

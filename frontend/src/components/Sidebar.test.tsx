@@ -363,3 +363,19 @@ describe('reaching the list without a mouse', () => {
     expect(screen.getByLabelText('Unpin study')).toHaveAttribute('aria-pressed', 'true')
   })
 })
+
+
+describe('the panel as a drawer on narrow windows', () => {
+  it('carries the id the header button says it controls', () => {
+    const { container } = render(<Sidebar {...props} projects={[project()]} />)
+    expect(container.querySelector('#projects-panel')).not.toBeNull()
+  })
+
+  it('marks itself open so the stylesheet can slide it in', () => {
+    const { container, rerender } = render(<Sidebar {...props} projects={[project()]} />)
+    expect(container.querySelector('aside')).not.toHaveClass('open')
+
+    rerender(<Sidebar {...props} projects={[project()]} open />)
+    expect(container.querySelector('aside')).toHaveClass('open')
+  })
+})

@@ -3,6 +3,24 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.17.1] — 2026-08-13
+
+### Fixed
+
+- **On a narrow window the projects panel was unreachable, not just hidden.** Below 820px the
+  sidebar was `display:none` with nothing anywhere to bring it back — so every saved study, and
+  everything added to that panel across the last four releases (rename, search, pinning, bulk
+  delete, "show all"), simply did not exist on a smaller window.
+
+  It is now a drawer: a **Projects** button appears in the header at exactly the widths where the
+  column collapses, and slides the panel over the page. Choosing a project closes it, since on a
+  narrow window the drawer covers the result it was opened to reach. Tapping the page behind it
+  closes it, and so does Escape — anything that covers the page needs a way out that does not
+  depend on hitting a particular target.
+
+  The button reports its state through `aria-expanded` and names the panel it controls, so this is
+  navigable without sight of the animation.
+
 ## [1.17.0] — 2026-08-13
 
 ### Added
