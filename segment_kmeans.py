@@ -1574,6 +1574,24 @@ def executive_summary(n_resp, names, shares, wants, min_jaccard, repro, unit="gr
     we refuse to show green, because 'high confidence in 6 groups' misleads when the count could as
     easily have been 3.
 
+    **Measured end to end over sixty planted studies** — a known number of groups at a known
+    separation, through the real pipeline — the light is informative and, more importantly, wrong
+    in only one direction:
+
+        light      studies   right k   mean ARI vs truth
+        high          16       69%          0.707
+        moderate      15       27%          0.267
+        low           29        3%          0.088
+
+    Two properties held across all sixty and are now protected by a test: it **never reported more
+    groups than were planted** (every error was a merge), and it **never showed green on the two
+    weakest separations** (zero "high" in thirty-six studies). What it does not promise is that a
+    green light means the count is exactly right — high confidence accompanied a merged answer in
+    5 of 16 green runs, always where two planted centres sat within about one noise standard
+    deviation per question. Tightening the light to catch those would trade against the property
+    worth more, which is that it does not go green on weak data; do not do it without repeating
+    the sweep.
+
     Both stability measures have to agree before the light goes above red. They fail in different
     ways and the amber band used to consult only the first: bootstrap Jaccard sits around 0.7 even
     on structureless data (Hennig's own reading of that band is "a pattern, membership doubtful"),

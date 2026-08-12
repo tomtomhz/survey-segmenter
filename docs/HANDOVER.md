@@ -199,6 +199,49 @@ calibration against known population utilities: 126 adjacent pairs from fourteen
 84.3%, correct 83.3%, tracking bin by bin. That number is quoted in the report as though it were a
 probability, and now it has earned it.
 
+### The confidence light, measured against a known truth
+
+The most load-bearing claim in the product — "High · Trust these groups" on the front card — had
+never been checked as a whole. Sixty planted studies (known k, known separation) through the real
+pipeline:
+
+| light | studies | right k | mean ARI vs truth |
+|---|---|---|---|
+| high | 16 | 69% | 0.707 |
+| moderate | 15 | 27% | 0.267 |
+| low | 29 | 3% | 0.088 |
+
+**Two properties held across all sixty**, and are now locked by
+`test_the_confidence_light_never_invents_groups_and_never_greenlights_weak_data`:
+
+* **It never over-counts.** Zero studies of sixty reported more groups than were planted. Every
+  error was a merge. That is the honest thing to tell a user: a green light can mean fewer groups
+  than really exist, never invented ones.
+* **It never greenlights weak data.** Zero "high" across the thirty-six studies at the two weakest
+  separations.
+
+**What it does not promise:** high confidence accompanied a merged answer in 5 of 16 green runs.
+Checking my own instrument mattered here — every one of those five had two planted centres within
+about one noise standard deviation per question, i.e. groups that genuinely overlap, and at an
+identical separation the tool got it right with 400 people and wrong with 80. So it is a
+sample-size effect at real but modest separation, not a broken light. **Do not tighten the light to
+catch them** without repeating the sweep: the property worth more is that it does not go green on
+weak data, and that is the one a tighter threshold would trade against.
+
+One test was renamed as a result. `test_it_never_claims_high_confidence_for_the_wrong_number_of_
+groups` checked a single centre configuration while its name claimed a universal property the
+sweep falsifies; it is now `test_this_overlapping_shape_drops_to_moderate_when_it_merges`.
+
+### PRIVACY.md did not mention that images are sent
+
+Found by reading the document against the code rather than on its own. `ai_interpret.py` attaches
+three charts as PNGs when the Claude layer is used, and the code is scrupulous about it — its
+docstring notes that the segment map plots one mark per respondent and argues why that is not
+re-identifiable. **None of that was in PRIVACY.md**, whose table listed only the digest as leaving
+the machine, in the one document that exists so this question has a written answer rather than a
+recollection. Now disclosed, including the per-respondent point and the advice to leave the layer
+off if a data protection assessment treats any per-individual representation as personal data.
+
 ### GitHub Actions: RESOLVED 2026-08-08 — the repository is public and CI is green
 
 For about a day every run failed **before starting a single step**: while the repository was

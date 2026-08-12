@@ -1058,16 +1058,24 @@ def test_it_recovers_the_number_of_groups_across_realistic_conditions():
     assert r["k"] == 3, f"five noise questions changed the answer to {r['k']}"
 
 
-def test_it_never_claims_high_confidence_for_the_wrong_number_of_groups():
+def test_this_overlapping_shape_drops_to_moderate_when_it_merges():
     """Being wrong is survivable. Being wrong and confident is not.
 
-    Overlapping segments are the realistic case and the hard one: measured over three seeds, the
-    tool found the true k once and merged two segments into k=2 the other two times. What makes
-    that acceptable is that it dropped to "moderate" both times it was wrong, so the report told
-    the reader to treat the groups as directional rather than settled.
+    Overlapping segments are the realistic case and the hard one: on THIS configuration, measured
+    over three seeds, the tool found the true k once and merged two segments into k=2 the other
+    two times — and dropped to "moderate" both times it was wrong, so the report told the reader
+    to treat the groups as directional rather than settled.
 
-    A change that improved accuracy by reporting high confidence more often would be a
-    regression, and this is what would catch it.
+    A change that improved accuracy by reporting high confidence more often would be a regression,
+    and this is what would catch it.
+
+    **This test used to be called `test_it_never_claims_high_confidence_for_the_wrong_number_of_
+    groups`, and that name claimed far more than it checks.** It checks one centre configuration.
+    A sixty-study sweep over planted structure found high confidence accompanying a merged answer
+    in 5 of 16 high-confidence runs — always where two planted centres sat within about one noise
+    standard deviation per question, which is to say where the groups genuinely overlap. The
+    general properties that DO hold are measured in
+    `test_the_confidence_light_never_invents_groups_and_never_greenlights_weak_data`.
     """
     centres = np.array([[4, 2, 4, 2, 3], [2, 4, 2, 4, 3], [3, 3, 4, 4, 2]], float)
     for seed in range(3):
@@ -6791,3 +6799,56 @@ def test_the_probability_one_item_beats_the_next_is_honest():
     # The confident end has to be the reliable end, or the flag built on it means nothing.
     confident = claimed >= 0.9
     assert confident.sum() >= 10 and correct[confident].mean() > 0.85
+
+
+def test_the_confidence_light_never_invents_groups_and_never_greenlights_weak_data():
+    """The two properties of the confidence light that a sixty-study sweep actually established.
+
+    The light sits on the front card saying "High · Trust these groups", and a reader acts on it.
+    Every guard behind it was added in response to a measured failure, but the light as a whole had
+    never been checked against a known truth. Planting a known number of groups at a known
+    separation and running the real pipeline sixty times gave:
+
+        light      studies   right k   mean ARI
+        high          16       69%       0.707
+        moderate      15       27%       0.267
+        low           29        3%       0.088
+
+    So it is genuinely informative — but two properties are stronger than that ordering, and they
+    are what this test protects:
+
+    * **It never over-counts.** Across all sixty studies it reported more groups than were planted
+      exactly zero times. Every error was a merge. That is the useful thing to tell a user: a green
+      light can mean FEWER groups than really exist, but not invented ones.
+    * **It never greenlights weak data.** Across the thirty-six studies at the two weakest
+      separations, "high" was returned zero times.
+
+    What it does NOT promise, measured in the same sweep: high confidence accompanied a merged
+    answer in 5 of 16 high-confidence runs, always where two planted centres sat within about one
+    noise standard deviation per question. Merging groups that genuinely overlap is defensible;
+    calling the result settled is the part worth knowing about, and it is why the planner's output
+    says so in words.
+    """
+    def planted(n_people, n_items, k, sep, seed):
+        rng = np.random.default_rng(seed)
+        centres = rng.normal(0, sep / 2.0, (k, n_items))
+        who = rng.integers(0, k, n_people)
+        raw = centres[who] + rng.normal(0, 1.0, (n_people, n_items))
+        frame = pd.DataFrame(np.clip(np.round(raw + 4), 1, 7).astype(int),
+                             columns=[f"q{i + 1}" for i in range(n_items)])
+        frame.insert(0, "id", range(n_people))
+        return frame, who
+
+    for k, sep, seed in ((3, 0.5, 0), (3, 1.0, 1), (4, 1.0, 2), (3, 2.0, 3)):
+        frame, truth = planted(120, 6, k, sep, seed)
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = sk.run_analysis(frame.to_csv(index=False).encode(),
+                                     cfg=sk.SegmentationConfig(k_min=2, k_max=6, **FAST))
+        found = int(result["k"])
+        assert found <= k, (
+            f"planted {k} groups at separation {sep} and reported {found} — inventing groups is "
+            "the one error the light is not allowed to make confidently")
+        if sep <= 1.0:
+            assert result["confidence"] != "high", (
+                f"separation {sep} is near the limit of what any method can separate, and it was "
+                f"called high confidence")
