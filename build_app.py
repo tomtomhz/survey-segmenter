@@ -341,6 +341,23 @@ def _smoke_test():
                   "in the app cannot work. Nothing else about the build looks wrong.")
             _discard_archive()
 
+        # The questionnaire designer, on the same trick and for the same reason: the handler
+        # resolves its import before it checks anything, so one deliberately impossible request
+        # proves the module is present in milliseconds instead of building a whole design.
+        req4 = urllib.request.Request(
+            "http://127.0.0.1:8765/design", data=json.dumps({"items": ["a"]}).encode(),
+            headers={"Content-Type": "application/json"})
+        try:
+            design_reply = json.loads(urllib.request.urlopen(req4, timeout=60).read())
+        except Exception as e:
+            print(f"\nBUILD IS BROKEN — the questionnaire designer endpoint failed "
+                  f"({type(e).__name__}).")
+            _discard_archive()
+        if "not installed" in str(design_reply.get("error", "")):
+            print("\nBUILD IS BROKEN — design.py did not survive bundling, so the app can analyse "
+                  "a best-worst study but not build one. Nothing else about the build looks wrong.")
+            _discard_archive()
+
         if missing:
             print("\nBUILD IS BROKEN — it runs, but quietly does less than it should:")
             for reason in missing:

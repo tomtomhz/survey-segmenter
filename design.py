@@ -96,20 +96,33 @@ def make_design(n_items, items_per_set=4, sets_per_respondent=10, n_respondents=
     # Measured on twelve items over sixty respondents, this brings the worst pair spread from
     # 37-71 down to 51-59 — the imbalance that most distorts a ranking — and a second pass changes
     # nothing, so one is the default.
+    # The OBJECTIVE is maintained incrementally as well, which is the second half of the same idea
+    # and matters far more as the item count grows. Rebuilding a standard deviation over the whole
+    # pair matrix costs O(items^2) per candidate swap while the swap itself touches a few dozen
+    # entries: sixty items over five hundred people took five minutes, nearly all of it spent
+    # re-reading numbers that had not changed.
+    #
+    # A swap moves items between screens without changing how many pairs a screen contains, so the
+    # TOTAL of the pair counts is invariant — and with the mean fixed, minimising the variance is
+    # exactly minimising the sum of squares. So that sum is all that has to be carried, and each
+    # changed entry updates it in constant time. Locked in by
+    # test_a_swap_never_changes_the_total_number_of_pairings, because the whole shortcut rests on it.
     pairs = _pair_counts(design, n_items)
     off_mask = ~np.eye(n_items, dtype=bool)
-
-    def score():
-        return float(pairs[off_mask].std())
+    sumsq = float((pairs[off_mask].astype(float) ** 2).sum())
 
     def apply_pairs(task, item, delta):
-        """Add `delta` to every pair between `item` and the rest of `task`."""
+        """Add `delta` to every pair between `item` and the rest of `task`, keeping `sumsq` true."""
+        nonlocal sumsq
         for other in task:
             if other != item:
-                pairs[item, other] += delta
-                pairs[other, item] += delta
+                old = int(pairs[item, other])
+                new = old + delta
+                pairs[item, other] = new
+                pairs[other, item] = new
+                sumsq += 2.0 * float(new * new - old * old)
 
-    best = score()
+    best = sumsq
     for _ in range(passes):
         improved = False
         for person in design:
@@ -125,8 +138,8 @@ def make_design(n_items, items_per_set=4, sets_per_respondent=10, n_respondents=
                             person[a][i], person[b][j] = y, x
                             apply_pairs(person[a], y, +1)
                             apply_pairs(person[b], x, +1)
-                            now = score()
-                            if now < best - 1e-12:
+                            now = sumsq
+                            if now < best - 1e-9:
                                 best, improved = now, True
                             else:                                   # put it back
                                 apply_pairs(person[a], y, -1)

@@ -8,13 +8,13 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-08 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.11.1**, 234 Python + 115 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.12.0**, 244 Python + 120 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
-## Session state — 2026-08-08 (read this first)
+## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.11.1.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+**Released: v1.5.1 → v1.12.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
 the team)/` is on **1.11.1** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
@@ -27,16 +27,21 @@ were previously outsourced to Sawtooth:
 
 | Step | Where | Since |
 |---|---|---|
-| Build the best-worst questionnaire | `--design` (CLI only) | 1.11.0 |
+| Build the best-worst questionnaire | `--design`, and a panel in the app | 1.11.0 / 1.12.0 |
 | Decide how many respondents to recruit | `--plan`, and a panel in the app | 1.8.0 / 1.9.0 |
 | Score best-worst answers by HB | automatic on detection | 1.6.0 |
 | Rank the items, with beat probabilities | report card + two downloads | 1.6.0 |
 | Which few items to actually launch | TURF, in the report | 1.10.0 |
 | Segment people, profile, name, export | the original tool | — |
 
-**`--design` is CLI-only** — the same half-delivered state the planner was in before 1.9.0, and the
-same argument applies: this tool exists for people who do not use a command line. Mirroring
-`PlanPanel.tsx` + the `/plan` endpoint is the obvious next piece of work.
+Nothing in that table is command-line-only any more. `--design` was, for one release, and 1.12.0
+closed it the same way 1.9.0 closed the planner.
+
+**The app deliberately caps the design shape** at 40 items, 6 per screen, 15 screens and 300
+versions. That is not timidity: it is the largest shape that answers in about twenty seconds, and
+the corner beyond it (8 items across 20 screens) takes eighty. The CLI has no ceiling. If someone
+raises the app's limits, re-measure first — the cost grows with `screens² × per_screen²` per person,
+so it climbs much faster than the numbers look like they should.
 
 ### v1.10.0 — TURF, and how much of a reach figure is luck
 
@@ -90,6 +95,36 @@ on it — the report footer and the app's own version come from `__version__` �
 consistent again. `test_the_places_the_version_is_written_by_hand_all_agree` caught it, which is
 the guard doing its job; it caught it *after* the tag because the bump was pushed on a pyflakes run
 with no pytest behind it. **Run the suite before tagging, not just the linter.**
+
+### v1.12.0 — the designer reaches the people it was built for
+
+Same argument as 1.9.0, and worth stating once so it does not have to be re-argued: a capability
+that exists only behind a command line, in a tool whose premise is that the user does not use one,
+is not delivered. Items are pasted rather than uploaded, because the list lives in an email or a
+slide and saving a `.txt` first was a step that existed only for `argparse`.
+
+Two things in it are worth not re-deriving:
+
+* **The CSV comes back inside the JSON reply, not through `/download`.** Everything that route
+  serves belongs to an analysed session and a design has none; inventing a session to hold one file
+  would put a study nobody ran into the project list. At the capped shapes the file is about a
+  megabyte, which is an ordinary reply for a local server.
+* **Duplicate lines are collapsed case-insensitively.** A pasted list routinely has the same
+  benefit twice, and left alone it produces a screen showing two identical options with preference
+  split between them.
+
+**The search also got about twice as fast**, and much more on long lists. The objective — a
+standard deviation over the whole pair matrix — was `O(items²)` per candidate swap while the swap
+touched a few dozen entries. Because a swap cannot change the total number of pairings, the mean is
+fixed, so minimising the variance is exactly minimising the sum of squares, and each changed entry
+updates that in constant time. Identical balance at every shape tried; 60 items over 500 people went
+from 300s to 157s. `test_a_swap_never_changes_the_total_number_of_pairings` exists because the whole
+shortcut rests on that invariance, and a broken version would still report a plausible balance.
+
+**Two stale README claims went with it** — that the tool "does not design the experimental stimuli"
+(untrue since 1.11.0) and that HB "has not yet been run on real MaxDiff responses" (untrue since
+1.6.1). Both were the project describing an older version of itself, which is the failure mode this
+file exists to prevent.
 
 ### GitHub Actions: RESOLVED 2026-08-08 — the repository is public and CI is green
 
@@ -422,16 +457,13 @@ Not a survey, but 17,000 real rows through the whole pipeline on 2026-07-31
 
 ## Next candidates, roughly by value
 
-1. **Put `--design` in the app.** The only feature that is CLI-only, in a tool whose entire premise
-   is that the user does not use a command line. `PlanPanel.tsx` and the `/plan` endpoint are the
-   pattern to copy — that work is already done once and went in cleanly.
-2. **Read a real Qualtrics/Sawtooth wide export.** Its shape is recognised and refused with
+1. **Read a real Qualtrics/Sawtooth wide export.** Its shape is recognised and refused with
    instructions rather than silently misread, which was the dangerous behaviour. Reading one
    properly is blocked on having a real file: the code polarity cannot be inferred from the data.
-3. **Resolving overlapping segments** — the measured weakness. Worth understanding before
+2. **Resolving overlapping segments** — the measured weakness. Worth understanding before
    attempting: merging may be the honest answer, and "improving" it risks trading away the
    never-confidently-wrong property, which is worth more.
-4. **Consolidate `segment-kmeans-tool.md`** in the assistant memory directory; it has grown well
+3. **Consolidate `segment-kmeans-tool.md`** in the assistant memory directory; it has grown well
    past 22 KB of appended paragraphs and is due a rewrite rather than another append.
 
 Two former entries are settled and should not be reopened without reading why: a **second

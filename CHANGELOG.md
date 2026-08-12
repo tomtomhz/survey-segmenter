@@ -3,6 +3,47 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.12.0] — 2026-08-09
+
+### Added
+
+- **The questionnaire designer is in the app.** It was command-line-only for one release, which in
+  a tool built for people who do not use a command line means it may as well not have existed —
+  the same half-delivered state the planner was in before 1.9.0. It now sits on the start screen
+  next to the planner, above it, because that is the order the work happens in: you write the
+  questionnaire, then decide how many people to put in front of it.
+
+  Items are **pasted, not uploaded**. Someone deciding what to ask has the list in an email or a
+  slide; making them save a `.txt` first was a step that existed only because the command line
+  needed one. Lines listed twice are collapsed, case-insensitively, so an item cannot end up
+  competing against itself on the same screen.
+
+  The app caps the shape at 40 items, 6 per screen, 15 screens and 300 versions. That ceiling is
+  measured rather than guessed: it is the largest shape that still answers in about twenty seconds,
+  while eight items across twenty screens takes eighty. `segment-kmeans --design` has no ceiling
+  and remains the right tool for anything bigger.
+
+### Changed
+
+- **The design search got about twice as fast**, and much more than that on long item lists.
+  Rebuilding a standard deviation over the whole pair matrix cost `O(items²)` for every candidate
+  swap while the swap itself touched a few dozen entries — sixty items over five hundred people
+  spent five minutes almost entirely re-reading numbers that had not changed.
+
+  A swap moves items between screens without changing how many pairs a screen contains, so the
+  total of the pair counts is invariant; with the mean fixed, minimising the variance is exactly
+  minimising the sum of squares, which each changed entry can update in constant time. Measured, at
+  identical balance in every shape tried: 12 items/200 people 2.4s → 1.3s, 30 items/500 people
+  35s → 20s, 60 items/500 people 300s → 157s. The invariance the shortcut rests on is now a test
+  rather than an assumption.
+
+### Fixed
+
+- **Two stale claims in the README.** It said the tool "does not design the experimental stimuli",
+  which stopped being true in 1.11.0, and that hierarchical Bayes "has not yet been run on real
+  MaxDiff responses", which stopped being true in 1.6.1 — 350 real respondents, Spearman 1.0000
+  against the classical score. Both were the project describing an older version of itself.
+
 ## [1.11.1] — 2026-08-08
 
 ### Fixed

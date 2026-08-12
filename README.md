@@ -141,6 +141,11 @@ Verified by closing the loop: build a design, simulate people answering it from 
 run the real estimator, and check the ranking that comes back is the one that went in. It is —
 Spearman 1.000.
 
+**This is in the app too**, on the start screen, where you paste the items instead of saving a file
+first. The app caps the shape at 40 items, 6 per screen, 15 screens and 300 versions, because those
+are the largest numbers that still answer in about twenty seconds; the command line has no such
+ceiling and is the right tool for anything bigger.
+
 ## Before you field: how many people do you need?
 
 ```bash
@@ -355,9 +360,9 @@ to `latent_class_typing_rule.json`, and `--classify` auto-detects which kind of 
 
 k-means finds spherical, roughly equal-size clusters. For genuinely elongated, unequal-variance, or overlapping segments it is the wrong tool no matter how carefully it is validated. That is exactly why two alternatives are built in as first-class methods: run `--method gmm` for a Gaussian-mixture / latent-class model that allows elliptical, unequal-size, overlapping segments (continuous data), or `--method lca` for a true Latent Class Analysis when your inputs are categorical rather than continuous utilities. When the per-segment Jaccard says the k-means segments have dissolved, switch methods and compare.
 
-The honest remaining boundary is *upstream*: this tool does not design the experimental stimuli — the part of a full Moskowitz/Sawtooth pipeline it still leaves to you.
+The boundary that used to sit *upstream* — designing the experimental stimuli, the last part of a full Moskowitz/Sawtooth pipeline this left to you — is closed: `--design`, and the panel on the app's start screen, build the best-worst questionnaire itself. What remains outside the tool is the judgement about **which items are worth testing at all**, which is not a statistical question.
 
-It does now estimate individual-level utilities from raw MaxDiff choices. Drop a tidy best-worst export (`respondent_id | set | item | choice`) in and it is detected, scored by hierarchical Bayes (`maxdiff.py`), and segmented on the resulting utilities. Measured against known utilities on simulated data, HB recovers individual utilities markedly better than counting (0.76 → 0.92 correlation at strong separation); its effect on the segmentation itself is small but consistent, and neither method rescues genuinely weak structure. **It has not yet been run on real MaxDiff responses** — see `docs/HANDOVER.md` for the full sweep, including where HB does not help.
+It does now estimate individual-level utilities from raw MaxDiff choices. Drop a tidy best-worst export (`respondent_id | set | item | choice`) in and it is detected, scored by hierarchical Bayes (`maxdiff.py`), and segmented on the resulting utilities. Measured against known utilities on simulated data, HB recovers individual utilities markedly better than counting (0.76 → 0.92 correlation at strong separation); its effect on the segmentation itself is small but consistent, and neither method rescues genuinely weak structure. It has since been run on **350 real respondents** (the `bwsTools` example data from CRAN): Spearman 1.0000 against the classical best-minus-worst score on the same data, and it independently found the three segments that package's own authors report. See `docs/HANDOVER.md` for the full sweep, including where HB does not help.
 
 ## Versioning, deployment, and licensing
 

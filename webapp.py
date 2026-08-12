@@ -434,6 +434,8 @@ def serve(port=8000):
                     self._do_name()
                 elif route == "/plan":
                     self._do_plan()
+                elif route == "/design":
+                    self._do_design()
                 elif route == "/delete_project":
                     body = self._read_json()
                     store.delete(body.get("session_id", ""))
@@ -717,6 +719,77 @@ def serve(port=8000):
                         "recommended_n": advice["recommended_n"],
                         "subtle_reachable": advice["subtle_reachable"],
                         "prose": planner.render(plan)})
+
+        def _do_design(self):
+            """Build the best-worst questionnaire. Runs before there is anything to analyse.
+
+            The command line takes a file of items; this takes them pasted into a box, because
+            someone deciding what to ask has the list in an email or a slide, not saved as a .txt.
+
+            The CSV goes back INSIDE the reply rather than being written to disk and downloaded
+            through /download. Everything that route serves belongs to an analysed session, and a
+            design has none — inventing a session to hold one file would mean it turned up in the
+            project list as a study nobody ran. At the shapes allowed below the file is at most
+            about a megabyte, which is a normal JSON reply for a local server.
+            """
+            # Imported before the parameters are checked, exactly as in _do_plan and for the same
+            # reason: a lazy import is invisible to PyInstaller, so this line is what lets the
+            # build's smoke test prove design.py was bundled without generating a whole design.
+            try:
+                import design as design_mod
+            except Exception:
+                self._json({"ok": False, "error": "The questionnaire designer is not installed."})
+                return
+            body = self._read_json()
+            items = [str(line).strip() for line in (body.get("items") or []) if str(line).strip()]
+            seen, unique = set(), []
+            for name in items:                      # a duplicated item would compete with itself
+                if name.lower() not in seen:
+                    seen.add(name.lower())
+                    unique.append(name)
+            try:
+                per_screen = int(body.get("per_screen", 4))
+                screens = int(body.get("screens", 10))
+                people = int(body.get("people", 200))
+            except (TypeError, ValueError):
+                self._json({"ok": False, "error": "Give whole numbers for the questionnaire shape."})
+                return
+            if len(unique) < 3:
+                self._json({"ok": False, "error": "List at least three items, one per line. A "
+                                                  "best-worst exercise compares things, so there "
+                                                  "have to be things to compare."})
+                return
+            # The ceilings are measured rather than guessed, and they are what the browser can wait
+            # for: the largest shape allowed here takes about twenty seconds, while eight items on
+            # a screen over twenty screens takes eighty. Anyone who needs that shape has
+            # `segment-kmeans --design`, which is the same code with no clock on it.
+            if len(unique) > 40:
+                self._json({"ok": False, "error": f"That is {len(unique)} items. Forty is the most "
+                                                  f"this screen will build; beyond that use "
+                                                  f"segment-kmeans --design."})
+                return
+            if not 2 <= per_screen <= 6:
+                self._json({"ok": False, "error": "Show between 2 and 6 items on each screen."})
+                return
+            if per_screen >= len(unique):
+                self._json({"ok": False, "error": f"You cannot show {per_screen} of {len(unique)} "
+                                                  f"items at once — there would be nothing left to "
+                                                  f"compare them against."})
+                return
+            if not 2 <= screens <= 15:
+                self._json({"ok": False, "error": "Ask between 2 and 15 screens per person."})
+                return
+            if not 20 <= people <= 300:
+                self._json({"ok": False, "error": "Build between 20 and 300 versions."})
+                return
+            try:
+                built, report = design_mod.make_design(len(unique), per_screen, screens, people)
+            except ValueError as e:
+                self._json({"ok": False, "error": sk._explain_run_error(str(e))})
+                return
+            self._json({"ok": True, "items": unique, "report": report,
+                        "prose": design_mod.render(report),
+                        "csv": design_mod.to_frame(built, unique).to_csv(index=False)})
 
         def _do_settings(self):
             if sk._ai is None:

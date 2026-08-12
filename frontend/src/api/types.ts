@@ -187,3 +187,25 @@ export interface PlanResult {
   subtle_reachable: boolean
   prose: string
 }
+
+/** What a generated questionnaire achieved, reported rather than assumed. */
+export interface DesignReport {
+  n_respondents: number
+  n_items: number
+  sets_per_respondent: number
+  items_per_set: number
+  times_each_item_shown: [number, number]
+  exposures_per_respondent: number
+  pair_appearances: [number, number]
+  never_paired: number
+  evenly_divisible: boolean
+}
+
+export interface DesignResult {
+  ok: true
+  items: string[]
+  report: DesignReport
+  prose: string
+  /** The design itself, one row per item shown. Carried in the reply — there is no session yet. */
+  csv: string
+}

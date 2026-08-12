@@ -6229,3 +6229,158 @@ def test_an_impossible_questionnaire_is_explained_in_words(kwargs, expect):
     explained = sk._explain_run_error(str(caught.value))
     assert "_DESIGN" not in explained, "an internal sentinel is being shown to the reader"
     assert expect in explained
+
+
+def test_the_design_endpoint_builds_a_fieldable_questionnaire(monkeypatch):
+    """Build a questionnaire through the real server and check the CSV is one you could field.
+
+    The design was command-line-only for a release, which in a tool built for people who do not use
+    a command line means it may as well not have existed. What matters here is not that the
+    endpoint answers — it is that what comes back is the design itself: every item present, no
+    screen showing the same item twice, and the row count exactly what was asked for. A handler
+    that returned a plausible report and a truncated CSV would pass a shallower test and waste a
+    real study.
+    """
+    import csv
+    import io
+    import json as _json
+    import socket
+    import threading
+    import time
+    import urllib.request
+
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: None)
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    threading.Thread(target=sk.serve, kwargs={"port": port}, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+
+    def post_json(path, obj):
+        req = urllib.request.Request(base + path, data=_json.dumps(obj).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        return _json.loads(urllib.request.urlopen(req, timeout=120).read().decode())
+
+    for _ in range(60):                                        # wait for the server to come up
+        try:
+            urllib.request.urlopen(base + "/", timeout=5).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+
+    names = [f"Benefit {chr(65 + i)}" for i in range(8)]
+    got = post_json("/design", {"items": names, "per_screen": 3, "screens": 6, "people": 25})
+    assert got["ok"] is True, got.get("error")
+
+    rows = list(csv.DictReader(io.StringIO(got["csv"])))
+    assert len(rows) == 25 * 6 * 3, "the CSV is not the size that was asked for"
+    assert {r["item"] for r in rows} == set(names), "an item never appears in the questionnaire"
+    assert len({r["respondent_id"] for r in rows}) == 25
+
+    screens = {}
+    for r in rows:
+        screens.setdefault((r["respondent_id"], r["task"]), []).append(r["item"])
+    assert all(len(v) == 3 for v in screens.values()), "a screen has the wrong number of items"
+    assert all(len(set(v)) == 3 for v in screens.values()), "a screen shows the same item twice"
+
+    # Different people must see different arrangements, or fatigue on screen three becomes an
+    # opinion about whatever is always on screen three.
+    arrangements = {tuple(sorted(v)) for (person, task), v in screens.items() if task == "1"}
+    assert len(arrangements) > 1, "every respondent got the identical questionnaire"
+
+    assert got["report"]["n_items"] == 8 and got["report"]["never_paired"] == 0
+    assert "_DESIGN" not in got["prose"]
+
+
+@pytest.mark.parametrize("body,expect", [
+    ({"items": ["only", "two"]}, "at least three"),
+    ({"items": [f"item {i}" for i in range(45)]}, "45 items"),
+    ({"items": ["a", "b", "c", "d"], "per_screen": 9}, "between 2 and 6"),
+    ({"items": ["a", "b", "c"], "per_screen": 3}, "nothing left to compare"),
+    ({"items": ["a", "b", "c", "d", "e"], "screens": 40}, "between 2 and 15"),
+    ({"items": ["a", "b", "c", "d", "e"], "people": 5000}, "between 20 and 300"),
+    ({"items": ["a", "b", "c", "d", "e"], "screens": "ten"}, "whole numbers"),
+])
+def test_the_design_endpoint_refuses_impossible_questionnaires_in_plain_words(body, expect,
+                                                                             monkeypatch):
+    """Every refusal has to say what to do instead, and never leak an internal sentinel.
+
+    These are the shapes a person actually types — nine items on a screen, three of three items,
+    five thousand versions — and each one is a question about the study rather than a mistake, so
+    the answer has to read like one.
+    """
+    import json as _json
+    import socket
+    import threading
+    import time
+    import urllib.request
+
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: None)
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    threading.Thread(target=sk.serve, kwargs={"port": port}, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(60):
+        try:
+            urllib.request.urlopen(base + "/", timeout=5).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+
+    req = urllib.request.Request(base + "/design", data=_json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    got = _json.loads(urllib.request.urlopen(req, timeout=60).read().decode())
+    assert got["ok"] is False
+    assert expect in got["error"], got["error"]
+    assert "_DESIGN" not in got["error"] and "Traceback" not in got["error"]
+
+
+def test_the_design_endpoint_collapses_items_listed_twice(monkeypatch):
+    """A duplicated line must not become an item competing against itself.
+
+    Pasting a list is the normal way in, and a list pasted from a slide or an email routinely has
+    the same benefit twice in different case. Left alone it produces a questionnaire where two
+    identical options appear on one screen and the ranking has to split preference between them.
+    """
+    import json as _json
+    import socket
+    import threading
+    import time
+    import urllib.request
+
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: None)
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    threading.Thread(target=sk.serve, kwargs={"port": port}, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(60):
+        try:
+            urllib.request.urlopen(base + "/", timeout=5).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+
+    body = {"items": ["Free delivery", "free delivery ", "Lower prices", "", "Longer returns"],
+            "per_screen": 2, "screens": 4, "people": 20}
+    req = urllib.request.Request(base + "/design", data=_json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    got = _json.loads(urllib.request.urlopen(req, timeout=60).read().decode())
+    assert got["ok"] is True, got.get("error")
+    assert got["items"] == ["Free delivery", "Lower prices", "Longer returns"]
+    assert got["report"]["n_items"] == 3
+
+
+def test_a_swap_never_changes_the_total_number_of_pairings():
+    """The fast objective is only correct because the total is fixed; check that it is.
+
+    The optimiser minimises the SUM OF SQUARES of the pair counts and calls it minimising the
+    variance. That step is valid only while the mean is constant — which holds because a swap moves
+    items between screens without changing how many pairs a screen contains. If that ever stopped
+    being true the search would quietly optimise the wrong thing and still report a balance figure,
+    so it is checked rather than assumed.
+    """
+    import design as d
+    import numpy as np
+
+    for seed in range(3):
+        built, _ = d.make_design(9, 3, 5, 20, seed=seed)
+        pairs = d._pair_counts(built, 9)
+        off = pairs[~np.eye(9, dtype=bool)]
+        # Every screen contributes exactly C(items_per_set, 2) unordered pairs, counted twice.
+        assert int(off.sum()) == 20 * 5 * (3 * 2 // 2) * 2

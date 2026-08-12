@@ -8,6 +8,7 @@ import { SettingsModal } from './components/SettingsModal'
 import { Sidebar } from './components/Sidebar'
 import { Thread } from './components/Thread'
 import { useDropTarget } from './hooks/useDropTarget'
+import { DesignPanel } from './components/DesignPanel'
 import { PlanPanel } from './components/PlanPanel'
 import { usePrintExpansion } from './hooks/usePrintExpansion'
 import { droppedADirectory, fileProblem } from './lib/upload'
@@ -299,10 +300,18 @@ export function App() {
             onNeedsKey={() => openSettings()}
             onAsk={(question) => void ask(question, false)}
             footer={
-              // Only before there is a result. Once an analysis exists the question has been
-              // answered by the data itself, and leaving a planning panel under every result would
-              // be clutter offering to plan a study already fielded.
-              sessionId === null ? <PlanPanel busy={busy} setBusy={setWorking} /> : null
+              // Only before there is a result. Once an analysis exists these questions have been
+              // answered by the data itself, and leaving them under every result would be clutter
+              // offering to plan and design a study already fielded.
+              //
+              // Design comes first because it comes first in real life: you write the
+              // questionnaire, then decide how many people to put in front of it.
+              sessionId === null ? (
+                <>
+                  <DesignPanel busy={busy} setBusy={setWorking} />
+                  <PlanPanel busy={busy} setBusy={setWorking} />
+                </>
+              ) : null
             }
           />
           <Composer

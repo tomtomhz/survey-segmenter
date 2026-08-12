@@ -8,8 +8,8 @@
  * normal thing to happen, not an exceptional one.
  */
 import type {
-  AiStatus, Analysis, ChatReply, Failure, NamesResult, PlanResult, Project, ProjectList, Result,
-  ScoreResult,
+  AiStatus, Analysis, ChatReply, DesignResult, Failure, NamesResult, PlanResult, Project,
+  ProjectList, Result, ScoreResult,
 } from './types'
 
 const UNREACHABLE =
@@ -93,6 +93,12 @@ export const api = {
   /** Plan a study before fielding it. Takes no session, because there is no data yet. */
   plan: (questions: number, segments: number) =>
     postJSON<PlanResult>('/plan', { questions, segments }),
+
+  /** Build the questionnaire itself. Also sessionless — this runs before anyone is asked anything. */
+  design: (items: string[], perScreen: number, screens: number, people: number) =>
+    postJSON<DesignResult>('/design', {
+      items, per_screen: perScreen, screens, people,
+    }),
 
   /**
    * The settings endpoint answers with a status object rather than `{ok:true}`, so a transport
