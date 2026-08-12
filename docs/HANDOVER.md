@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.13.2**, 261 Python + 120 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.13.3**, 261 Python + 120 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.13.2.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.13.2** — verified by unpacking the zip that is actually sitting there and
+**Released: v1.5.1 → v1.13.3.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.13.3** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 

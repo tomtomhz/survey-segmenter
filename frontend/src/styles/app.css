@@ -7,17 +7,22 @@
 
    A tool, not a document: it is scanned and operated, so state (how many groups, how much to
    trust them) is encoded in form and colour, and the long statistical report is tucked behind a
-   disclosure. Palette is a beige paper ground with a fern-green accent; the neutrals carry a
-   green bias so they read as chosen rather than default grey. System fonts only — the app runs
-   offline, so a web font would silently fall back.
+   disclosure. System fonts only — the app runs offline, so a web font would silently fall back.
+
+   The light ground is white. It was a beige paper tone, which read as decoration the tool had not
+   earned. Everything that used to separate by tint now separates by border: cards, notes and stat
+   tiles already carried a 1px line, and the header and sidebar their own edge, so flattening the
+   grounds to white cost no hierarchy. The remaining neutrals — the line colours and the sunk tone
+   behind table stripes and code — keep a slight green bias toward the accent, so they read as
+   chosen rather than as default grey. Dark mode is unchanged; it was never beige.
    --------------------------------------------------------------------------------------------- */
 *{box-sizing:border-box}
 :root{
  /* Tell the browser we handle both themes ourselves. Without this, Chrome's auto-dark-mode
     repaints buttons and inputs with its own washed-out greys and the labels stop being legible. */
  color-scheme:light dark;
- --bg:#F4F2E8; --surface:#FBFAF3; --card:#FFFFFF; --sunk:#EFEDE1;
- --ink:#1B2420; --ink-soft:#3C4842; --muted:#6D7A71; --line:#E4E1D3; --line-strong:#D3CFBE;
+ --bg:#FFFFFF; --surface:#FFFFFF; --card:#FFFFFF; --sunk:#F1F3F1;
+ --ink:#1B2420; --ink-soft:#3C4842; --muted:#6D7A71; --line:#E3E7E4; --line-strong:#CBD2CD;
  --accent:#46785C; --accent-hover:#3A6650; --accent-soft:#E9F1EA; --accent-ink:#FFFFFF;
  --ok:#3C7D5B; --ok-bg:#E7F1E9; --warn:#8A6410; --warn-bg:#F6EEDA; --risk:#9C4029; --risk-bg:#F7E7E2;
  --ring:rgba(70,120,92,.30);
@@ -41,8 +46,8 @@
  --ok:#7FB48F; --ok-bg:#1F2C25; --warn:#D6A94F; --warn-bg:#2E2718; --risk:#DE8C74; --risk-bg:#2E1E1A;
 }
 :root[data-theme="light"]{
- --bg:#F4F2E8; --surface:#FBFAF3; --card:#FFFFFF; --sunk:#EFEDE1;
- --ink:#1B2420; --ink-soft:#3C4842; --muted:#6D7A71; --line:#E4E1D3; --line-strong:#D3CFBE;
+ --bg:#FFFFFF; --surface:#FFFFFF; --card:#FFFFFF; --sunk:#F1F3F1;
+ --ink:#1B2420; --ink-soft:#3C4842; --muted:#6D7A71; --line:#E3E7E4; --line-strong:#CBD2CD;
  --accent:#46785C; --accent-hover:#3A6650; --accent-soft:#E9F1EA; --accent-ink:#FFFFFF;
  --ok:#3C7D5B; --ok-bg:#E7F1E9; --warn:#8A6410; --warn-bg:#F6EEDA; --risk:#9C4029; --risk-bg:#F7E7E2;
 }

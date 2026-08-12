@@ -3,6 +3,24 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.13.3] — 2026-08-09
+
+### Changed
+
+- **The light theme is white, not beige.** The paper-toned ground read as decoration the tool had
+  not earned. Everything that used to separate by tint now separates by border — cards, notes and
+  stat tiles already carried a 1px line, and the header and sidebar their own edge — so flattening
+  the grounds to white cost no hierarchy.
+
+  Changed in all four places it lived, not just the obvious one: the interface tokens, the
+  no-interface fallback page, and **the charts**, whose background tone is baked into every
+  exported PNG and is also the colour used to ring overlapping marks so they read as separated. A
+  beige chart on a white page would have looked like a bug.
+
+  The remaining neutrals — the line colours, and the tone behind table stripes and inline code —
+  keep a slight green bias toward the accent, so they read as chosen rather than as default grey.
+  Dark mode is untouched; it was never beige.
+
 ## [1.13.2] — 2026-08-09
 
 ### Fixed

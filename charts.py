@@ -96,7 +96,7 @@ DIVERGING = ("#2a78d6", "#f0efec", "#e34948")
 # in white, so the ring reads as a gap rather than as an outline — on a dark page a white ring
 # around every dot looks like a deliberate stroke, which is not what it is. Swapped for a CSS
 # variable on the way out exactly like the segment hues, so it follows the reader's theme.
-_SURFACE = "#FBFAF3"
+_SURFACE = "#FFFFFF"
 _SURFACE_DARK = "#222724"
 
 # The app's own accent, and deliberately NOT one of the identity slots — that was the mistake
@@ -329,7 +329,7 @@ class _Figure:
         composites onto black in some viewers and the axis labels vanish."""
         buf = io.BytesIO()
         self.fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.2,
-                         facecolor="#FBFAF3", dpi=110)
+                         facecolor="#FFFFFF", dpi=110)
         return buf.getvalue()
 
 
