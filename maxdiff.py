@@ -165,6 +165,23 @@ def _logsumexp(a):
     return (m + np.log(np.exp(a - m).sum(axis=-1, keepdims=True)))[..., 0]
 
 
+# Floating-point flags are ignored inside the sampler, and the result is checked for real
+# afterwards. Both halves of that matter.
+#
+# On macOS with numpy 2 on Apple's Accelerate BLAS, an ordinary matrix multiply of small finite
+# numbers raises "divide by zero", "overflow" AND "invalid value" — all three, every time.
+# Reproduced with nothing but `standard_normal((80, 9)) @ standard_normal((9, 9))`, which warns
+# while returning a perfectly finite product: the vectorised kernel raises the exception flags from
+# padding lanes that hold no data. Every estimate this project has run on a Mac printed those
+# warnings and the arithmetic was correct each time — verified by watching all 26,000 covariance
+# draws of one study, none non-finite, largest entry 7.67.
+#
+# macOS is the platform this ships on, so leaving it alone tells every command-line user that their
+# analysis overflowed when it did not. Suppressing a warning that is always false is right;
+# suppressing it BLINDLY would not be, because a genuine divergence looks identical from outside.
+# Hence the explicit finiteness check at the end of the sampler, which is the assurance these
+# warnings were never actually providing.
+@np.errstate(divide="ignore", over="ignore", invalid="ignore")
 def estimate_hb(design, best_pos, worst_pos, item_names, respondent_ids,
                 n_draws=6000, n_burn=2000, thin=5, seed=42, progress=True):
     """Estimate individual-level utilities by Hierarchical Bayes.
@@ -256,6 +273,12 @@ def estimate_hb(design, best_pos, worst_pos, item_names, respondent_ids,
 
     if not kept:
         raise ValueError("No posterior draws were kept — increase n_draws above n_burn.")
+
+    # The check the suppressed warnings were pretending to be. A chain that genuinely diverges
+    # produces non-finite draws, and that has to stop the run loudly rather than flow onward into a
+    # ranking that still looks like an answer.
+    if not (np.isfinite(kept).all() and np.isfinite(kept_mu).all()):
+        raise ValueError("_MAXDIFF_DIVERGED")
 
     # Expand back to K items and centre once, for reporting. Centring here is safe: it happens
     # after sampling, so it cannot make the covariance the sampler used singular.

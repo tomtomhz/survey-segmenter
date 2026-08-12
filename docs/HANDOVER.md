@@ -8,13 +8,13 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.13.0**, 258 Python + 120 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.13.1**, 261 Python + 120 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.13.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+**Released: v1.5.1 → v1.13.1.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
 the team)/` is on **1.12.2** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
@@ -177,6 +177,27 @@ four times), then 9.5-22.3 points (measured with the wrong instrument). Both wer
 that nobody had checked against anything external. The current table records the real error beside
 the reported one so the two can be compared directly; if you change the holdout scheme, re-run that
 comparison rather than reasoning about it.
+
+### v1.13.1 — the sampler was crying wolf on the platform it ships on
+
+Two results from pointing the same "check it against an outside truth" method at `maxdiff.py`.
+
+**The alarming one was the false one.** Every estimate run on a Mac printed "divide by zero",
+"overflow" and "invalid value" from inside the sampler, and the arithmetic was correct every time.
+It is numpy 2 on Apple's Accelerate BLAS: an ordinary matmul of small finite numbers raises all
+three flags from SIMD padding lanes. Reproduce with `standard_normal((80,9)) @
+standard_normal((9,9))` — warns, returns a finite product. Before believing a fix here, run that
+one line; it takes a second and it is the whole diagnosis.
+
+The flags are suppressed with `@np.errstate` on `estimate_hb` and replaced by an explicit
+finiteness check on the kept draws, raising `_MAXDIFF_DIVERGED` with a plain-English translation.
+**Do not remove that check when tidying the suppression** — it is the only thing now standing
+between a genuinely diverged chain and a ranking that still looks like an answer.
+
+**The load-bearing one held up.** `prob_ahead` claims a probability, so it was checked for
+calibration against known population utilities: 126 adjacent pairs from fourteen studies, claimed
+84.3%, correct 83.3%, tracking bin by bin. That number is quoted in the report as though it were a
+probability, and now it has earned it.
 
 ### GitHub Actions: RESOLVED 2026-08-08 — the repository is public and CI is green
 

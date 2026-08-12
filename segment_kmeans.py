@@ -170,7 +170,7 @@ for _m in ("divide by zero encountered in matmul", "overflow encountered in matm
            "invalid value encountered in matmul"):
     warnings.filterwarnings("ignore", message=_m, category=RuntimeWarning)
 
-__version__ = "1.13.0"    # keep in sync with pyproject.toml
+__version__ = "1.13.1"    # keep in sync with pyproject.toml
 
 # Optional "ask Claude about your segments" add-on. Imported here (not lazily) so the packaged app
 # bundles it; wrapped so a missing file/SDK never stops the core segmentation tool from loading.
@@ -3882,6 +3882,17 @@ def _explain_run_error(msg):
                 "The last column can be the words best and worst (or most and least), or numbers: "
                 "1 for best, -1 for worst, 0 for the rest. Any spreadsheet can do this with a "
                 "pivot, and it is the point where YOU tell me which pick was which.")
+    if msg.startswith("_MAXDIFF_DIVERGED"):
+        # Never seen in practice — the sampler is checked for this rather than trusted not to do
+        # it. Written out anyway, because a sentinel that reaches a reader is the failure mode this
+        # translation table exists to prevent, and the day it fires is the worst day to discover it
+        # says "_MAXDIFF_DIVERGED".
+        return ("The best-worst estimate did not settle — the numbers ran away rather than "
+                "converging, so there is no ranking I would stand behind.\n\n"
+                "This usually means the answers carry almost no information: a study where nearly "
+                "everyone picked the same item every time, or where most screens were left blank. "
+                "Check that the best and worst picks are recorded the right way round, and that "
+                "people actually answered more than a screen or two each.")
     if msg.startswith("_MAXDIFF_MISSING:"):
         # Reached a user verbatim, as "Technical detail: _MAXDIFF_MISSING:item", alongside generic
         # advice to check the file has one row per person — which is the opposite of what a

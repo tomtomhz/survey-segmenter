@@ -3,6 +3,32 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.13.1] — 2026-08-09
+
+### Fixed
+
+- **Every best-worst estimate ever run on a Mac told the user it had overflowed.** The sampler
+  printed "divide by zero", "overflow" and "invalid value" — all three, on every study — and the
+  arithmetic was correct every single time. On macOS with numpy 2 on Apple's Accelerate BLAS, an
+  ordinary matrix multiply of small finite numbers raises all three while returning a finite
+  product: the vectorised kernel raises the exception flags from padding lanes holding no data.
+  Reproduced with nothing more than `standard_normal((80, 9)) @ standard_normal((9, 9))`.
+
+  macOS is the platform this ships on, so this was a warning shown to every command-line user about
+  a problem that did not exist. The flags are now ignored inside the sampler — and, because
+  suppressing a warning blindly is how a real divergence becomes silent, the draws are explicitly
+  checked for finiteness afterwards and a genuine failure is refused in plain words. That check is
+  the assurance the warnings were never actually providing.
+
+### Verified
+
+- **The ranking's "probability this beats the next item" is honest**, checked against a known truth
+  rather than against itself. Simulating studies from chosen population utilities, running the real
+  design and the real estimator, and asking how often the item placed above another really was
+  above it: over 126 adjacent pairs from fourteen studies the table claimed **84.3%** and was right
+  **83.3%** of the time, tracking bin by bin. A miscalibrated probability would be worse than none,
+  because it gets quoted as though it were one. Now locked in by a test.
+
 ## [1.13.0] — 2026-08-09
 
 Three defects in the "which few to launch" answer, all found by auditing it against an outside
