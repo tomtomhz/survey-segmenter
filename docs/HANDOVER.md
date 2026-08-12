@@ -15,7 +15,7 @@ this says where it stands, what was decided and why, and what to do next.
 ## Session state — 2026-08-08/09 (read this first)
 
 **Released: v1.5.1 → v1.13.1.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.12.2** — verified by unpacking the zip that is actually sitting there and
+the team)/` is on **1.13.1** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
