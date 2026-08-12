@@ -265,9 +265,41 @@ class ProjectStore:
             out.append({"id": d.get("id", f.name.split(".")[0]),
                         "title": d.get("title") or "Untitled survey",
                         "updated": d.get("updated", ""), "k": d.get("k"),
-                        "n_people": d.get("n_people"), "confidence": d.get("confidence")})
-        out.sort(key=lambda d: d["updated"], reverse=True)
+                        "n_people": d.get("n_people"), "confidence": d.get("confidence"),
+                        "pinned": bool(d.get("pinned"))})
+        # Pinned first, then most recent. Pinning is what a person does to keep something out of
+        # the churn, so it has to survive the cut below — otherwise the one guarantee it offers
+        # ("this stays where I can find it") fails precisely when the list is long enough to need
+        # it. Within each group the order is still newest first.
+        out.sort(key=lambda d: (not d["pinned"], d["updated"] or ""), reverse=False)
+        out.sort(key=lambda d: (d["pinned"], d["updated"] or ""), reverse=True)
         return out[:limit]
+
+    def count(self):
+        """How many projects exist, which is not always how many the sidebar shows.
+
+        `list` caps its output. Before this the cap was silent: a workspace with seventy studies
+        showed sixty and said nothing, which looks exactly like ten having been deleted. The count
+        travels to the interface so it can say "showing 60 of 73" instead of quietly lying.
+        """
+        return sum(1 for _ in self.root.glob("*.meta.json"))
+
+    def set_pinned(self, pid, pinned):
+        """Pin a project to the top of the list, or unpin it.
+
+        Only the sidebar's summary carries this: it is a property of how the list is displayed,
+        not of the analysis, and the full record has no use for it.
+        """
+        meta_path = self._path(pid, ".meta.json")
+        if not meta_path or not meta_path.exists():
+            return False
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            return False
+        meta["pinned"] = bool(pinned)
+        self._write_atomic(meta_path, json.dumps(meta))
+        return True
 
 
 def _shutdown_page():
@@ -375,7 +407,7 @@ def serve(port=8000):
                 self._do_download()
                 return
             if route == "/projects":
-                self._json({"ok": True, "projects": store.list()})
+                self._json({"ok": True, "projects": store.list(), "total": store.count()})
                 return
             if route == "/project":
                 from urllib.parse import parse_qs, urlparse
@@ -469,11 +501,13 @@ def serve(port=8000):
                     self._do_design()
                 elif route == "/rename":
                     self._do_rename()
+                elif route == "/pin":
+                    self._do_pin()
                 elif route == "/delete_project":
                     body = self._read_json()
                     store.delete(body.get("session_id", ""))
                     sessions.pop(body.get("session_id", ""), None)
-                    self._json({"ok": True, "projects": store.list()})
+                    self._json({"ok": True, "projects": store.list(), "total": store.count()})
                 elif route == "/chat":
                     self._do_chat()
                 elif route == "/settings":
@@ -901,7 +935,21 @@ def serve(port=8000):
             live = sessions.get(session_id)
             if live is not None:
                 live["title"] = title
-            self._json({"ok": True, "projects": store.list(), "title": title})
+            self._json({"ok": True, "projects": store.list(), "total": store.count(), "title": title})
+
+        def _do_pin(self):
+            """Pin or unpin a project. The body says which, so the client never has to guess the
+            current state and toggle blind — two tabs open on the same app would fight over it."""
+            body = self._read_json()
+            pinned = body.get("pinned")
+            if not isinstance(pinned, bool):
+                self._json({"ok": False, "error": "Say whether to pin or unpin."})
+                return
+            if not store.set_pinned(body.get("session_id", ""), pinned):
+                self._json({"ok": False, "error": "That project could not be found. It may have "
+                                                  "been deleted."})
+                return
+            self._json({"ok": True, "projects": store.list(), "total": store.count()})
 
         def _do_settings(self):
             if sk._ai is None:

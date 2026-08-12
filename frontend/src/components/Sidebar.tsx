@@ -19,14 +19,19 @@ export function Sidebar({
   onOpen,
   onDelete,
   onRename,
+  onPin,
   onNew,
+  total,
 }: {
   projects: ProjectSummary[]
   activeId: string | null
   onOpen: (id: string) => void
   onDelete: (id: string) => void
   onRename: (id: string, title: string) => void
+  onPin: (id: string, pinned: boolean) => void
   onNew: () => void
+  /** How many projects exist. Larger than the list when the cap has bitten. */
+  total?: number
 }) {
   // Deleting a project removes the analysis and the original upload from disk, with no undo.
   // A single unlabelled × next to every row is one slip away from destroying an afternoon's work,
@@ -43,10 +48,17 @@ export function Sidebar({
     return projects.filter((p) => (p.title || '').toLowerCase().includes(needle))
   }, [projects, query])
 
-  // Grouped by when they were last touched, in the order a person thinks about time. The buckets
-  // are computed from the same `updated` string the rows already show, so a row can never appear
-  // under a heading that disagrees with its own timestamp.
-  const groups = useMemo(() => groupByAge(matches), [matches])
+  // Pinned first as their own section, then by when they were last touched, in the order a person
+  // thinks about time. The date buckets are computed from the same `updated` string the rows show,
+  // so a row can never appear under a heading that disagrees with its own timestamp.
+  const groups = useMemo(() => {
+    const pinned = matches.filter((p) => p.pinned)
+    const rest = matches.filter((p) => !p.pinned)
+    return [
+      ...(pinned.length ? ([['Pinned', pinned]] as [string, ProjectSummary[]][]) : []),
+      ...groupByAge(rest),
+    ]
+  }, [matches])
 
   function startRename(project: ProjectSummary) {
     setArmed(null)
@@ -177,6 +189,16 @@ export function Sidebar({
                       <div className="rowacts">
                         <button
                           type="button"
+                          className={`xbtn${project.pinned ? ' pinned' : ''}`}
+                          aria-label={project.pinned ? `Unpin ${name}` : `Pin ${name}`}
+                          title={project.pinned ? 'Unpin' : 'Pin to the top'}
+                          aria-pressed={!!project.pinned}
+                          onClick={() => onPin(project.id, !project.pinned)}
+                        >
+                          {project.pinned ? '★' : '☆'}
+                        </button>
+                        <button
+                          type="button"
                           className="xbtn"
                           aria-label={`Rename ${name}`}
                           title="Rename"
@@ -200,6 +222,13 @@ export function Sidebar({
               })}
             </div>
           ))
+        )}
+        {/* The list is capped. Before this the cap was silent, which looks exactly like projects
+            having been deleted — so it says what it is showing and what exists. */}
+        {total != null && total > projects.length && (
+          <div className="side-more">
+            Showing the {projects.length} most recent of {total}. Pin one to keep it here.
+          </div>
         )}
       </div>
     </aside>

@@ -3,6 +3,25 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.15.1] — 2026-08-09
+
+### Fixed
+
+- **The projects list silently hid everything past the sixtieth.** The sidebar shows the sixty most
+  recent projects and said nothing about the rest, which looks exactly like projects having been
+  deleted. Found while adding pinning, on a real workspace: **the list was showing 60 of 162.** It
+  now says "Showing the 60 most recent of 162", so the cap is a fact rather than a disappearance.
+
+### Added
+
+- **Pin a project to the top.** The star on a row keeps it in a Pinned section above the date
+  groups, and — the part that matters — **a pinned project is never cut off by the cap**. A pin
+  that only reordered the visible sixty would fail at exactly the point someone starts pinning
+  things, which is when the list gets long.
+
+  The pin state is sent rather than toggled, so two windows open on the same app cannot disagree
+  about which way the switch was pointing.
+
 ## [1.15.0] — 2026-08-09
 
 ### Added

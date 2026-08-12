@@ -132,6 +132,11 @@ header .sp{flex:1}
 .rowacts{display:flex;gap:0}
 .projrow .rowacts .xbtn{opacity:0}
 .projrow:hover .rowacts .xbtn,.projrow:focus-within .rowacts .xbtn{opacity:1}
+/* A pinned row keeps its star lit whether or not the row is hovered: the mark is the whole point
+   of pinning, and hiding it until hover would make a pinned project look like any other. */
+.projrow .rowacts .xbtn.pinned{opacity:1;color:var(--accent)}
+.side-more{color:var(--muted);font-size:.72rem;line-height:1.5;padding:12px 12px 4px;
+ border-top:1px solid var(--line);margin-top:8px}
 .projrow.renaming{padding:2px 0}
 .renameinput{flex:1;min-width:0;font:inherit;font-size:.88rem;font-weight:600;color:var(--ink);
  background:var(--card);border:1px solid var(--accent);border-radius:var(--r-sm);padding:9px 10px}

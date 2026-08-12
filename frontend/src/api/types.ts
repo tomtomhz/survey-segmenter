@@ -103,11 +103,17 @@ export interface ProjectSummary {
   n_people: number | null
   confidence: Confidence | null
   updated: string | null
+  /** Kept at the top of the list, and never cut off by the cap. Optional so an older server
+   *  still parses; absent reads as not pinned. */
+  pinned?: boolean
 }
 
 export interface ProjectList {
   ok: true
   projects: ProjectSummary[]
+  /** How many projects EXIST, which is not always how many are listed — the list is capped.
+   *  Optional so an older server still parses; without it no "showing x of y" line is shown. */
+  total?: number
 }
 
 /**

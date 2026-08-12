@@ -7118,3 +7118,85 @@ def test_renaming_refuses_the_shapes_that_would_break_the_list(body, expect, mon
     assert got["ok"] is False
     assert expect in got["error"], got["error"]
     assert "Traceback" not in got["error"]
+
+
+def test_pinning_keeps_a_project_at_the_top_and_out_of_the_cap(tmp_path):
+    """Pinning has to survive the list's cap, or it fails exactly when it is needed.
+
+    The sidebar shows the sixty most recent projects. A pin that only reorders the visible sixty
+    would drop a pinned study the moment the workspace grew past that — which is the point at which
+    someone starts pinning things.
+    """
+    store = webapp.ProjectStore(root=tmp_path)
+    for i in range(70):
+        store.save(f"p{i:03d}", {"title": f"study {i}", "k": 2, "n_people": 100,
+                                 "confidence": "high"})
+    # An old one, buried well past the cap by the time seventy exist.
+    assert store.set_pinned("p000", True)
+
+    listed = store.list()
+    assert len(listed) == 60, "the cap moved; this test is about what happens at the boundary"
+    assert store.count() == 70, "the count has to be of what EXISTS, not of what is shown"
+    assert listed[0]["id"] == "p000", "the pinned project is not first"
+    assert listed[0]["pinned"] is True
+    assert all(p["pinned"] is False for p in listed[1:]), "nothing else should be pinned"
+
+    assert store.set_pinned("p000", False)
+    assert store.list()[0]["id"] != "p000", "unpinning did not release it"
+    assert store.set_pinned("nope", True) is False, "an unknown project must not report success"
+
+
+def test_the_pin_endpoint_says_what_it_did_and_refuses_what_it_cannot(monkeypatch, tmp_path):
+    """Pin state is sent, not toggled, so two windows on the same app cannot disagree."""
+    import json as _json
+    import socket
+    import threading
+    import time
+    import urllib.request
+
+    monkeypatch.setenv("SURVEY_SEGMENTER_PROJECTS", str(tmp_path / "projects"))
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: None)
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    threading.Thread(target=sk.serve, kwargs={"port": port}, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(80):
+        try:
+            urllib.request.urlopen(base + "/", timeout=5).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+
+    def post(path, obj):
+        request = urllib.request.Request(base + path, data=_json.dumps(obj).encode(),
+                                         headers={"Content-Type": "application/json"},
+                                         method="POST")
+        return _json.loads(urllib.request.urlopen(request, timeout=300).read().decode())
+
+    rng = np.random.default_rng(0)
+    rows = ["id,q1,q2,q3,q4"]
+    for i in range(120):
+        centre = [2, 6][i % 2]
+        rows.append(f"{i}," + ",".join(
+            str(int(np.clip(rng.normal(centre, 1), 1, 7))) for _ in range(4)))
+    boundary = "----t"
+    blob = ("\n".join(rows)).encode()
+    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="s.csv"\r\n'
+            f'Content-Type: text/csv\r\n\r\n').encode() + blob + f"\r\n--{boundary}--\r\n".encode()
+    request = urllib.request.Request(base + "/analyze", data=body, method="POST",
+                                     headers={"Content-Type":
+                                              f"multipart/form-data; boundary={boundary}"})
+    session_id = _json.loads(
+        urllib.request.urlopen(request, timeout=300).read().decode())["session_id"]
+
+    pinned = post("/pin", {"session_id": session_id, "pinned": True})
+    assert pinned["ok"] and pinned["projects"][0]["pinned"] is True
+    assert pinned["total"] == 1, "every list reply carries how many exist"
+
+    unpinned = post("/pin", {"session_id": session_id, "pinned": False})
+    assert unpinned["projects"][0]["pinned"] is False
+
+    vague = post("/pin", {"session_id": session_id})
+    assert vague["ok"] is False and "pin or unpin" in vague["error"]
+
+    missing = post("/pin", {"session_id": "nope", "pinned": True})
+    assert missing["ok"] is False and "could not be found" in missing["error"]

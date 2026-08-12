@@ -25,6 +25,7 @@ const props = {
   onOpen: () => {},
   onDelete: () => {},
   onRename: () => {},
+  onPin: () => {},
   onNew: () => {},
 }
 
@@ -170,5 +171,54 @@ describe('bucketing by age', () => {
       project({ id: 'b', title: 'older' }),
     ])
     expect(rows[0][1].map((p) => p.id)).toEqual(['a', 'b'])
+  })
+})
+
+
+describe('pinning and the cap', () => {
+  it('lifts pinned projects into their own section above the dates', () => {
+    render(
+      <Sidebar
+        {...props}
+        projects={[
+          project({ id: 'a', title: 'ordinary', updated: iso(0) }),
+          project({ id: 'b', title: 'kept', updated: iso(40), pinned: true }),
+        ]}
+      />,
+    )
+    const headings = screen.getAllByText(/Pinned|Today|Older/).map((n) => n.textContent)
+    expect(headings[0]).toBe('Pinned')
+    expect(headings).toContain('Today')
+  })
+
+  it('sends the state it wants rather than toggling blind', async () => {
+    const user = userEvent.setup()
+    const onPin = vi.fn()
+    render(<Sidebar {...props} projects={[project({ title: 'study' })]} onPin={onPin} />)
+
+    await user.click(screen.getByLabelText('Pin study'))
+    expect(onPin).toHaveBeenCalledWith('p1', true)
+  })
+
+  it('offers to unpin something already pinned', async () => {
+    const user = userEvent.setup()
+    const onPin = vi.fn()
+    render(
+      <Sidebar {...props} projects={[project({ title: 'study', pinned: true })]} onPin={onPin} />,
+    )
+    await user.click(screen.getByLabelText('Unpin study'))
+    expect(onPin).toHaveBeenCalledWith('p1', false)
+  })
+
+  it('says when the list is not showing everything, because a silent cap looks like data loss', () => {
+    const rows = Array.from({ length: 3 }, (_, i) => project({ id: `p${i}`, title: `study ${i}` }))
+    render(<Sidebar {...props} projects={rows} total={73} />)
+    expect(screen.getByText(/Showing the 3 most recent of 73/)).toBeInTheDocument()
+  })
+
+  it('says nothing when the list is the whole of it', () => {
+    const rows = Array.from({ length: 3 }, (_, i) => project({ id: `p${i}`, title: `study ${i}` }))
+    render(<Sidebar {...props} projects={rows} total={3} />)
+    expect(screen.queryByText(/Showing the/)).not.toBeInTheDocument()
   })
 })

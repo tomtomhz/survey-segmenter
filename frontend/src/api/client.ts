@@ -94,6 +94,11 @@ export const api = {
   renameProject: (id: string, title: string) =>
     postJSON<ProjectList & { title: string }>('/rename', { session_id: id, title }),
 
+  /** Pin a project to the top, or unpin it. The desired state is sent rather than toggled, so two
+   *  windows open on the same app cannot disagree about which way the switch was pointing. */
+  pinProject: (id: string, pinned: boolean) =>
+    postJSON<ProjectList>('/pin', { session_id: id, pinned }),
+
   /** Plan a study before fielding it. Takes no session, because there is no data yet. */
   plan: (questions: number, segments: number) =>
     postJSON<PlanResult>('/plan', { questions, segments }),

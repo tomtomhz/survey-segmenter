@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.15.0**, 270 Python + 139 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.15.1**, 272 Python + 144 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.15.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.15.0** — verified by unpacking the zip that is actually sitting there and
+**Released: v1.5.1 → v1.15.1.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.15.1** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
@@ -231,6 +231,22 @@ weak data, and that is the one a tighter threshold would trade against.
 One test was renamed as a result. `test_it_never_claims_high_confidence_for_the_wrong_number_of_
 groups` checked a single centre configuration while its name claimed a universal property the
 sweep falsifies; it is now `test_this_overlapping_shape_drops_to_moderate_when_it_merges`.
+
+### The sidebar was hiding a hundred projects
+
+`ProjectStore.list()` caps at sixty and always has. Nothing said so, which is indistinguishable
+from projects having been deleted — and on the real workspace here it was showing **60 of 162**.
+Found while adding pinning, not by looking for it, which is the usual way: the count only became
+visible because something else needed it.
+
+Two rules came out of it and are in the code:
+
+* **A pinned project is never cut off by the cap.** `list()` sorts pinned first *before* slicing,
+  because a pin that only reorders the visible sixty fails at exactly the point someone starts
+  pinning — when the list is long.
+* **Every reply that hands out the list also carries `total`.** Four endpoints return the project
+  list; if one of them forgot, the "showing 60 of 162" line would go stale the moment you renamed
+  or deleted something.
 
 ### The projects list, and a trap in verifying UI
 

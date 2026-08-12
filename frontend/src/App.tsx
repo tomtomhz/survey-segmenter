@@ -37,6 +37,9 @@ const AI_NUDGE =
 export function App() {
   const [messages, setMessages] = useState<Message[]>([GREETING])
   const [projects, setProjects] = useState<ProjectSummary[]>([])
+  // How many exist, as opposed to how many are listed: the server caps the list, and a cap
+  // nobody mentions looks exactly like projects having gone missing.
+  const [projectTotal, setProjectTotal] = useState<number | undefined>(undefined)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   // `busy` is state, so it does not update until the next render — two files dropped in the same
@@ -75,7 +78,9 @@ export function App() {
 
   const refreshProjects = useCallback(async () => {
     const reply = await api.projects()
-    if (!isFailure(reply)) setProjects(reply.projects)
+    if (isFailure(reply)) return
+    setProjects(reply.projects)
+    if (reply.total != null) setProjectTotal(reply.total)
   }, [])
 
   useEffect(() => {
@@ -243,16 +248,27 @@ export function App() {
         setSessionId(null)
         setMessages([GREETING])
       }
-      if (!isFailure(reply)) setProjects(reply.projects)
+      if (!isFailure(reply)) {
+        setProjects(reply.projects)
+        if (reply.total != null) setProjectTotal(reply.total)
+      }
     },
     [sessionId],
   )
+
+  const pinProject = useCallback(async (id: string, pinned: boolean) => {
+    const reply = await api.pinProject(id, pinned)
+    if (isFailure(reply)) return
+    setProjects(reply.projects)
+    if (reply.total != null) setProjectTotal(reply.total)
+  }, [])
 
   const renameProject = useCallback(
     async (id: string, title: string) => {
       const reply = await api.renameProject(id, title)
       if (isFailure(reply)) return
       setProjects(reply.projects)
+      if (reply.total != null) setProjectTotal(reply.total)
       // The transcript opens with "Analyse: <name>", so a rename has to reach it too — otherwise
       // the sidebar says one thing and the conversation above it says another until the app is
       // restarted. Narrowed on `kind` rather than reaching for a field: the message union has a
@@ -312,6 +328,8 @@ export function App() {
           onOpen={(id) => void openProject(id)}
           onDelete={(id) => void deleteProject(id)}
           onRename={(id, title) => void renameProject(id, title)}
+          onPin={(id, pinned) => void pinProject(id, pinned)}
+          total={projectTotal}
           onNew={startNew}
         />
         <div className="main">
