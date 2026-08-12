@@ -90,6 +90,10 @@ export const api = {
 
   deleteProject: (id: string) => postJSON<ProjectList>('/delete_project', { session_id: id }),
 
+  /** Rename a saved project. Returns the whole list, so the sidebar re-sorts without a refetch. */
+  renameProject: (id: string, title: string) =>
+    postJSON<ProjectList & { title: string }>('/rename', { session_id: id, title }),
+
   /** Plan a study before fielding it. Takes no session, because there is no data yet. */
   plan: (questions: number, segments: number) =>
     postJSON<PlanResult>('/plan', { questions, segments }),

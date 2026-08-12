@@ -199,6 +199,37 @@ class ProjectStore:
         if raw is not None and len(raw) <= self.MAX_RAW and not (rawp and rawp.exists()):
             self._write_atomic(rawp, raw)
 
+    def rename(self, pid, title):
+        """Give a project a name a person chose, rather than the file it arrived as.
+
+        Both copies have to move together: the sidebar reads `.meta.json` so it does not have to
+        parse a megabyte of report per row, and everything else reads the main record. Writing one
+        and not the other leaves a project called two different things depending on where you look.
+
+        Returns True if it was renamed, False if there was no such project — the caller turns that
+        into a message rather than a silent success.
+        """
+        main = self._path(pid)
+        if not main or not main.exists():
+            return False
+        try:
+            body = json.loads(main.read_text(encoding="utf-8"))
+        except Exception:
+            return False
+        body["title"] = title
+        self._write_atomic(main, json.dumps(body))
+        meta_path = self._path(pid, ".meta.json")
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            # No usable summary alongside it — rebuild the little of it the sidebar needs rather
+            # than leaving the row showing the old name for ever.
+            meta = {"id": pid, "updated": body.get("updated"), "k": body.get("k"),
+                    "n_people": body.get("n_people"), "confidence": body.get("confidence")}
+        meta["title"] = title
+        self._write_atomic(meta_path, json.dumps(meta))
+        return True
+
     def load(self, pid):
         p = self._path(pid)
         if not p or not p.exists():
@@ -436,6 +467,8 @@ def serve(port=8000):
                     self._do_plan()
                 elif route == "/design":
                     self._do_design()
+                elif route == "/rename":
+                    self._do_rename()
                 elif route == "/delete_project":
                     body = self._read_json()
                     store.delete(body.get("session_id", ""))
@@ -834,6 +867,41 @@ def serve(port=8000):
             self._json({"ok": True, "items": unique, "report": report,
                         "prose": design_mod.render(report),
                         "csv": design_mod.to_frame(built, unique).to_csv(index=False)})
+
+        def _do_rename(self):
+            """Rename a saved project.
+
+            The name a project arrives with is the file's name, and a real workspace fills up with
+            `export (3).csv` and four copies of `s.csv` that cannot be told apart. Renaming is the
+            cheapest thing that makes a list of past work navigable.
+            """
+            body = self._read_json()
+            title = body.get("title")
+            if not isinstance(title, str):
+                self._json({"ok": False, "error": "Send the new name as text."})
+                return
+            # Collapsed, not merely stripped: a name pasted from a spreadsheet arrives with tabs
+            # and newlines in it, and those break the single-line row it has to fit on.
+            title = " ".join(title.split())
+            if not title:
+                self._json({"ok": False, "error": "Give the project a name."})
+                return
+            if len(title) > 80:
+                self._json({"ok": False, "error": f"That name is {len(title)} characters. Keep it "
+                                                  f"under 80 so it fits the list."})
+                return
+            session_id = body.get("session_id", "")
+            if not store.rename(session_id, title):
+                self._json({"ok": False, "error": "That project could not be found. It may have "
+                                                  "been deleted."})
+                return
+            # An open session holds its own copy of the record, so it has to hear about this too —
+            # otherwise the sidebar shows the new name and the page header keeps the old one until
+            # the app is restarted.
+            live = sessions.get(session_id)
+            if live is not None:
+                live["title"] = title
+            self._json({"ok": True, "projects": store.list(), "title": title})
 
         def _do_settings(self):
             if sk._ai is None:

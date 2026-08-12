@@ -3,6 +3,31 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.15.0] — 2026-08-09
+
+### Added
+
+The projects list was a flat column of filenames. That is fine for five projects and unusable for
+sixty, which is what a real workspace becomes — `export (3).csv`, and four copies of `s.csv` that
+cannot be told apart. Three things, in the order they were missed:
+
+- **Rename a project.** The name it arrives with is the file's name, not what the study was.
+  Click the `⋯` on a row, or double-click the row. Enter saves, Escape abandons the edit. Names are
+  collapsed to one line and capped at 80 characters so they fit the row they have to live in.
+
+- **Search.** Filters by name as you type. It only appears past a handful of projects — a filter
+  box above three rows is furniture.
+
+- **Grouped by when you last touched them** — Today, Yesterday, Previous 7 days, Previous 30 days,
+  Older. Empty buckets are not rendered, so a workspace where everything happened today shows one
+  heading rather than five saying nothing. A project with a missing or unreadable timestamp goes
+  into "Older" rather than disappearing.
+
+One behaviour worth naming because it was found by using the thing rather than by reading it:
+renaming a project while a search is active used to make the row vanish, since the name you
+searched for is the one you just replaced — the list emptied to "Nothing matches". The search now
+clears itself when the new name would hide the row you just acted on.
+
 ## [1.14.1] — 2026-08-09
 
 ### Fixed

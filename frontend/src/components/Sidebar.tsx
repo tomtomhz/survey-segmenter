@@ -1,25 +1,77 @@
-import { useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { ProjectSummary } from '../api/types'
 import { relativeTime } from '../lib/labels'
 
-/** Analysed surveys, so someone can come back to one rather than re-running it. */
+/**
+ * Analysed surveys, so someone can come back to one rather than re-running it.
+ *
+ * This started as a flat list of filenames, which is fine for five projects and unusable for
+ * sixty. A real workspace fills up with `export (3).csv` and four copies of `s.csv` that cannot be
+ * told apart, so three things were added, in the order they were missed:
+ *
+ * * **A name you chose.** The filename is what the survey arrived as, not what the study was.
+ * * **Search**, because past about twenty rows scrolling is not finding.
+ * * **Date grouping**, so "the one from this morning" is a place to look rather than a scan.
+ */
 export function Sidebar({
   projects,
   activeId,
   onOpen,
   onDelete,
+  onRename,
   onNew,
 }: {
   projects: ProjectSummary[]
   activeId: string | null
   onOpen: (id: string) => void
   onDelete: (id: string) => void
+  onRename: (id: string, title: string) => void
   onNew: () => void
 }) {
   // Deleting a project removes the analysis and the original upload from disk, with no undo.
   // A single unlabelled × next to every row is one slip away from destroying an afternoon's work,
   // so the × arms the row and a second, explicit click carries it out.
   const [armed, setArmed] = useState<string | null>(null)
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const [query, setQuery] = useState('')
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  const matches = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    if (!needle) return projects
+    return projects.filter((p) => (p.title || '').toLowerCase().includes(needle))
+  }, [projects, query])
+
+  // Grouped by when they were last touched, in the order a person thinks about time. The buckets
+  // are computed from the same `updated` string the rows already show, so a row can never appear
+  // under a heading that disagrees with its own timestamp.
+  const groups = useMemo(() => groupByAge(matches), [matches])
+
+  function startRename(project: ProjectSummary) {
+    setArmed(null)
+    setRenaming(project.id)
+    setDraft(project.title || '')
+    // Focus after the input exists. Selecting the text means typing replaces the old name, which
+    // is what renaming usually is, while leaving it editable for a small correction.
+    window.setTimeout(() => {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }, 0)
+  }
+
+  function commitRename(id: string) {
+    const cleaned = draft.trim()
+    const previous = projects.find((p) => p.id === id)?.title || ''
+    setRenaming(null)
+    if (!cleaned || cleaned === previous) return
+    // Renaming while a search is active would otherwise make the row vanish, because the name you
+    // searched for is the one you just replaced: found by doing it — search "typing", rename to
+    // something else, and the list empties with "Nothing matches". Clearing the filter keeps the
+    // thing you just acted on in front of you, which is the point of having acted on it.
+    if (query.trim() && !cleaned.toLowerCase().includes(query.trim().toLowerCase())) setQuery('')
+    onRename(id, cleaned)
+  }
 
   return (
     <aside className="side">
@@ -29,68 +81,164 @@ export function Sidebar({
       <button type="button" className="newbtn" onClick={onNew}>
         +&nbsp;&nbsp;New analysis
       </button>
+
+      {/* Only once there is enough to search. A filter box above three rows is furniture. */}
+      {projects.length > 6 && (
+        <div className="side-search">
+          <input
+            type="search"
+            value={query}
+            placeholder="Search projects"
+            aria-label="Search projects by name"
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+      )}
+
       <div className="list">
         {projects.length === 0 ? (
           <div className="empty">
             Your analysed surveys will be saved here, so you can come back to them.
           </div>
+        ) : matches.length === 0 ? (
+          <div className="empty">
+            Nothing matches &ldquo;{query.trim()}&rdquo;. Projects are searched by name — rename one
+            from the &ldquo;⋯&rdquo; button if it is still called what the file was.
+          </div>
         ) : (
-          projects.map((project) => {
-            const name = project.title || 'Untitled survey'
-            return (
-              <div className="projrow" key={project.id}>
-                <button
-                  type="button"
-                  className={`proj${project.id === activeId ? ' active' : ''}`}
-                  onClick={() => onOpen(project.id)}
-                >
-                  <div className="t">{name}</div>
-                  <div className="m">
-                    <span className={`dot ${project.confidence ?? 'unknown'}`} />
-                    {summarise(project)}
-                  </div>
-                  <div className="m">{relativeTime(project.updated)}</div>
-                </button>
-                {armed === project.id ? (
-                  <div className="confirm">
+          groups.map(([heading, rows]) => (
+            <div key={heading}>
+              <div className="side-group">{heading}</div>
+              {rows.map((project) => {
+                const name = project.title || 'Untitled survey'
+                if (renaming === project.id) {
+                  return (
+                    <div className="projrow renaming" key={project.id}>
+                      <input
+                        ref={inputRef}
+                        className="renameinput"
+                        value={draft}
+                        maxLength={80}
+                        aria-label={`Rename ${name}`}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onBlur={() => commitRename(project.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitRename(project.id)
+                          // Escape has to abandon the edit, not save it — and it must not fall
+                          // through to the blur handler, which would save the very thing the user
+                          // just asked to throw away.
+                          if (e.key === 'Escape') {
+                            setDraft(project.title || '')
+                            setRenaming(null)
+                          }
+                        }}
+                      />
+                    </div>
+                  )
+                }
+                return (
+                  <div className="projrow" key={project.id}>
                     <button
                       type="button"
-                      className="xbtn danger"
-                      aria-label={`Confirm deleting ${name}`}
-                      onClick={() => {
-                        setArmed(null)
-                        onDelete(project.id)
-                      }}
+                      className={`proj${project.id === activeId ? ' active' : ''}`}
+                      onClick={() => onOpen(project.id)}
+                      onDoubleClick={() => startRename(project)}
                     >
-                      Delete
+                      <div className="t">{name}</div>
+                      <div className="m">
+                        <span className={`dot ${project.confidence ?? 'unknown'}`} />
+                        {summarise(project)}
+                      </div>
+                      <div className="m">{relativeTime(project.updated)}</div>
                     </button>
-                    <button
-                      type="button"
-                      className="xbtn"
-                      aria-label="Keep this project"
-                      onClick={() => setArmed(null)}
-                    >
-                      Keep
-                    </button>
+                    {armed === project.id ? (
+                      <div className="confirm">
+                        <button
+                          type="button"
+                          className="xbtn danger"
+                          aria-label={`Confirm deleting ${name}`}
+                          onClick={() => {
+                            setArmed(null)
+                            onDelete(project.id)
+                          }}
+                        >
+                          Delete
+                        </button>
+                        <button
+                          type="button"
+                          className="xbtn"
+                          aria-label="Keep this project"
+                          onClick={() => setArmed(null)}
+                        >
+                          Keep
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="rowacts">
+                        <button
+                          type="button"
+                          className="xbtn"
+                          aria-label={`Rename ${name}`}
+                          title="Rename"
+                          onClick={() => startRename(project)}
+                        >
+                          ⋯
+                        </button>
+                        <button
+                          type="button"
+                          className="xbtn"
+                          aria-label={`Delete ${name}`}
+                          title="Delete this project"
+                          onClick={() => setArmed(project.id)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    className="xbtn"
-                    aria-label={`Delete ${name}`}
-                    title="Delete this project"
-                    onClick={() => setArmed(project.id)}
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            )
-          })
+                )
+              })}
+            </div>
+          ))
         )}
       </div>
     </aside>
   )
+}
+
+/**
+ * Bucket projects by age, keeping the order the server sent (newest first) within each bucket.
+ *
+ * Empty buckets are dropped rather than rendered as bare headings, so a workspace where everything
+ * happened today shows one heading rather than five, four of which say nothing.
+ */
+export function groupByAge(
+  projects: ProjectSummary[],
+  now: Date = new Date(),
+): [string, ProjectSummary[]][] {
+  const startOfToday = new Date(now)
+  startOfToday.setHours(0, 0, 0, 0)
+  const day = 24 * 60 * 60 * 1000
+
+  const buckets: [string, ProjectSummary[]][] = [
+    ['Today', []],
+    ['Yesterday', []],
+    ['Previous 7 days', []],
+    ['Previous 30 days', []],
+    ['Older', []],
+  ]
+
+  for (const project of projects) {
+    const when = project.updated ? new Date(project.updated) : null
+    // A project with no timestamp, or an unparseable one, still has to appear somewhere. "Older"
+    // is the honest bucket: it makes no claim the data does not support.
+    const age = when && !Number.isNaN(when.getTime())
+      ? startOfToday.getTime() - new Date(when).setHours(0, 0, 0, 0)
+      : Number.POSITIVE_INFINITY
+    const index = age <= 0 ? 0 : age <= day ? 1 : age <= 7 * day ? 2 : age <= 30 * day ? 3 : 4
+    buckets[index][1].push(project)
+  }
+  return buckets.filter(([, rows]) => rows.length > 0)
 }
 
 function summarise(project: ProjectSummary): string {

@@ -115,6 +115,27 @@ header .sp{flex:1}
 .dot.high{background:var(--ok)}.dot.moderate{background:var(--warn)}.dot.low{background:var(--risk)}
 .dot.unknown{background:var(--line-strong)}
 .side .empty{color:var(--muted);font-size:.82rem;padding:10px 12px;line-height:1.5}
+
+/* Search, grouping and rename: the three things a list of sixty needs and a list of five does not.
+   The search box only appears past a handful of projects — a filter above three rows is furniture. */
+.side-search{padding:8px 10px 4px}
+.side-search input{width:100%;font:inherit;font-size:.82rem;padding:7px 10px;color:var(--ink);
+ background:var(--card);border:1px solid var(--line-strong);border-radius:var(--r-sm)}
+.side-search input::placeholder{color:var(--muted)}
+.side-search input:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px var(--ring)}
+/* Date headings are signposts, not content: quiet, sticky so the bucket stays named while its rows
+   scroll past, and on the sidebar's own ground so rows slide under rather than through them. */
+.side-group{position:sticky;top:0;z-index:1;background:var(--surface);color:var(--muted);
+ font-size:.68rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+ padding:10px 12px 5px}
+/* Both row actions travel together, so a hovered row does not shuffle as they appear. */
+.rowacts{display:flex;gap:0}
+.projrow .rowacts .xbtn{opacity:0}
+.projrow:hover .rowacts .xbtn,.projrow:focus-within .rowacts .xbtn{opacity:1}
+.projrow.renaming{padding:2px 0}
+.renameinput{flex:1;min-width:0;font:inherit;font-size:.88rem;font-weight:600;color:var(--ink);
+ background:var(--card);border:1px solid var(--accent);border-radius:var(--r-sm);padding:9px 10px}
+.renameinput:focus{outline:none;box-shadow:0 0 0 3px var(--ring)}
 .xbtn{border:none;background:transparent;color:var(--muted);cursor:pointer;font-size:.95rem;
  padding:2px 6px;border-radius:5px;line-height:1}
 .xbtn:hover{color:var(--risk);background:var(--risk-bg)}

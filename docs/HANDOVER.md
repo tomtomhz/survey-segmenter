@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.14.1**, 265 Python + 128 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.15.0**, 270 Python + 139 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.14.1.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.14.1** — verified by unpacking the zip that is actually sitting there and
+**Released: v1.5.1 → v1.15.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.15.0** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
@@ -231,6 +231,27 @@ weak data, and that is the one a tighter threshold would trade against.
 One test was renamed as a result. `test_it_never_claims_high_confidence_for_the_wrong_number_of_
 groups` checked a single centre configuration while its name claimed a universal property the
 sweep falsifies; it is now `test_this_overlapping_shape_drops_to_moderate_when_it_merges`.
+
+### The projects list, and a trap in verifying UI
+
+1.15.0 gave the sidebar rename, search and date grouping. The rename endpoint writes the title to
+**both** places it lives — the full record and the small `.meta.json` the sidebar reads so it does
+not parse a megabyte of report per row. Writing one and not the other leaves a project called two
+different things depending where you look, which is what the test checks.
+
+**The trap is in how UI gets verified, and it cost half an hour.** Driving the app through the
+browser tool, rename appeared to be completely broken: typing into the field worked, but Enter and
+Escape did nothing, and no `/rename` request was ever made. The endpoint was fine when called
+directly, the bundle was current, and the component tests passed.
+
+The cause was the instrument. **The browser tool's synthetic key events do not reach React's root
+event listener**, so `onKeyDown` never fired — while `type` still updated the field, which is what
+made it look like a real bug. A `KeyboardEvent` dispatched from `javascript_tool` does work, and
+with that the whole flow completed and `POST /rename → 200` appeared in the network log.
+
+So: **for React key handling, verify with `javascript_tool`-dispatched events or with the component
+tests; the `computer` key action proves nothing.** Clicks are fine — those work. Third time this
+session an instrument was the fault rather than the code, which is the pattern to expect.
 
 ### The typing tool, checked by holdout
 

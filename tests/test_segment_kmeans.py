@@ -7019,3 +7019,102 @@ def test_the_scoring_confidence_is_reported_with_the_floor_it_is_measured_from(m
     assert "confidence_floor" in scored, "the figure was sent without the scale it sits on"
     assert scored["confidence_floor"] == pytest.approx(1.0 / len(scored["breakdown"]), abs=0.01)
     assert scored["mean_confidence"] >= scored["confidence_floor"]
+
+
+def test_a_project_can_be_renamed_and_the_new_name_sticks_everywhere(monkeypatch, tmp_path):
+    """A project arrives named after the file, and a real workspace fills with `s.csv` four times.
+
+    The name lives in two places on disk — the full record, and the small summary the sidebar reads
+    so it does not parse a megabyte of report per row. Writing one and not the other leaves a
+    project called two different things depending where you look, which is why this checks both
+    through the server rather than checking the store in isolation.
+    """
+    import json as _json
+    import socket
+    import threading
+    import time
+    import urllib.request
+
+    projects_dir = tmp_path / "projects"
+    monkeypatch.setenv("SURVEY_SEGMENTER_PROJECTS", str(projects_dir))
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: None)
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    threading.Thread(target=sk.serve, kwargs={"port": port}, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(80):
+        try:
+            urllib.request.urlopen(base + "/", timeout=5).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+
+    def post(path, obj):
+        request = urllib.request.Request(base + path, data=_json.dumps(obj).encode(),
+                                         headers={"Content-Type": "application/json"},
+                                         method="POST")
+        return _json.loads(urllib.request.urlopen(request, timeout=300).read().decode())
+
+    rng = np.random.default_rng(0)
+    rows = ["id,q1,q2,q3,q4"]
+    for i in range(120):
+        centre = [2, 6][i % 2]
+        rows.append(f"{i}," + ",".join(
+            str(int(np.clip(rng.normal(centre, 1), 1, 7))) for _ in range(4)))
+    boundary = "----t"
+    blob = ("\n".join(rows)).encode()
+    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="s.csv"\r\n'
+            f'Content-Type: text/csv\r\n\r\n').encode() + blob + f"\r\n--{boundary}--\r\n".encode()
+    request = urllib.request.Request(base + "/analyze", data=body, method="POST",
+                                     headers={"Content-Type":
+                                              f"multipart/form-data; boundary={boundary}"})
+    analysed = _json.loads(urllib.request.urlopen(request, timeout=300).read().decode())
+    session_id = analysed["session_id"]
+
+    renamed = post("/rename", {"session_id": session_id, "title": "  Pricing study   wave 2 "})
+    assert renamed["ok"], renamed.get("error")
+    # Collapsed, not merely stripped: a name pasted from a spreadsheet carries tabs and newlines,
+    # and those break the single-line row it has to fit on.
+    assert renamed["title"] == "Pricing study wave 2"
+    assert any(p["title"] == "Pricing study wave 2" for p in renamed["projects"])
+
+    # Both copies on disk have to agree, or the sidebar and the page disagree about the same study.
+    files = list(projects_dir.glob("*.meta.json"))
+    assert files, "no sidebar summary was written"
+    assert _json.loads(files[0].read_text(encoding="utf-8"))["title"] == "Pricing study wave 2"
+    reopened = _json.loads(urllib.request.urlopen(
+        base + f"/project?id={session_id}", timeout=60).read().decode())
+    assert reopened["title"] == "Pricing study wave 2"
+
+
+@pytest.mark.parametrize("body,expect", [
+    ({"title": "   "}, "Give the project a name"),
+    ({"title": 42}, "as text"),
+    ({"title": "x" * 200}, "under 80"),
+    ({"title": "fine", "session_id": "no-such-project"}, "could not be found"),
+])
+def test_renaming_refuses_the_shapes_that_would_break_the_list(body, expect, monkeypatch, tmp_path):
+    """Every refusal says what to do instead, and an unknown project is a message not a crash."""
+    import json as _json
+    import socket
+    import threading
+    import time
+    import urllib.request
+
+    monkeypatch.setenv("SURVEY_SEGMENTER_PROJECTS", str(tmp_path / "projects"))
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: None)
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    threading.Thread(target=sk.serve, kwargs={"port": port}, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(80):
+        try:
+            urllib.request.urlopen(base + "/", timeout=5).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+
+    request = urllib.request.Request(base + "/rename", data=_json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+    got = _json.loads(urllib.request.urlopen(request, timeout=60).read().decode())
+    assert got["ok"] is False
+    assert expect in got["error"], got["error"]
+    assert "Traceback" not in got["error"]

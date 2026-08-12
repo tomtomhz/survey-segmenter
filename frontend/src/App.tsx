@@ -248,6 +248,29 @@ export function App() {
     [sessionId],
   )
 
+  const renameProject = useCallback(
+    async (id: string, title: string) => {
+      const reply = await api.renameProject(id, title)
+      if (isFailure(reply)) return
+      setProjects(reply.projects)
+      // The transcript opens with "Analyse: <name>", so a rename has to reach it too — otherwise
+      // the sidebar says one thing and the conversation above it says another until the app is
+      // restarted. Narrowed on `kind` rather than reaching for a field: the message union has a
+      // `text` on exactly one of its six variants, and the build (which type-checks more strictly
+      // than an editor pass) is what caught the assumption that it was on all of them.
+      if (id === sessionId) {
+        setMessages((previous) =>
+          previous.map((message) =>
+            message.kind === 'you' && message.text.startsWith('Analyse: ')
+              ? { ...message, text: `Analyse: ${title}` }
+              : message,
+          ),
+        )
+      }
+    },
+    [sessionId],
+  )
+
   /** Remember what had focus, so closing the dialog can hand it back. */
   const openSettings = useCallback(() => {
     returnFocusTo.current = document.activeElement as HTMLElement | null
@@ -288,6 +311,7 @@ export function App() {
           activeId={sessionId}
           onOpen={(id) => void openProject(id)}
           onDelete={(id) => void deleteProject(id)}
+          onRename={(id, title) => void renameProject(id, title)}
           onNew={startNew}
         />
         <div className="main">
