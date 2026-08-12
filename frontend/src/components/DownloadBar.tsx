@@ -88,7 +88,7 @@ export function DownloadBar({
   )
 }
 
-function ScoreSummary({ result, scored }: { result: Analysis; scored: ScoreResult }) {
+export function ScoreSummary({ result, scored }: { result: Analysis; scored: ScoreResult }) {
   const breakdown = Object.entries(scored.breakdown)
     .map(([group, count]) => `Group ${group}: ${count}`)
     .join(' · ')
@@ -96,7 +96,20 @@ function ScoreSummary({ result, scored }: { result: Analysis; scored: ScoreResul
     <>
       <b>{scored.n} people scored.</b> {breakdown}
       <br />
-      <span style={{ color: 'var(--muted)' }}>Average confidence {scored.mean_confidence}.</span>
+      {/* The floor is shown beside the figure because the figure means nothing without it: this
+          scale runs from 1/k, not from 0. Measured over thirty-six holdout studies, two-group
+          runs averaged 0.59 and three-group runs 0.44 — which reads as a large difference and is
+          not one, since both sit about 17% of the way up their own range. */}
+      <span style={{ color: 'var(--muted)' }}>
+        Average confidence {scored.mean_confidence}
+        {scored.confidence_floor != null && (
+          <>
+            {' '}— on this study&rsquo;s scale, {scored.confidence_floor} means no better than
+            guessing and 1.0 means sitting exactly on a group&rsquo;s centre
+          </>
+        )}
+        .
+      </span>
       {!!scored.off_scale && (
         <div className="note warn" style={{ margin: '8px 0 0' }}>
           <b>{scored.off_scale} of {scored.n} answered something outside your original scale</b> —

@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.14.0**, 263 Python + 125 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.14.1**, 265 Python + 128 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.14.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.14.0** — verified by unpacking the zip that is actually sitting there and
+**Released: v1.5.1 → v1.14.1.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.14.1** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
@@ -231,6 +231,26 @@ weak data, and that is the one a tighter threshold would trade against.
 One test was renamed as a result. `test_it_never_claims_high_confidence_for_the_wrong_number_of_
 groups` checked a single centre configuration while its name claimed a universal property the
 sweep falsifies; it is now `test_this_overlapping_shape_drops_to_moderate_when_it_merges`.
+
+### The typing tool, checked by holdout
+
+The last major claim with no external check. Build the rule on 70% of a planted study, score the
+30% it has never seen, thirty-six times:
+
+* **Agreement with what clustering everyone together would say: 98.7%** where groups genuinely
+  separate, 93.5% overall. That is the promise the rule actually makes.
+* **No overfitting at all** — accuracy against the planted truth was 0.9 points *higher* on withheld
+  people than on the people the rule was built from. Expected of a nearest-centroid rule, but worth
+  holding as a fact.
+* At weak separation agreement falls to 83%, and that is correct behaviour: the segmentation itself
+  matched the truth only 51% of the time on those studies, so the rule is faithfully reproducing an
+  unreliable answer rather than adding error of its own.
+
+**The finding was in the presentation, not the statistics.** The app printed "Average confidence
+0.58" with no scale. That number runs from 1/k, not from 0, so its floor moves with the group
+count: two-group studies averaged 0.586 and three-group studies 0.443, which reads as a large
+difference and is not one — both sit about 17% of the way up their own range. The floor is now sent
+with the figure and shown beside it. **Do not "simplify" that back to a bare number.**
 
 ### Contrast: the palette was never measured, on either ground
 

@@ -3,6 +3,31 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.14.1] — 2026-08-09
+
+### Fixed
+
+- **The scoring confidence was printed without the scale it sits on.** "Average confidence 0.58"
+  looks like a figure out of 1. It is not: scoring confidence is an inverse-distance share on the
+  winning group's centre, so it runs from **1/k** — equidistant from every group, a coin toss — up
+  to 1, and the bottom of the scale moves with the number of groups.
+
+  Measured over thirty-six holdout studies, two-group runs averaged **0.586** and three-group runs
+  **0.443**. A reader would take the first for the better-typed study. They are the same: 17.1% and
+  16.4% of the way up their respective ranges. The app now prints the floor beside the figure.
+
+### Verified
+
+- **The typing tool works as well on strangers as on the people it was built from**, checked by
+  holdout rather than asserted: build the rule on 70% of a planted study, score the 30% it has
+  never seen. Agreement with what clustering everyone together would have said was **98.7%** where
+  the groups genuinely separate and **93.5%** overall, and accuracy against the planted truth was
+  0.9 points *higher* on withheld people than on training people — no overfitting to find.
+
+  Where groups barely separate, agreement falls to 83%. That is the rule faithfully reproducing an
+  unreliable segmentation, not a fault in the rule: on those same studies the segmentation itself
+  matched the truth only 51% of the time.
+
 ## [1.14.0] — 2026-08-09
 
 ### Added

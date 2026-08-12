@@ -130,6 +130,9 @@ export interface ScoreResult {
   n: number
   breakdown: Record<string, number>
   mean_confidence: number | string
+  /** The value that means "no better than guessing" — 1/k, so it moves with the group count.
+   *  Optional so an older server still parses; without it the figure is shown bare. */
+  confidence_floor?: number
   /** How many of the scored people answered something outside the scale the study used —
    *  typically a "no answer" code such as 99. Optional so an older server still parses. */
   off_scale?: number
