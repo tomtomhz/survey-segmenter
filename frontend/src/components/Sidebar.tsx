@@ -20,6 +20,7 @@ export function Sidebar({
   onDelete,
   onRename,
   onPin,
+  onDeleteMany,
   onNew,
   total,
 }: {
@@ -29,6 +30,7 @@ export function Sidebar({
   onDelete: (id: string) => void
   onRename: (id: string, title: string) => void
   onPin: (id: string, pinned: boolean) => void
+  onDeleteMany: (ids: string[]) => void
   onNew: () => void
   /** How many projects exist. Larger than the list when the cap has bitten. */
   total?: number
@@ -40,6 +42,11 @@ export function Sidebar({
   const [renaming, setRenaming] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [query, setQuery] = useState('')
+  // Selection is a mode rather than always-on checkboxes: a checkbox beside every row makes the
+  // list look like a form, and picking a project to open is the common action by a wide margin.
+  const [selecting, setSelecting] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [confirmingMany, setConfirmingMany] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   const matches = useMemo(() => {
@@ -85,6 +92,28 @@ export function Sidebar({
     onRename(id, cleaned)
   }
 
+  function toggleSelected(id: string) {
+    setSelected((previous) => {
+      const next = new Set(previous)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+    setConfirmingMany(false)
+  }
+
+  function leaveSelectMode() {
+    setSelecting(false)
+    setSelected(new Set())
+    setConfirmingMany(false)
+  }
+
+  // Only what is on screen can be selected, so "select all" means the rows the search left —
+  // which is what makes clearing a category of old work practical without a bulk action that
+  // reaches things the user cannot see.
+  const visibleIds = matches.map((p) => p.id)
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id))
+
   return (
     <aside className="side">
       <div className="head">
@@ -104,6 +133,53 @@ export function Sidebar({
             aria-label="Search projects by name"
             onChange={(e) => setQuery(e.target.value)}
           />
+          <button
+            type="button"
+            className="linkbtn"
+            onClick={() => (selecting ? leaveSelectMode() : setSelecting(true))}
+          >
+            {selecting ? 'Cancel' : 'Select'}
+          </button>
+        </div>
+      )}
+
+      {selecting && (
+        <div className="side-bulk">
+          <button
+            type="button"
+            className="linkbtn"
+            onClick={() =>
+              setSelected(allVisibleSelected ? new Set() : new Set(visibleIds))
+            }
+          >
+            {allVisibleSelected ? 'Clear' : `Select all ${visibleIds.length}`}
+          </button>
+          {selected.size > 0 &&
+            (confirmingMany ? (
+              <span className="bulkconfirm">
+                <button
+                  type="button"
+                  className="xbtn danger"
+                  onClick={() => {
+                    onDeleteMany([...selected])
+                    leaveSelectMode()
+                  }}
+                >
+                  Delete {selected.size}
+                </button>
+                <button type="button" className="xbtn" onClick={() => setConfirmingMany(false)}>
+                  Keep
+                </button>
+              </span>
+            ) : (
+              /* Two clicks, like the single-row delete. This removes the analysis AND the original
+                 upload for every selected project, with no undo, so the count is stated in the
+                 confirming button rather than left to whatever the user thinks they ticked. */
+              <button type="button" className="linkbtn danger"
+                      onClick={() => setConfirmingMany(true)}>
+                Delete {selected.size} selected
+              </button>
+            ))}
         </div>
       )}
 
@@ -150,11 +226,22 @@ export function Sidebar({
                 }
                 return (
                   <div className="projrow" key={project.id}>
+                    {selecting && (
+                      <input
+                        type="checkbox"
+                        className="selbox"
+                        checked={selected.has(project.id)}
+                        aria-label={`Select ${name}`}
+                        onChange={() => toggleSelected(project.id)}
+                      />
+                    )}
                     <button
                       type="button"
                       className={`proj${project.id === activeId ? ' active' : ''}`}
-                      onClick={() => onOpen(project.id)}
-                      onDoubleClick={() => startRename(project)}
+                      // In select mode the row picks rather than opens. Opening a project mid-
+                      // selection would swap the whole page out from under a half-made choice.
+                      onClick={() => (selecting ? toggleSelected(project.id) : onOpen(project.id))}
+                      onDoubleClick={() => !selecting && startRename(project)}
                     >
                       <div className="t">{name}</div>
                       <div className="m">
@@ -163,7 +250,7 @@ export function Sidebar({
                       </div>
                       <div className="m">{relativeTime(project.updated)}</div>
                     </button>
-                    {armed === project.id ? (
+                    {selecting ? null : armed === project.id ? (
                       <div className="confirm">
                         <button
                           type="button"

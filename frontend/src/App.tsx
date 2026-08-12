@@ -256,6 +256,22 @@ export function App() {
     [sessionId],
   )
 
+  const deleteProjects = useCallback(
+    async (ids: string[]) => {
+      const reply = await api.deleteProjects(ids)
+      if (isFailure(reply)) return
+      // If the study on screen was one of them, the page has to let go of it too — otherwise the
+      // transcript keeps offering downloads for a project whose files are gone.
+      if (sessionId && ids.includes(sessionId)) {
+        setSessionId(null)
+        setMessages([GREETING])
+      }
+      setProjects(reply.projects)
+      if (reply.total != null) setProjectTotal(reply.total)
+    },
+    [sessionId],
+  )
+
   const pinProject = useCallback(async (id: string, pinned: boolean) => {
     const reply = await api.pinProject(id, pinned)
     if (isFailure(reply)) return
@@ -329,6 +345,7 @@ export function App() {
           onDelete={(id) => void deleteProject(id)}
           onRename={(id, title) => void renameProject(id, title)}
           onPin={(id, pinned) => void pinProject(id, pinned)}
+          onDeleteMany={(ids) => void deleteProjects(ids)}
           total={projectTotal}
           onNew={startNew}
         />

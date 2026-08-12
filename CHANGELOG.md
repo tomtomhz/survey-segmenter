@@ -3,6 +3,33 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.16.0] — 2026-08-09
+
+### Added
+
+- **Clear out several projects at once.** "Select" beside the search turns the list into
+  checkboxes; tick what you want gone and delete it in one go. Clearing a hundred throwaway runs
+  one arm-and-confirm at a time is the kind of chore that means they never get cleared.
+
+  Three deliberate limits, because this removes the analysis *and* the original upload with no
+  undo:
+
+  * **Two clicks, like the single-row delete**, and the confirming button names the number:
+    "Delete 12", not "Delete".
+  * **"Select all" means the rows the search left**, never rows scrolled out of view or hidden
+    behind the list cap. A bulk action must not reach anything the user cannot see.
+  * **Leaving select mode drops the selection**, so a set ticked five minutes ago cannot act later.
+
+  While selecting, clicking a row picks it rather than opening it — opening a project mid-selection
+  would swap the whole page out from under a half-made choice.
+
+  Server-side it is one request rather than one per project, and an id that is already gone is
+  skipped rather than failing the batch: half a delete is worse than either outcome. The reply says
+  how many were **actually** removed rather than how many were asked for. A malformed request —
+  ids sent as a bare string rather than a list — is refused, because iterating a string into
+  single-character ids on a path that deletes files is the worst version of a bug this project has
+  already found twice elsewhere.
+
 ## [1.15.1] — 2026-08-09
 
 ### Fixed

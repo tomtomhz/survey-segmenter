@@ -135,6 +135,19 @@ header .sp{flex:1}
 /* A pinned row keeps its star lit whether or not the row is hovered: the mark is the whole point
    of pinning, and hiding it until hover would make a pinned project look like any other. */
 .projrow .rowacts .xbtn.pinned{opacity:1;color:var(--accent)}
+/* Search and Select share a row: the filter is the usual reason to come here, so Select sits
+   beside it as a quiet text button rather than competing as another box. */
+.side-search{display:flex;align-items:center;gap:8px}
+.side-search input{flex:1;min-width:0}
+.linkbtn{border:none;background:transparent;padding:2px 2px;font:inherit;font-size:.76rem;
+ color:var(--muted);cursor:pointer;text-decoration:underline;text-underline-offset:2px;
+ text-decoration-thickness:1px;flex:none}
+.linkbtn:hover{color:var(--accent)}
+.linkbtn.danger{color:var(--risk)}
+.side-bulk{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;
+ padding:6px 12px 2px}
+.bulkconfirm{display:flex;gap:4px;align-items:center}
+.selbox{margin:11px 2px 0 2px;flex:none;accent-color:var(--accent)}
 .side-more{color:var(--muted);font-size:.72rem;line-height:1.5;padding:12px 12px 4px;
  border-top:1px solid var(--line);margin-top:8px}
 .projrow.renaming{padding:2px 0}

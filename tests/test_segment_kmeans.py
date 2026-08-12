@@ -7200,3 +7200,62 @@ def test_the_pin_endpoint_says_what_it_did_and_refuses_what_it_cannot(monkeypatc
 
     missing = post("/pin", {"session_id": "nope", "pinned": True})
     assert missing["ok"] is False and "could not be found" in missing["error"]
+
+
+def test_deleting_many_projects_reports_what_it_actually_removed(monkeypatch, tmp_path):
+    """Bulk delete is irreversible, so it reports what happened rather than what was asked.
+
+    Clearing a hundred throwaway runs one arm-and-confirm at a time is the kind of chore that means
+    they never get cleared, and firing a hundred single deletes from the client would rebuild and
+    return the whole project list a hundred times. One request instead — and an id that is already
+    gone is skipped rather than failing the batch, because half a delete is worse than either
+    outcome.
+    """
+    import json as _json
+    import socket
+    import threading
+    import time
+    import urllib.request
+
+    projects_dir = tmp_path / "projects"
+    monkeypatch.setenv("SURVEY_SEGMENTER_PROJECTS", str(projects_dir))
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: None)
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    threading.Thread(target=sk.serve, kwargs={"port": port}, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(80):
+        try:
+            urllib.request.urlopen(base + "/", timeout=5).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+
+    # Seed through the store rather than by analysing five surveys: this is about the delete path.
+    store = webapp.ProjectStore(root=projects_dir)
+    for i in range(5):
+        store.save(f"keep{i}", {"title": f"study {i}", "k": 2, "n_people": 100},
+                   raw=b"id,q1\n1,5\n")
+
+    def post(path, obj):
+        request = urllib.request.Request(base + path, data=_json.dumps(obj).encode(),
+                                         headers={"Content-Type": "application/json"},
+                                         method="POST")
+        return _json.loads(urllib.request.urlopen(request, timeout=120).read().decode())
+
+    got = post("/delete_projects", {"ids": ["keep0", "keep1", "never-existed"]})
+    assert got["ok"] is True
+    assert got["deleted"] == 2, "an id that was never there must not be counted as removed"
+    assert got["total"] == 3
+    assert {p["id"] for p in got["projects"]} == {"keep2", "keep3", "keep4"}
+
+    # Everything belonging to a deleted project goes, including the original upload.
+    assert not list(projects_dir.glob("keep0*")), "files were left behind"
+    assert list(projects_dir.glob("keep2*")), "an unselected project was removed"
+
+    empty = post("/delete_projects", {"ids": []})
+    assert empty["ok"] is False and "Nothing was selected" in empty["error"]
+
+    wrong = post("/delete_projects", {"ids": "keep2"})
+    assert wrong["ok"] is False and "list of ids" in wrong["error"], (
+        "a bare string must not be iterated into single-character ids on a DELETE path")
+    assert list(projects_dir.glob("keep2*")), "the malformed request deleted something"

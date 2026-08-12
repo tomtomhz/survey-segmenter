@@ -508,6 +508,8 @@ def serve(port=8000):
                     store.delete(body.get("session_id", ""))
                     sessions.pop(body.get("session_id", ""), None)
                     self._json({"ok": True, "projects": store.list(), "total": store.count()})
+                elif route == "/delete_projects":
+                    self._do_delete_many()
                 elif route == "/chat":
                     self._do_chat()
                 elif route == "/settings":
@@ -936,6 +938,42 @@ def serve(port=8000):
             if live is not None:
                 live["title"] = title
             self._json({"ok": True, "projects": store.list(), "total": store.count(), "title": title})
+
+        def _do_delete_many(self):
+            """Delete several projects in one go.
+
+            A workspace fills with throwaway runs, and clearing a hundred of them one arm-and-
+            confirm at a time is the kind of chore that means they never get cleared. One request
+            rather than a hundred: the client would otherwise fire them in a loop and each one
+            would rebuild and return the entire project list.
+
+            Deleting is irreversible — the analysis and the original upload both go — so the count
+            actually removed is reported back rather than assumed, and ids that no longer exist are
+            skipped quietly rather than failing the whole batch. Half a delete is worse than either
+            outcome.
+            """
+            body = self._read_json()
+            ids = body.get("ids")
+            if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+                self._json({"ok": False, "error": "Send the projects to delete as a list of ids."})
+                return
+            if not ids:
+                self._json({"ok": False, "error": "Nothing was selected."})
+                return
+            removed = 0
+            for pid in ids:
+                # `delete` is quiet about an id it does not recognise, so count what was really
+                # there rather than trusting the length of the request.
+                existed = self._store_has(pid)
+                store.delete(pid)
+                sessions.pop(pid, None)
+                removed += 1 if existed else 0
+            self._json({"ok": True, "deleted": removed, "projects": store.list(),
+                        "total": store.count()})
+
+        def _store_has(self, pid):
+            path = store._path(pid, ".meta.json")
+            return bool(path and path.exists())
 
         def _do_pin(self):
             """Pin or unpin a project. The body says which, so the client never has to guess the

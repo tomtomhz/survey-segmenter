@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.15.1**, 272 Python + 144 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.16.0**, 273 Python + 150 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.15.1.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.15.1** — verified by unpacking the zip that is actually sitting there and
+**Released: v1.5.1 → v1.16.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.16.0** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
@@ -231,6 +231,22 @@ weak data, and that is the one a tighter threshold would trade against.
 One test was renamed as a result. `test_it_never_claims_high_confidence_for_the_wrong_number_of_
 groups` checked a single centre configuration while its name claimed a universal property the
 sweep falsifies; it is now `test_this_overlapping_shape_drops_to_moderate_when_it_merges`.
+
+### Bulk delete, and the rules it follows
+
+1.16.0 added multi-select delete. It removes the analysis and the original upload with no undo, so
+the constraints are the feature and should not be relaxed for convenience:
+
+* **Two clicks, and the confirming button names the count** — "Delete 12", never a bare "Delete".
+* **"Select all" covers the rows the search left, and nothing else.** Not rows scrolled away, not
+  rows behind the sixty-project cap. A bulk action must never reach what the user cannot see.
+* **Leaving select mode drops the selection**, so a set ticked earlier cannot act later.
+* **The server reports what it actually removed**, not what was asked for, and skips ids that are
+  already gone rather than failing the batch.
+
+`ids` sent as a bare string is refused. That is the third appearance of the same coercion — after
+`/design` and `/name` — and on a path that deletes files it is the worst of the three: iterating
+`"keep2"` would have produced five single-character ids. A test covers it explicitly.
 
 ### The sidebar was hiding a hundred projects
 

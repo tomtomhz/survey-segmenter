@@ -26,6 +26,7 @@ const props = {
   onDelete: () => {},
   onRename: () => {},
   onPin: () => {},
+  onDeleteMany: () => {},
   onNew: () => {},
 }
 
@@ -220,5 +221,90 @@ describe('pinning and the cap', () => {
     const rows = Array.from({ length: 3 }, (_, i) => project({ id: `p${i}`, title: `study ${i}` }))
     render(<Sidebar {...props} projects={rows} total={3} />)
     expect(screen.queryByText(/Showing the/)).not.toBeInTheDocument()
+  })
+})
+
+
+describe('clearing out old projects', () => {
+  const many = (n = 8) =>
+    Array.from({ length: n }, (_, i) => project({ id: `p${i}`, title: `study ${i}` }))
+
+  it('does not show checkboxes until you ask to select', async () => {
+    const user = userEvent.setup()
+    render(<Sidebar {...props} projects={many()} />)
+    expect(screen.queryByLabelText('Select study 0')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Select' }))
+    expect(screen.getByLabelText('Select study 0')).toBeInTheDocument()
+  })
+
+  it('picks rather than opens while selecting, so the page does not swap mid-choice', async () => {
+    const user = userEvent.setup()
+    const onOpen = vi.fn()
+    render(<Sidebar {...props} projects={many()} onOpen={onOpen} />)
+
+    await user.click(screen.getByRole('button', { name: 'Select' }))
+    await user.click(screen.getByText('study 2'))
+
+    expect(onOpen).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Select study 2')).toBeChecked()
+  })
+
+  it('needs two clicks to delete, and names the number on the button that does it', async () => {
+    const user = userEvent.setup()
+    const onDeleteMany = vi.fn()
+    render(<Sidebar {...props} projects={many()} onDeleteMany={onDeleteMany} />)
+
+    await user.click(screen.getByRole('button', { name: 'Select' }))
+    await user.click(screen.getByLabelText('Select study 0'))
+    await user.click(screen.getByLabelText('Select study 3'))
+
+    await user.click(screen.getByRole('button', { name: 'Delete 2 selected' }))
+    expect(onDeleteMany).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Delete 2' }))
+    expect(onDeleteMany).toHaveBeenCalledWith(['p0', 'p3'])
+  })
+
+  it('lets you back out of the confirmation without losing the selection', async () => {
+    const user = userEvent.setup()
+    const onDeleteMany = vi.fn()
+    render(<Sidebar {...props} projects={many()} onDeleteMany={onDeleteMany} />)
+
+    await user.click(screen.getByRole('button', { name: 'Select' }))
+    await user.click(screen.getByLabelText('Select study 1'))
+    await user.click(screen.getByRole('button', { name: 'Delete 1 selected' }))
+    await user.click(screen.getByRole('button', { name: 'Keep' }))
+
+    expect(onDeleteMany).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Select study 1')).toBeChecked()
+  })
+
+  it('selects only what the search left, never rows the user cannot see', async () => {
+    const user = userEvent.setup()
+    const onDeleteMany = vi.fn()
+    const rows = [...many(7), project({ id: 'keep', title: 'the real study' })]
+    render(<Sidebar {...props} projects={rows} onDeleteMany={onDeleteMany} />)
+
+    await user.type(screen.getByLabelText(/Search projects/), 'study 1')
+    await user.click(screen.getByRole('button', { name: 'Select' }))
+    await user.click(screen.getByRole('button', { name: /Select all 1/ }))
+    await user.click(screen.getByRole('button', { name: 'Delete 1 selected' }))
+    await user.click(screen.getByRole('button', { name: 'Delete 1' }))
+
+    expect(onDeleteMany).toHaveBeenCalledWith(['p1'])
+  })
+
+  it('drops the selection when you leave select mode, so it cannot act later', async () => {
+    const user = userEvent.setup()
+    render(<Sidebar {...props} projects={many()} />)
+
+    await user.click(screen.getByRole('button', { name: 'Select' }))
+    await user.click(screen.getByLabelText('Select study 0'))
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await user.click(screen.getByRole('button', { name: 'Select' }))
+
+    expect(screen.getByLabelText('Select study 0')).not.toBeChecked()
+    expect(screen.queryByRole('button', { name: /Delete .* selected/ })).not.toBeInTheDocument()
   })
 })
