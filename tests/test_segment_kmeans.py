@@ -6460,3 +6460,63 @@ def test_an_item_carrying_a_newline_cannot_split_a_cell_in_the_export(monkeypatc
     rows = list(csv.DictReader(io.StringIO(got["csv"])))
     assert len(rows) == 20 * 3 * 2
     assert {r["item"] for r in rows} == set(got["items"])
+
+
+def test_segment_names_that_are_not_names_are_refused(monkeypatch, tmp_path):
+    """The same coercion the design endpoint had, in the one place nothing downstream can catch it.
+
+    A segment name is free text, so no later validation can tell a real name from a coerced one:
+    "AB" sent instead of ["A", "B"] named two segments A and B, and a list holding an object named
+    one of them "{'x': 1}". Those land in group_names.csv and in every export built from it, which
+    is what a colleague opens.
+    """
+    import json as _json
+    import socket
+    import threading
+    import time
+    import urllib.request
+
+    monkeypatch.setenv("SURVEY_SEGMENTER_PROJECTS", str(tmp_path / "projects"))
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: None)
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    threading.Thread(target=sk.serve, kwargs={"port": port}, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(80):
+        try:
+            urllib.request.urlopen(base + "/", timeout=5).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+
+    rng = np.random.default_rng(0)
+    rows = ["id,q1,q2,q3,q4"]
+    for i in range(120):
+        centre = 2 if i % 2 else 6
+        rows.append(f"{i}," + ",".join(
+            str(int(np.clip(rng.normal(centre, 1), 1, 7))) for _ in range(4)))
+    boundary = "----t"
+    blob = ("\n".join(rows)).encode()
+    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="s.csv"\r\n'
+            f'Content-Type: text/csv\r\n\r\n').encode() + blob + f"\r\n--{boundary}--\r\n".encode()
+    req = urllib.request.Request(base + "/analyze", data=body, method="POST",
+                                 headers={"Content-Type":
+                                          f"multipart/form-data; boundary={boundary}"})
+    session_id = _json.loads(urllib.request.urlopen(req, timeout=300).read().decode())["session_id"]
+
+    def name_with(names):
+        r = urllib.request.Request(
+            base + "/name", data=_json.dumps({"session_id": session_id, "names": names}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        return _json.loads(urllib.request.urlopen(r, timeout=60).read().decode())
+
+    spelt_as_a_string = name_with("AB")
+    assert spelt_as_a_string["ok"] is False, "a bare string was split into one name per letter"
+    assert "as a list" in spelt_as_a_string["error"]
+
+    with_objects = name_with([{"x": 1}, None])
+    assert with_objects["ok"] is False
+    assert "has to be text" in with_objects["error"]
+
+    fine = name_with(["Loyal  Fans ", "Price Hunters"])
+    assert fine["ok"] is True, fine.get("error")
+    assert fine["names"] == ["Loyal Fans", "Price Hunters"], "whitespace was not tidied"

@@ -3,6 +3,24 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.12.2] — 2026-08-09
+
+### Fixed
+
+- **Segment names were coerced the same way, in the place it matters most.** Having found the
+  defect in the new design endpoint, the obvious question was where else it lived — and `/name` had
+  it. Sending `"AB"` instead of `["A", "B"]` named the two segments **A** and **B**; a list holding
+  an object named one of them `{'x': 1}`.
+
+  This one is worse than the design case, because a segment name is free text: nothing downstream
+  can tell a coerced name from a real one, so it lands in `group_names.csv`, in
+  `segment_assignments.csv`, and in whatever a colleague opens next. Names must now be a list of
+  text, and internal whitespace is tidied.
+
+  `/plan` and `/regroup` were checked for the same thing and are sound — the planner's bounds catch
+  a coerced number, and re-grouping drops column names that do not exist and refuses when nothing
+  real is left.
+
 ## [1.12.1] — 2026-08-09
 
 ### Fixed

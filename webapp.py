@@ -613,7 +613,18 @@ def serve(port=8000):
                                 "the names yourself."})
                     return
             else:
-                names = [str(n).strip() for n in (body.get("names") or [])]
+                supplied = body.get("names")
+                # Segment names are free text, so nothing downstream can tell a real name from a
+                # coerced one — which makes the coercion silent all the way into group_names.csv
+                # and every export built from it. Sending "AB" rather than ["A", "B"] named the two
+                # segments A and B; a list holding an object named one of them "{'x': 1}".
+                if supplied is not None and not isinstance(supplied, list):
+                    self._json({"ok": False, "error": "Send the names as a list, one per group."})
+                    return
+                if any(not isinstance(n, str) for n in (supplied or [])):
+                    self._json({"ok": False, "error": "Every group name has to be text."})
+                    return
+                names = [" ".join(str(n).split()) for n in (supplied or [])]
                 if len([n for n in names if n]) != len(groups):
                     self._json({"ok": False,
                                 "error": f"Please give a name for each of the {len(groups)} groups."})

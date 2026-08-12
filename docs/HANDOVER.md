@@ -8,13 +8,13 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.12.1**, 248 Python + 120 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.12.2**, 249 Python + 120 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.12.1.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+**Released: v1.5.1 → v1.12.2.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
 the team)/` is on **1.11.1** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
@@ -143,6 +143,13 @@ None of these were reachable from the panel, which is exactly why none of the te
 endpoint is reachable directly. The fix refuses all three rather than coercing: `str()` will
 cheerfully turn a dict into a string, and every such coercion produces a design that reads correctly
 and is nonsense in the field.
+
+**Then the same question was asked of every sibling endpoint, which is the part worth repeating.**
+`/name` had it too, and worse: a segment name is free text, so nothing downstream can tell a coerced
+name from a real one. `"AB"` named the two segments **A** and **B**, straight into `group_names.csv`
+and every export built from it. Fixed in 1.12.2. `/plan` and `/regroup` were probed and are sound —
+the planner's bounds catch a coerced number, and re-grouping drops column names that do not exist
+and refuses when nothing real is left. Worth re-running that probe whenever an endpoint is added.
 
 ### GitHub Actions: RESOLVED 2026-08-08 — the repository is public and CI is green
 
