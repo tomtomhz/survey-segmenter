@@ -1,6 +1,15 @@
 /* ---------------------------------------------------------------------------------------------
    Survey Segmenter — visual system.
 
+   CONTRAST: the light palette is checked against WCAG AA (4.5:1 for body text), and three tokens
+   were moved to clear it after the ground went white — `--muted` from #6D7A71 (4.49 on white, 4.03
+   on the sunk tone) to #606D62 (5.44 / 4.88), `--ok` from #3C7D5B to #377552 (4.25 -> 4.74 on its
+   own tint), and `--accent-soft` from #E9F1EA to #EFF6F0 so accent-coloured text on a hovered
+   button clears it (4.45 -> 4.66). `--muted` is the one that mattered: it carries every hint and
+   caption in the interface, at small sizes, and it had been failing on the old beige ground too.
+   Dark mode already cleared AA on every pair and is deliberately untouched. If you change a colour
+   here, re-run the check in tests/test_segment_kmeans.py rather than eyeballing it.
+
    Ported verbatim from the previous single-file interface: the design was not the problem, the
    architecture was. Two selectors changed — `textarea#in` and `#send` became classes, because a
    component should not depend on being the only thing on the page with a given id.
@@ -22,9 +31,9 @@
     repaints buttons and inputs with its own washed-out greys and the labels stop being legible. */
  color-scheme:light dark;
  --bg:#FFFFFF; --surface:#FFFFFF; --card:#FFFFFF; --sunk:#F1F3F1;
- --ink:#1B2420; --ink-soft:#3C4842; --muted:#6D7A71; --line:#E3E7E4; --line-strong:#CBD2CD;
- --accent:#46785C; --accent-hover:#3A6650; --accent-soft:#E9F1EA; --accent-ink:#FFFFFF;
- --ok:#3C7D5B; --ok-bg:#E7F1E9; --warn:#8A6410; --warn-bg:#F6EEDA; --risk:#9C4029; --risk-bg:#F7E7E2;
+ --ink:#1B2420; --ink-soft:#3C4842; --muted:#606D62; --line:#E3E7E4; --line-strong:#CBD2CD;
+ --accent:#46785C; --accent-hover:#3A6650; --accent-soft:#EFF6F0; --accent-ink:#FFFFFF;
+ --ok:#377552; --ok-bg:#E7F1E9; --warn:#8A6410; --warn-bg:#F6EEDA; --risk:#9C4029; --risk-bg:#F7E7E2;
  --ring:rgba(70,120,92,.30);
  --shadow-sm:0 1px 2px rgba(27,36,32,.05);
  --shadow:0 1px 2px rgba(27,36,32,.05),0 12px 28px rgba(27,36,32,.07);
@@ -47,9 +56,9 @@
 }
 :root[data-theme="light"]{
  --bg:#FFFFFF; --surface:#FFFFFF; --card:#FFFFFF; --sunk:#F1F3F1;
- --ink:#1B2420; --ink-soft:#3C4842; --muted:#6D7A71; --line:#E3E7E4; --line-strong:#CBD2CD;
- --accent:#46785C; --accent-hover:#3A6650; --accent-soft:#E9F1EA; --accent-ink:#FFFFFF;
- --ok:#3C7D5B; --ok-bg:#E7F1E9; --warn:#8A6410; --warn-bg:#F6EEDA; --risk:#9C4029; --risk-bg:#F7E7E2;
+ --ink:#1B2420; --ink-soft:#3C4842; --muted:#606D62; --line:#E3E7E4; --line-strong:#CBD2CD;
+ --accent:#46785C; --accent-hover:#3A6650; --accent-soft:#EFF6F0; --accent-ink:#FFFFFF;
+ --ok:#377552; --ok-bg:#E7F1E9; --warn:#8A6410; --warn-bg:#F6EEDA; --risk:#9C4029; --risk-bg:#F7E7E2;
 }
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;height:100vh;
@@ -154,6 +163,16 @@ header .sp{flex:1}
 .pill.high{color:var(--ok);background:var(--ok-bg);border-color:var(--ok)}
 .pill.moderate{color:var(--warn);background:var(--warn-bg);border-color:var(--warn)}
 .pill.low{color:var(--risk);background:var(--risk-bg);border-color:var(--risk)}
+/* The confidence caveat, folded away on the stat card. Deliberately quiet: same size as the
+   advice line above it, no chevron rotation, no colour — it is a footnote to a verdict, and
+   anything more assertive would compete with the verdict itself. */
+.whatmeans{margin-top:10px}
+.whatmeans>summary{cursor:pointer;font-size:.74rem;color:var(--muted);list-style:none;
+ text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px}
+.whatmeans>summary::-webkit-details-marker{display:none}
+.whatmeans>summary:hover{color:var(--accent)}
+.whatmeans>p{margin:6px 0 0;font-size:.76rem;line-height:1.5;color:var(--ink-soft);
+ max-width:34rem}
 .pill.unknown{color:var(--muted);background:var(--sunk);border-color:var(--line-strong)}
 
 /* panels --------------------------------------------------------------------------------------- */

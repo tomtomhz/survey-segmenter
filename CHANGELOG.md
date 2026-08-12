@@ -3,6 +3,35 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.14.0] — 2026-08-09
+
+### Added
+
+- **The confidence light now says what it is worth.** "Trust these groups" is the sentence people
+  act on, and on its own it invites a reader to treat the number of groups as exact — the one thing
+  a sixty-study measurement does not support. A quiet "What does *High* actually mean?" now sits
+  under the result cards and answers it from evidence: a green light found the right number about
+  seven times in ten, never invented groups that were not there, and when it is wrong it has merged
+  two real groups — so the number is a floor, not a headcount. Amber and red get their own equally
+  concrete accounts.
+
+  Placed below the card row rather than inside the confidence tile: the tiles are equal-height, so
+  three lines of caveat in one of them stretched all three, left "Groups found" as a tall empty
+  box, and squeezed the text into a third of the width.
+
+### Fixed
+
+- **Three text colours were below the WCAG AA line for body copy.** Found by measuring the palette
+  after the ground changed from beige to white — a palette tuned against one ground is not
+  automatically legible on another. `--muted`, which carries every hint and caption in the
+  interface at small sizes, was at 4.49:1 on white and 4.03:1 on the sunk tone against a 4.5:1
+  requirement, and it had been failing on the old beige ground too. It is now 5.44 / 4.88. `--ok`
+  on its own tint went 4.25 → 4.74, and accent-coloured text on a hovered button 4.45 → 4.66.
+
+  Dark mode already cleared AA on every pair and is untouched. A test now parses the stylesheet and
+  checks every pairing the interface actually paints, so the next colour change cannot fail this
+  silently.
+
 ## [1.13.3] — 2026-08-09
 
 ### Changed

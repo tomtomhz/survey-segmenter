@@ -6852,3 +6852,62 @@ def test_the_confidence_light_never_invents_groups_and_never_greenlights_weak_da
             assert result["confidence"] != "high", (
                 f"separation {sep} is near the limit of what any method can separate, and it was "
                 f"called high confidence")
+
+
+def _relative_luminance(hex_colour):
+    """WCAG 2.1 relative luminance."""
+    hex_colour = hex_colour.lstrip("#")
+    channels = [int(hex_colour[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    channels = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+
+def _contrast(a, b):
+    high, low = sorted((_relative_luminance(a), _relative_luminance(b)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+def test_every_text_colour_in_the_interface_clears_wcag_aa():
+    """Text has to be readable, and "looks fine to me" is not a measurement.
+
+    Checked because the light ground was changed from beige to white, and a palette that was tuned
+    against one ground is not automatically legible on another. Three tokens turned out to be under
+    the 4.5:1 line for body text — `--muted` at 4.49 on white and 4.03 on the sunk tone, `--ok` at
+    4.25 on its own tint, and accent-coloured text on a hovered button at 4.45. `--muted` was the
+    one that mattered: it carries every hint and caption in the interface, at small sizes, and it
+    had been failing on the old beige ground too, which is how a palette drifts — nobody measures
+    the colour that was inherited.
+
+    Parsed out of the stylesheet rather than repeated here, because a second copy of a colour is
+    how the check and the thing it checks stop agreeing.
+    """
+    import re
+    css = (Path(__file__).resolve().parents[1] / "frontend/src/styles/app.css").read_text(
+        encoding="utf-8")
+
+    def palette(selector):
+        """The tokens in effect for one theme block."""
+        start = css.index(selector)
+        block = css[start:css.index("}", start)]
+        return dict(re.findall(r"--([a-z-]+):\s*(#[0-9A-Fa-f]{6})", block))
+
+    light = palette(':root[data-theme="light"]')
+    dark = palette(':root[data-theme="dark"]')
+    assert light and dark, "could not parse the theme blocks — has the stylesheet been restructured?"
+
+    # Every pairing the interface actually paints: body text and captions on each ground, the
+    # accent on the surfaces it sits on, and each semantic colour on its own tint.
+    pairs = [("ink", "card"), ("ink", "bg"), ("ink-soft", "card"), ("muted", "card"),
+             ("muted", "sunk"), ("accent", "card"), ("accent", "accent-soft"),
+             ("accent-ink", "accent"), ("ok", "ok-bg"), ("warn", "warn-bg"), ("risk", "risk-bg")]
+
+    failures = []
+    for theme_name, theme in (("light", light), ("dark", dark)):
+        for foreground, background in pairs:
+            if foreground not in theme or background not in theme:
+                continue
+            found = _contrast(theme[foreground], theme[background])
+            if found < 4.5:
+                failures.append(f"{theme_name}: --{foreground} ({theme[foreground]}) on "
+                                f"--{background} ({theme[background]}) is {found:.2f}:1")
+    assert not failures, "text below the 4.5:1 line for body copy:\n  " + "\n  ".join(failures)

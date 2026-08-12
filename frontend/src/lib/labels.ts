@@ -14,6 +14,38 @@ export const CONFIDENCE_ADVICE: Record<Confidence, string> = {
 }
 
 /**
+ * What each light is actually worth, from measurement rather than from the word itself.
+ *
+ * Sixty simulated studies were run through the real pipeline with the true number of groups known
+ * in advance. Green found the right number about seven times in ten and averaged 0.71 agreement
+ * with the truth; amber, three in ten; red, almost never. Two things held across every one of the
+ * sixty and are the useful ones to tell a reader: the tool never reported MORE groups than
+ * existed, and it never showed green on the weakest data.
+ *
+ * "Trust these groups" on its own invites a reader to treat the number as exact, which is the one
+ * thing the measurement does not support — when green is wrong, it has merged two real groups.
+ * Saying so costs three lines and is the difference between a claim and an honest claim.
+ */
+export const CONFIDENCE_DETAIL: Record<Confidence, string> = {
+  high:
+    'Checked against sixty studies where the right answer was known: a green light found the '
+    + 'right number of groups about seven times in ten, and never invented groups that were not '
+    + 'there. When it is wrong it has merged two real groups into one — so read the number as a '
+    + 'floor, not a headcount.',
+  moderate:
+    'Checked against sixty studies where the right answer was known: an amber light found the '
+    + 'right number about three times in ten. The groups usually point in the right direction, '
+    + 'but do not build a budget on the exact number or on who sits in which one.',
+  low:
+    'Checked against sixty studies where the right answer was known: a red light almost never '
+    + 'recovered the true grouping. Either the questions do not separate people, or there is no '
+    + 'grouping to find. More people will not fix the first and cannot fix the second.',
+  unknown:
+    'The checks that produce this light did not complete, so there is no evidence here either '
+    + 'way. Read the full report below before using the groups.',
+}
+
+/**
  * Declared in reading order: are these groups real (map, gorge, fit, k), and only then what is in
  * them (profiles, heatmap). The tab order itself comes from the server's chart list; this map
  * mirrors it so the two cannot drift.

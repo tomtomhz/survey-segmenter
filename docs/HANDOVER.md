@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.13.3**, 261 Python + 120 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.14.0**, 263 Python + 125 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.13.3.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.13.3** — verified by unpacking the zip that is actually sitting there and
+**Released: v1.5.1 → v1.14.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.14.0** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
@@ -231,6 +231,18 @@ weak data, and that is the one a tighter threshold would trade against.
 One test was renamed as a result. `test_it_never_claims_high_confidence_for_the_wrong_number_of_
 groups` checked a single centre configuration while its name claimed a universal property the
 sweep falsifies; it is now `test_this_overlapping_shape_drops_to_moderate_when_it_merges`.
+
+### Contrast: the palette was never measured, on either ground
+
+Changing the light ground to white was the prompt, but the finding was older than the change.
+Three pairings sat below the 4.5:1 WCAG AA line for body text, and `--muted` — which carries every
+hint and caption in the interface, at small sizes — had been failing on the beige ground too. That
+is how a palette drifts: nobody measures the colour that was inherited.
+
+Fixed to 5.44 / 4.88 for muted, and two smaller lifts for `--ok` and `--accent-soft`. Dark mode
+already cleared AA everywhere and was left alone. `test_every_text_colour_in_the_interface_clears_
+wcag_aa` parses the stylesheet and checks every pairing the interface actually paints, so this
+cannot regress quietly. **If you change a colour, run that test rather than eyeballing it.**
 
 ### PRIVACY.md did not mention that images are sent
 
