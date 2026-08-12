@@ -741,7 +741,31 @@ def serve(port=8000):
                 self._json({"ok": False, "error": "The questionnaire designer is not installed."})
                 return
             body = self._read_json()
-            items = [str(line).strip() for line in (body.get("items") or []) if str(line).strip()]
+            raw = body.get("items")
+            # A bare string is the shape a caller most easily gets wrong, and it is the one that
+            # fails silently: iterating "delivery" yields letters, so the app cheerfully built a
+            # questionnaire comparing d, e, l, i, v, r and y. Anything that is not a list of text
+            # is refused rather than coerced — str() of a dict is a perfectly good Python string
+            # and a nonsensical thing to ask someone to choose between.
+            if raw is not None and not isinstance(raw, list):
+                self._json({"ok": False, "error": "Send the items as a list, one entry per item."})
+                return
+            if any(not isinstance(line, str) for line in (raw or [])):
+                self._json({"ok": False, "error": "Every item has to be text."})
+                return
+            # Collapsed rather than merely stripped: an item carrying a newline splits a cell in
+            # half in most survey platforms, which corrupts the import rather than looking wrong.
+            items = [" ".join(str(line).split()) for line in (raw or [])]
+            items = [line for line in items if line]
+            # Long enough for a real benefit statement, short enough that forty of them cannot turn
+            # a small design into a multi-megabyte reply. Truncating instead would silently change
+            # the wording of the questionnaire, which is worse than saying no.
+            too_long = [line for line in items if len(line) > 200]
+            if too_long:
+                self._json({"ok": False, "error": f"One item is {len(too_long[0])} characters long. "
+                                                  f"Keep each under 200 — people have to read them "
+                                                  f"on a screen and choose between them."})
+                return
             seen, unique = set(), []
             for name in items:                      # a duplicated item would compete with itself
                 if name.lower() not in seen:

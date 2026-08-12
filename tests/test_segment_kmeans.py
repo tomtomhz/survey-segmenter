@@ -6384,3 +6384,79 @@ def test_a_swap_never_changes_the_total_number_of_pairings():
         off = pairs[~np.eye(9, dtype=bool)]
         # Every screen contributes exactly C(items_per_set, 2) unordered pairs, counted twice.
         assert int(off.sum()) == 20 * 5 * (3 * 2 // 2) * 2
+
+
+@pytest.mark.parametrize("body,expect", [
+    # The one that failed SILENTLY: iterating a string yields letters, so the app built a
+    # questionnaire asking people to choose between d, e, l, i, v, r and y — and reported it as a
+    # perfectly balanced seven-item design.
+    ({"items": "delivery"}, "as a list"),
+    ({"items": [{"a": 1}, ["b"], None, "real item"]}, "has to be text"),
+    ({"items": ["x" * 5000, "b", "c", "d"]}, "under 200"),
+])
+def test_the_design_endpoint_refuses_items_that_are_not_items(body, expect, monkeypatch):
+    """Malformed item lists are refused rather than coerced into something plausible.
+
+    `str()` will happily turn a dict into a string and a bare string into a list of letters, and
+    every one of those produces a design that looks correct in the report and is nonsense in the
+    field. Refusing costs a message; coercing costs a study.
+    """
+    import json as _json
+    import socket
+    import threading
+    import time
+    import urllib.request
+
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: None)
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    threading.Thread(target=sk.serve, kwargs={"port": port}, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(60):
+        try:
+            urllib.request.urlopen(base + "/", timeout=5).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+
+    req = urllib.request.Request(base + "/design", data=_json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    got = _json.loads(urllib.request.urlopen(req, timeout=60).read().decode())
+    assert got["ok"] is False, "a malformed item list was accepted"
+    assert expect in got["error"], got["error"]
+
+
+def test_an_item_carrying_a_newline_cannot_split_a_cell_in_the_export(monkeypatch):
+    """Whitespace inside an item is collapsed, because a newline corrupts most platform imports.
+
+    The panel cannot produce one — it splits on newlines — but the endpoint is reachable directly,
+    and a broken import is worse than a visibly wrong one because it looks like the design's fault.
+    """
+    import csv
+    import io
+    import json as _json
+    import socket
+    import threading
+    import time
+    import urllib.request
+
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: None)
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    threading.Thread(target=sk.serve, kwargs={"port": port}, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(60):
+        try:
+            urllib.request.urlopen(base + "/", timeout=5).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+
+    body = {"items": ['Free "next-day",\ndelivery', "Lower prices", "Longer returns", "Live chat"],
+            "per_screen": 2, "screens": 3, "people": 20}
+    req = urllib.request.Request(base + "/design", data=_json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    got = _json.loads(urllib.request.urlopen(req, timeout=60).read().decode())
+    assert got["ok"] is True, got.get("error")
+    assert got["items"][0] == 'Free "next-day", delivery'
+    rows = list(csv.DictReader(io.StringIO(got["csv"])))
+    assert len(rows) == 20 * 3 * 2
+    assert {r["item"] for r in rows} == set(got["items"])

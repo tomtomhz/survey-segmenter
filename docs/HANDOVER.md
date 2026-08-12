@@ -8,13 +8,13 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.12.0**, 244 Python + 120 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.12.1**, 248 Python + 120 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.12.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+**Released: v1.5.1 → v1.12.1.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
 the team)/` is on **1.11.1** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
@@ -125,6 +125,24 @@ shortcut rests on that invariance, and a broken version would still report a pla
 (untrue since 1.11.0) and that HB "has not yet been run on real MaxDiff responses" (untrue since
 1.6.1). Both were the project describing an older version of itself, which is the failure mode this
 file exists to prevent.
+
+### v1.12.1 — what an hour of adversarial probing found in an hour-old feature
+
+Worth recording as a method rather than as a bug. The design endpoint was written, tested, driven
+through the real browser, and green — and then probed with the four shapes a caller most easily
+gets wrong. Three of them were accepted:
+
+* **Items sent as a bare string** iterated letter by letter, producing a study comparing `d`, `e`,
+  `l`, `i`, `v`, `r`, `y` — and a report calling it a balanced seven-item design. This is the worst
+  kind of defect this project produces: not a crash, an answer.
+* **Objects and nulls in the list** became items named `{'a': 1}` and `None`.
+* **A 50,000-character item** turned a four-item design into a one-megabyte reply.
+
+None of these were reachable from the panel, which is exactly why none of the tests caught them.
+**A test suite written against the UI only covers the inputs the UI can produce**, and every
+endpoint is reachable directly. The fix refuses all three rather than coercing: `str()` will
+cheerfully turn a dict into a string, and every such coercion produces a design that reads correctly
+and is nonsense in the field.
 
 ### GitHub Actions: RESOLVED 2026-08-08 — the repository is public and CI is green
 

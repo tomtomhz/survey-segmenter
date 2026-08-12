@@ -3,6 +3,23 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.12.1] — 2026-08-09
+
+### Fixed
+
+- **The design endpoint coerced malformed input into a plausible-looking questionnaire.** Found by
+  probing it adversarially straight after building it, not by a user. Sending the items as a bare
+  string rather than a list made the server iterate it letter by letter and build a study asking
+  people to choose between `d`, `e`, `l`, `i`, `v`, `r` and `y` — reported, with a straight face, as
+  a well-balanced seven-item design. A list containing objects or nulls produced items literally
+  named `{'a': 1}` and `None`. A single 50,000-character item turned a four-item design into a
+  one-megabyte reply.
+
+  All three are now refused with an explanation rather than coerced, and whitespace inside an item
+  is collapsed, because an item carrying a newline splits a cell in most survey platforms and
+  corrupts the import rather than merely looking wrong. Coercion is the wrong instinct here: it
+  costs a message to refuse and a whole study to accept.
+
 ## [1.12.0] — 2026-08-09
 
 ### Added
