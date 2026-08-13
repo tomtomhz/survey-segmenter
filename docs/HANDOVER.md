@@ -232,6 +232,21 @@ One test was renamed as a result. `test_it_never_claims_high_confidence_for_the_
 groups` checked a single centre configuration while its name claimed a universal property the
 sweep falsifies; it is now `test_this_overlapping_shape_drops_to_moderate_when_it_merges`.
 
+### The performance figures are data-specific, and re-measuring them nearly produced a false alarm
+
+Re-checked 2026-08-13 because a lot of code has gone into the analysis path. A synthetic 48,842 x 5
+file took **2.20 minutes** against the documented **0.9**, which looks like a 2.4x regression.
+
+It is not one. Running the **identical fixture** against a worktree at `v1.5.7` — the release the
+figure was written for — gave **2.25 minutes and 1.26 GB**, against the current 2.20 minutes and
+1.20 GB. Today's code is marginally faster and lighter. The whole gap is the data: the documented
+0.9 was the California housing file, whose distribution the k-search settles on faster than three
+cleanly planted groups.
+
+Two things to carry forward. **Quote the dataset with any timing**, or the number becomes a trap for
+whoever re-measures it. And when a benchmark looks like a regression, A/B the same fixture against
+the old tag before believing it — `git worktree add /tmp/old <tag>` costs a minute and settles it.
+
 ### The demographics section was silent about every number in it
 
 Found while auditing the opposite claim — that demographics cannot influence the grouping, which
@@ -517,7 +532,8 @@ workflows. Nothing is outstanding or half-finished.
    Two independent faults in `recommend_k`; against planted truth, 0.618 became 0.992.
 
 **Also shipped:** large studies (48,842 respondents went from 11.04 GB and 2.2 minutes to 1.59 GB
-and 0.9; 581,012 rows now run in 3.2 minutes), seven file shapes that were read wrongly and
+and 0.9 **on the California housing file** — that figure is specific to that data and is not a
+general benchmark, see the note below; 581,012 rows now run in 3.2 minutes), seven file shapes that were read wrongly and
 silently, a cap on calling a wide questionnaire high confidence, the categorical path brought from
 two of eleven pieces of evidence up to parity, and "no answer" codes in follow-up files no longer
 scored in silence.
