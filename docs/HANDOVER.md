@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.19.1**, 283 Python + 161 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.20.0**, 284 Python + 161 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.19.1.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.19.1** — verified by unpacking the zip that is actually sitting there and
+**Released: v1.5.1 → v1.20.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.20.0** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
@@ -231,6 +231,22 @@ weak data, and that is the one a tighter threshold would trade against.
 One test was renamed as a result. `test_it_never_claims_high_confidence_for_the_wrong_number_of_
 groups` checked a single centre configuration while its name claimed a universal property the
 sweep falsifies; it is now `test_this_overlapping_shape_drops_to_moderate_when_it_merges`.
+
+### The demographics section was silent about every number in it
+
+Found while auditing the opposite claim — that demographics cannot influence the grouping, which
+holds. The profiler branched on "non-numeric OR twelve or fewer distinct values" and did nothing
+at all with what fell through, so age in years, income and tenure were never tested and never
+mentioned. On a study whose segments were 25 and 55 years old, `age` appeared nowhere.
+
+**The failure mode is the one this project treats as most serious: doing less than the reader
+believes.** The heading promises profiling against demographics and the list looks complete.
+
+Now Kruskal-Wallis for numerics, inside the same FDR correction as the chi-squares — correcting
+only part of a family understates it — and the per-segment median printed beside each p-value,
+because "differs" without "which way" is not actionable. If you add another column type here, add
+it to the same `pvals` dict rather than a parallel one, or the correction silently stops covering
+everything.
 
 ### run_analysis discarded the caller's method, and how that surfaced
 

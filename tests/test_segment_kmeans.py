@@ -7532,3 +7532,52 @@ def test_a_survey_weight_projects_the_sizes_without_forming_the_groups():
     for wanted in (round(float(expected_sample.max()), 2), round(float(expected_population.max()), 2)):
         assert any(abs(s - wanted) < 0.02 for s in shares), (
             f"{wanted} appears nowhere among the reported shares {shares}")
+
+
+def test_a_numeric_demographic_is_profiled_rather_than_dropped_in_silence():
+    """Age in years, income, tenure in months — dropped without a word until now.
+
+    The profiler tested a column as categories when it was non-numeric OR had twelve or fewer
+    distinct values, and did nothing at all with the rest. So a study whose two segments averaged 25
+    and 55 years old produced a demographics section that listed `region` and never mentioned `age`.
+    To anyone who has not read the code, a heading that says "Profiling the segments against
+    demographics" followed by a list without age means age does not differ.
+
+    Kruskal-Wallis rather than one-way ANOVA, because survey demographics are routinely skewed and a
+    rank test does not require them to be normal. Folded into the same Benjamini-Hochberg
+    correction: correcting only the categorical subset would understate how many comparisons were
+    made.
+    """
+    rng = np.random.default_rng(0)
+    n = 300
+    group = rng.integers(0, 2, n)
+    ratings = np.where(group[:, None] == 0, 2, 6) + rng.normal(0, 0.8, (n, 5))
+    frame = pd.DataFrame(np.clip(np.round(ratings), 1, 7).astype(int),
+                         columns=[f"q{i + 1}" for i in range(5)])
+    frame.insert(0, "id", range(n))
+    frame["age"] = np.where(group == 0, 25, 55) + rng.integers(-4, 5, n)     # differs hugely
+    frame["income"] = rng.integers(20000, 90000, n)                          # differs not at all
+    frame["region"] = np.where(group == 0, "North", "South")
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        result = sk.run_analysis(frame.to_csv(index=False).encode(),
+                                 cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+    digest = result["digest"]
+    assert frame["age"].nunique() > 12, "the fixture no longer exercises the branch it is about"
+
+    assert "**age**" in digest, "a numeric demographic was dropped from the profiling section"
+    assert "Kruskal-Wallis" in digest
+    # It must survive the correction — a 30-year gap is not a marginal finding.
+    age_line = next(line for line in digest.split("\n") if "**age**" in line)
+    assert "survives FDR correction" in age_line, age_line
+
+    # And the one that genuinely does not differ must NOT be dressed up as a finding.
+    income_line = next(line for line in digest.split("\n") if "**income**" in line)
+    assert "survives FDR correction" not in income_line, income_line
+
+    # A p-value alone says something differs without saying which way, which is the whole point of
+    # profiling, so the medians travel with it — in plain numbers, not scientific notation.
+    medians = [line for line in digest.split("\n") if "median by segment" in line]
+    assert medians, "the direction of the difference was not reported"
+    assert not any("e+0" in line for line in medians), (
+        f"a median came out in scientific notation: {medians}")

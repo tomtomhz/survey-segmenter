@@ -3,6 +3,30 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.20.0] — 2026-08-13
+
+### Fixed
+
+- **Age, income and every other numeric demographic were dropped from the profiling section without
+  a word.** The profiler tested a column as categories when it was non-numeric *or* had twelve or
+  fewer distinct values, and did nothing whatever with the rest. So a study whose two segments
+  averaged **25 and 55 years old** produced a demographics section that listed `region` and never
+  mentioned `age` — and to anyone who has not read the code, a heading that says "Profiling the
+  segments against demographics" followed by a list without age means age does not differ.
+
+  It was the single most actionable fact in that dataset, and the report was silent about it.
+
+  Numeric demographics are now tested with **Kruskal-Wallis** — a rank test, because survey
+  demographics are routinely skewed (income, tenure, number of children) and one-way ANOVA would
+  ask them to be normal. They are folded into the **same** Benjamini-Hochberg correction as the
+  categorical ones, since correcting only the categorical subset understates how many comparisons
+  were actually made.
+
+  And the **median per segment travels with the p-value**: a p-value alone says something differs
+  without saying which way, which is the entire point of profiling. In plain numbers rather than
+  scientific notation — "51,503", not "5.15e+04" — because this report is written for someone who
+  will never read the word "eta-squared".
+
 ## [1.19.1] — 2026-08-13
 
 ### Verified

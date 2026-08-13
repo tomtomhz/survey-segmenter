@@ -170,7 +170,7 @@ for _m in ("divide by zero encountered in matmul", "overflow encountered in matm
            "invalid value encountered in matmul"):
     warnings.filterwarnings("ignore", message=_m, category=RuntimeWarning)
 
-__version__ = "1.19.1"    # keep in sync with pyproject.toml
+__version__ = "1.20.0"    # keep in sync with pyproject.toml
 
 # Optional "ask Claude about your segments" add-on. Imported here (not lazily) so the packaged app
 # bundles it; wrapped so a missing file/SDK never stops the core segmentation tool from loading.
@@ -2943,7 +2943,7 @@ def profile_demographics(labels, ids, demo_source, id_col, unit="segment"):
         demo = demo.set_index(demo[id_col].astype(str)).join(seg, how="inner")
     else:
         demo = demo.copy(); demo[unit] = labels
-    pvals = {}
+    pvals, how, detail = {}, {}, {}
     for col in [c for c in demo.columns if c not in (unit, id_col)]:
         # Non-numeric or few-valued columns are profiled as categories. Tested by dtype
         # rather than against `object` for the pandas 3 reason above.
@@ -2952,12 +2952,47 @@ def profile_demographics(labels, ids, demo_source, id_col, unit="segment"):
             if ct.shape[0] > 1 and ct.shape[1] > 1:
                 _, p, _, _ = stats.chi2_contingency(ct)
                 pvals[col] = p
+                how[col] = "chi-square"
+            continue
+        # A NUMBER with many distinct values — age in years, income, tenure in months. These used
+        # to be dropped in silence: the section still appeared, listed whatever was categorical,
+        # and said nothing about the rest. Measured on a study whose two segments were 25 and 55
+        # years old on average, "age" was not mentioned anywhere, which reads as "age does not
+        # differ" to anyone who does not know the code.
+        #
+        # Kruskal-Wallis rather than one-way ANOVA: survey demographics are routinely skewed
+        # (income, tenure, number of children), and a rank test does not ask them to be normal.
+        values = pd.to_numeric(demo[col], errors="coerce")
+        groups = [values[demo[unit] == g].dropna().to_numpy()
+                  for g in sorted(demo[unit].dropna().unique())]
+        groups = [g for g in groups if len(g) >= 2]
+        if len(groups) > 1 and len({float(v) for g in groups for v in g}) > 1:
+            try:
+                _, p = stats.kruskal(*groups)
+            except ValueError:
+                continue                        # identical within every group: nothing to test
+            pvals[col] = p
+            how[col] = "Kruskal-Wallis"
+            # The medians are what a reader acts on. A p-value alone says something differs
+            # without saying which way, and "which way" is the entire point of profiling.
+            medians = values.groupby(demo[unit]).median()
+            # Plainly, not in scientific notation: a median income of 51,500 is a number a
+            # reader recognises and "5.15e+04" is not, and this report is written for someone who
+            # will never read the word "eta-squared".
+            detail[col] = ", ".join(
+                f"{unit} {int(g)}: " + (f"{m:,.0f}" if abs(m) >= 1000 else f"{m:.4g}")
+                for g, m in medians.items())
     sig = _fdr_bh(pvals) if pvals else {}
     L = [f"## Profiling the {_plural(unit)} against demographics "
-         "(chi-square, Benjamini-Hochberg FDR-corrected; profiling only)\n"]
+         "(chi-square for categories, Kruskal-Wallis for numbers; Benjamini-Hochberg "
+         "FDR-corrected across all of them; profiling only)\n"]
     for col, p in sorted(pvals.items(), key=lambda kv: kv[1]):
-        L.append(f"- **{col}**: chi-square p = {p:.4f}"
-                 + (f"  <- differs by {unit} (survives FDR correction)" if sig.get(col) else ""))
+        line = f"- **{col}**: {how[col]} p = {p:.4f}"
+        if sig.get(col):
+            line += f"  <- differs by {unit} (survives FDR correction)"
+        if col in detail:
+            line += f"\n    - median by {unit} — {detail[col]}"
+        L.append(line)
     L.append(f"\n(Demographics describe {_plural(unit)}; they do not define them.)")
     return "\n".join(L)
 
