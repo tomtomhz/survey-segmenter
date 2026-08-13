@@ -19,6 +19,36 @@ the team)/` is on **1.20.0** — verified by unpacking the zip that is actually 
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
+### Every claim that has been checked against an outside truth
+
+This file has grown to twenty-seven sections and the evidence is scattered through all of them.
+This is the index. **"Outside truth" means a fact the tool did not produce** — planted structure,
+a known population, a held-out sample — because comparing the tool's numbers to each other cannot
+detect a number that is measuring the wrong quantity, which is how most of these were found.
+
+| Claim the tool makes | What it measured | Held by |
+|---|---|---|
+| "Probability this item beats the next" | claimed 84.3%, right 83.3%, over 126 adjacent pairs | `test_the_probability_one_item_beats_the_next_is_honest` |
+| The confidence light never invents groups | 0 of 60 planted studies over-counted | `test_the_confidence_light_never_invents_groups_and_never_greenlights_weak_data` |
+| …and never goes green on weak data | 0 "high" in 36 studies at the two weakest separations | same test |
+| What "high" is worth | 69% right k, mean ARI 0.707 (moderate 27%/0.267, low 3%/0.088) | measured; see the v1.13.0 section |
+| TURF's optimism figure is honest | reports 14.8 points against a real 14.0 | `test_turf_optimism_tracks_the_real_error_against_a_known_population` |
+| TURF says when its answer is a coin toss | best reach tied in 14 of 30 studies at 60 people | `test_turf_says_when_the_winning_set_is_a_coin_toss` |
+| The typing rule works on strangers | 98.7% agreement, and *better* on held-out people than training ones | `test_the_typing_rule_works_as_well_on_strangers_as_on_the_people_it_was_built_from` |
+| Demographics cannot influence the grouping | ARI 1.000 with the real structure, −0.003 with a decoy | `test_demographics_cannot_influence_the_grouping_they_are_used_to_profile` |
+| A survey weight projects sizes without shaping segments | exact on an 81%/19% sample weighted to 21%/79% | `test_a_survey_weight_projects_the_sizes_without_forming_the_groups` |
+| Numeric demographics are profiled, not dropped | a 30-year age gap that used to go unmentioned | `test_a_numeric_demographic_is_profiled_rather_than_dropped_in_silence` |
+| Switching to `gmm` helps only on elliptical groups | 0.954 vs 0.872 elliptical; 0.147 vs 0.340 on unequal spreads | `test_the_gaussian_mixture_helps_where_it_is_meant_to_and_over_splits_where_it_is_not` |
+| HB beats counting even when its assumptions are wrong | +0.147 to +0.189, widest under the worst violation | `test_hb_still_beats_counting_when_its_assumptions_are_wrong` |
+| The questionnaire designer closes the loop | Spearman 1.000 from planted utilities and back | the design tests |
+| k-selection accuracy | 19 of 21 | `python3 references/kbench.py` |
+| Every text colour clears WCAG AA | all pairs ≥ 4.5:1 in both themes | `test_every_text_colour_in_the_interface_clears_wcag_aa` |
+
+**Four of those started as defects rather than confirmations** — TURF gave up three, the demographics
+profiler one — and in three of the four the statistics were right and the *presentation* was wrong.
+That is the pattern to expect: this codebase computes well and has historically described itself
+carelessly.
+
 ### The workflow now covers the whole loop
 
 Up to 1.9.0 the tool analysed a study someone else had designed and fielded. It now covers
