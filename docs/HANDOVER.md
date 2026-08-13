@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.18.0**, 279 Python + 161 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.19.0**, 281 Python + 161 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.18.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.18.0** — verified by unpacking the zip that is actually sitting there and
+**Released: v1.5.1 → v1.19.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.19.0** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
@@ -231,6 +231,22 @@ weak data, and that is the one a tighter threshold would trade against.
 One test was renamed as a result. `test_it_never_claims_high_confidence_for_the_wrong_number_of_
 groups` checked a single centre configuration while its name claimed a universal property the
 sweep falsifies; it is now `test_this_overlapping_shape_drops_to_moderate_when_it_merges`.
+
+### run_analysis discarded the caller's method, and how that surfaced
+
+`auto_prepare` decides what the data supports, and `replace(cfg, **_opts)` then overwrote whatever
+was asked for — so `run_analysis(cfg=SegmentationConfig(method="gmm"))` completed happily and
+reported `method: kmeans`. The CLI was always fine; only the app's path had it.
+
+**It surfaced as a measurement that was too clean.** Comparing k-means against gmm across five
+separations and two seeds returned identical ARI to three decimal places every time. Two methods do
+not agree to three decimals ten times running — that is one method running twice. Worth keeping as
+a habit: when a comparison comes out perfectly clean, suspect the comparison before believing it.
+
+The fix honours an explicit method where the data allows it and **says so in the report** where it
+cannot, rather than substituting silently. "The caller asked" is told from "the caller did not ask"
+by comparing against a fresh `SegmentationConfig()`, because the dataclass has no way to express
+"unset" and giving it one would change what every other caller means.
 
 ### Probe every endpoint you add, the same evening you add it
 
@@ -677,9 +693,14 @@ Not a survey, but 17,000 real rows through the whole pipeline on 2026-07-31
 1. **Read a real Qualtrics/Sawtooth wide export.** Its shape is recognised and refused with
    instructions rather than silently misread, which was the dangerous behaviour. Reading one
    properly is blocked on having a real file: the code polarity cannot be inferred from the data.
-2. **Resolving overlapping segments** — the measured weakness. Worth understanding before
-   attempting: merging may be the honest answer, and "improving" it risks trading away the
-   never-confidently-wrong property, which is worth more.
+2. ~~**Resolving overlapping segments**~~ — **answered in 1.19.0, and the answer is to leave it
+   alone.** Merging IS the honest answer: on planted overlapping spherical groups the Gaussian
+   mixture, which the README offered as the remedy, never beat k-means at any separation tried, and
+   was notably worse at the separation where k-means starts to recover the third group. The
+   mixture's real strength is elliptical clusters (0.954 against 0.872), and it degrades badly on
+   unequal spreads by over-splitting. Do not reopen this without new evidence of a *different*
+   kind — the property being protected is that the tool is never confidently wrong, and every
+   attempt to sharpen overlapping segments trades against it.
 3. **Duplicate a project** to re-run the same file with a different set of questions. Partly
    covered already by the column picker's re-group, which is why it is third rather than first.
 

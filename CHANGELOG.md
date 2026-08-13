@@ -3,6 +3,48 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.19.0] — 2026-08-13
+
+### Fixed
+
+- **A requested method was thrown away without a word.** `run_analysis` — the path the app uses —
+  read the questionnaire, decided what the data supported, and then overwrote whatever the caller
+  had asked for. A request for `gmm` came back as a completed run whose report said
+  *"method: kmeans"*. The command line never had this problem; only this path did.
+
+  The project's own comment on `--force-k` states the principle it was breaking: an ignored flag
+  that reports success is worse than an unimplemented one, because the reader believes the answer
+  is the one they asked for.
+
+  An explicitly requested method is now used where the data allows it. Where it does not — a
+  Gaussian mixture over categorical answers is not defensible whoever asks — the detection stays in
+  charge and the substitution is **stated in the report** instead of made silently.
+
+  Found while trying to measure something else, which is how the last several have turned up: the
+  two methods returned byte-identical results at five separations and two seeds, and that is not
+  what agreement looks like.
+
+### Changed
+
+- **The README's advice about `--method gmm` is now measured, and narrower than it was.** It was
+  offered as the remedy for k-means's honest limitation — "elliptical, unequal-size, overlapping".
+  Against planted truth, three seeds at 400 respondents:
+
+  | planted group shape | k-means | gmm |
+  |---|---|---|
+  | elongated, similar spread | 0.872 | **0.954** |
+  | elongated, one group twice as wide | 0.695 | 0.668 |
+  | elongated, one group three times as wide | 0.340 | **0.147** |
+
+  It earns its place on elliptical clusters and gets **worse** as spreads become unequal, spending
+  the extra flexibility on splitting the broad group rather than modelling it — 3.7 groups found
+  where there were 2. And on overlapping *spherical* groups it never beat k-means at any separation
+  tried, so it is not the answer to two segments that have merged.
+
+  That last point settles a question the handover has carried for months as "the measured
+  weakness": when the tool merges two overlapping groups, **merging is the honest answer**, and the
+  documented alternative does not recover them.
+
 ## [1.18.0] — 2026-08-13
 
 ### Added

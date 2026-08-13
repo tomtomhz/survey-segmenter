@@ -7366,3 +7366,94 @@ def test_the_project_list_can_be_asked_for_all_of_it(monkeypatch, tmp_path):
     # Same order either way: pinned first, then newest. A different order between the two views
     # would make "show all" feel like a different list rather than more of the same one.
     assert [p["id"] for p in everything["projects"]][:60] == [p["id"] for p in capped["projects"]]
+
+
+def test_an_explicitly_asked_for_method_is_used_or_refused_in_words():
+    """`run_analysis` used to discard the caller's method without a word.
+
+    `auto_prepare` reads the questionnaire and decides what the data can support, and that
+    detection then overwrote whatever was asked for: a request for `gmm` came back as a completed
+    run whose report said "method: kmeans". The command line never had this problem — only the path
+    the app uses did.
+
+    The project's own comment on `--force-k` states the principle: an ignored flag that reports
+    success is worse than an unimplemented one, because the reader believes the answer is the one
+    they asked for.
+    """
+    rng = np.random.default_rng(0)
+    centres = np.zeros((3, 6))
+    centres[1] = 1.0
+    centres[2] = -3.0
+    who = rng.integers(0, 3, 300)
+    raw = centres[who] + rng.normal(0, 1.0, (300, 6))
+    frame = pd.DataFrame(np.clip(np.round(raw + 4), 1, 7).astype(int),
+                         columns=[f"q{i + 1}" for i in range(6)])
+    frame.insert(0, "id", range(300))
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        asked = sk.run_analysis(frame.to_csv(index=False).encode(),
+                                cfg=sk.SegmentationConfig(k_min=2, k_max=5, method="gmm", **FAST))
+    assert asked["method"] == "gmm", "the requested method was silently replaced"
+
+    # Categorical answers cannot be handed to a Gaussian mixture whoever asks: the detection stays
+    # in charge, and the substitution is stated rather than made quietly.
+    categorical = pd.DataFrame({
+        "id": range(200),
+        "brand": rng.choice(["Nike", "Adidas", "Puma"], 200),
+        "channel": rng.choice(["Online", "Store"], 200),
+        "pref": rng.choice(["A", "B", "C"], 200)})
+    with contextlib.redirect_stdout(io.StringIO()):
+        refused = sk.run_analysis(categorical.to_csv(index=False).encode(),
+                                  cfg=sk.SegmentationConfig(k_min=2, k_max=4, method="gmm",
+                                                            **FAST))
+    assert refused["method"] == "lca", "a Gaussian mixture was run over categorical codes"
+    assert "You asked for the gmm method" in refused["digest"], (
+        "the method was swapped without telling the reader")
+
+
+def test_the_gaussian_mixture_helps_where_it_is_meant_to_and_over_splits_where_it_is_not():
+    """What switching to `gmm` actually buys, measured rather than assumed.
+
+    The README offers it as the remedy for k-means's honest limitation — spherical, equal-size
+    clusters — and the shape of that remedy turns out to be narrower than "elliptical, unequal-size,
+    overlapping". Measured over three seeds at 400 respondents:
+
+        group shape                          k-means ARI    gmm ARI    difference
+        elongated, similar spread               0.872        0.954       +0.082
+        elongated, one group twice as wide      0.695        0.668       -0.027
+        elongated, one group three times        0.340        0.147       -0.193
+
+    It earns its place on elliptical clusters and loses badly on very unequal spreads, where it
+    spends the extra flexibility splitting the broad group rather than modelling it — 3.7 groups
+    found against a true 2. Separately, on overlapping SPHERICAL groups it never beat k-means at
+    any separation tried, so it is not the answer to a merge.
+
+    This test keeps the first row honest, because that is the row the advice rests on.
+    """
+    def elongated(n_people, n_items, seed, ratio):
+        rng = np.random.default_rng(seed)
+        who = rng.integers(0, 2, n_people)
+        spread = np.where(who == 0, 1.0, ratio)[:, None]
+        noise = rng.normal(0, 1.0, (n_people, n_items)) * spread
+        noise[:, :2] *= 2.5                       # stretched on two questions: an elliptical cloud
+        raw = np.where(who == 0, -1.2, 1.2)[:, None] + noise
+        frame = pd.DataFrame(np.clip(np.round(raw + 4), 1, 7).astype(int),
+                             columns=[f"q{i + 1}" for i in range(n_items)])
+        frame.insert(0, "id", range(n_people))
+        return frame, who
+
+    def score(frame, truth, method):
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = sk.run_analysis(frame.to_csv(index=False).encode(),
+                                     cfg=sk.SegmentationConfig(k_min=2, k_max=5, method=method,
+                                                               **FAST))
+        labels = pd.read_csv(io.StringIO(result["files"]["segment_assignments.csv"]))
+        column = "segment" if "segment" in labels.columns else "class"
+        return result["k"], adjusted_rand_score(truth, labels[column].to_numpy())
+
+    frame, truth = elongated(400, 6, 0, 1.0)
+    _, kmeans_ari = score(frame, truth, "kmeans")
+    _, gmm_ari = score(frame, truth, "gmm")
+    assert gmm_ari > kmeans_ari, (
+        f"the mixture no longer helps on the shape it is recommended for: {gmm_ari:.3f} against "
+        f"{kmeans_ari:.3f} — if this is a deliberate change, re-measure the table in the docstring")

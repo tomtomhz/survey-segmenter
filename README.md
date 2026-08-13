@@ -358,7 +358,19 @@ to `latent_class_typing_rule.json`, and `--classify` auto-detects which kind of 
 
 ## The honest limitation
 
-k-means finds spherical, roughly equal-size clusters. For genuinely elongated, unequal-variance, or overlapping segments it is the wrong tool no matter how carefully it is validated. That is exactly why two alternatives are built in as first-class methods: run `--method gmm` for a Gaussian-mixture / latent-class model that allows elliptical, unequal-size, overlapping segments (continuous data), or `--method lca` for a true Latent Class Analysis when your inputs are categorical rather than continuous utilities. When the per-segment Jaccard says the k-means segments have dissolved, switch methods and compare.
+k-means finds spherical, roughly equal-size clusters. For genuinely elongated segments it is the wrong tool no matter how carefully it is validated, which is why two alternatives are built in as first-class methods: `--method gmm` for a Gaussian mixture (continuous data), and `--method lca` for a true Latent Class Analysis when your inputs are categorical rather than continuous.
+
+**What switching to `gmm` actually buys is narrower than it sounds, and is measured rather than asserted.** Three seeds at 400 respondents, against planted truth:
+
+| planted group shape | k-means | gmm |
+|---|---|---|
+| elongated, similar spread | 0.872 | **0.954** |
+| elongated, one group twice as wide | 0.695 | 0.668 |
+| elongated, one group three times as wide | 0.340 | **0.147** |
+
+It earns its place on elliptical clusters. It does **worse** as the spreads become unequal, because it spends the extra flexibility splitting the broad group rather than modelling it — 3.7 groups found where there were 2. And on overlapping *spherical* groups it never beat k-means at any separation tried, so it is not the answer to two segments that have merged: at that point merging is usually the honest answer, and the report says so rather than inventing a split.
+
+So: switch to `gmm` when the segment map shows stretched, cigar-shaped clouds. Do not reach for it because the groups overlap, and read the per-segment Jaccard on both before believing either.
 
 The boundary that used to sit *upstream* — designing the experimental stimuli, the last part of a full Moskowitz/Sawtooth pipeline this left to you — is closed: `--design`, and the panel on the app's start screen, build the best-worst questionnaire itself. What remains outside the tool is the judgement about **which items are worth testing at all**, which is not a statistical question.
 

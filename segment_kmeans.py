@@ -170,7 +170,7 @@ for _m in ("divide by zero encountered in matmul", "overflow encountered in matm
            "invalid value encountered in matmul"):
     warnings.filterwarnings("ignore", message=_m, category=RuntimeWarning)
 
-__version__ = "1.18.0"    # keep in sync with pyproject.toml
+__version__ = "1.19.0"    # keep in sync with pyproject.toml
 
 # Optional "ask Claude about your segments" add-on. Imported here (not lazily) so the packaged app
 # bundles it; wrapped so a missing file/SDK never stops the core segmentation tool from loading.
@@ -4228,6 +4228,15 @@ def _turf_section(est, size=3):
     return "\n".join(lines), result
 
 
+#: Why a detected method cannot be overridden, in words a reader of the report understands. Only
+#: the two that are forced by the shape of the data appear here; `kmeans` is never a refusal.
+_METHOD_REASON = {
+    "lca": "categorical answers rather than rating scales",
+    "kproto": "a mix of rating scales and pick-any questions",
+    "kmeans": "rating scales",
+}
+
+
 def run_analysis(data, cfg=None, force_items=None):
     """Raw survey (bytes or a path) -> a dict with everything the web app and the AI layer need:
     the title, the report as an HTML fragment (auto-detection notes on top), and a plain-text
@@ -4268,6 +4277,31 @@ def run_analysis(data, cfg=None, force_items=None):
     if maxdiff_est is not None:
         _turf_made = _turf_section(maxdiff_est)
     clean, method, id_col, items, plan = auto_prepare(df, force_items=force_items)
+    # An explicitly requested method is honoured where the data allows it, rather than silently
+    # replaced by the detected one.
+    #
+    # `auto_prepare` reads the questionnaire and decides what the data can support: k-means for
+    # rating scales, k-prototypes where ratings are mixed with pick-any answers, latent class for
+    # categorical. That detection is right and stays in charge of those two — a Gaussian mixture
+    # over categorical codes is not a defensible answer whoever asked for it. But where the data is
+    # continuous, `gmm` is a legitimate alternative that this project documents as the remedy for
+    # k-means's known weakness, and passing it here used to be discarded without a word: the run
+    # reported success, the report said "method: kmeans", and the caller believed they had the
+    # answer they asked for. The command line never had this problem; only this path did, which is
+    # the path the app uses.
+    #
+    # Comparing against a fresh default is how "the caller asked for kmeans" is told apart from
+    # "the caller did not ask" — the dataclass cannot distinguish them, and inventing an "auto"
+    # default would change what every other caller of SegmentationConfig means.
+    requested = None
+    if cfg is not None and cfg.method != SegmentationConfig().method:
+        requested = cfg.method
+    if requested and method == "kmeans":
+        method = requested
+    elif requested and requested != method:
+        plan["notes"].append(
+            f"You asked for the {requested} method, but this file is {_METHOD_REASON[method]}, so "
+            f"it was analysed with {method} instead.")
     _opts = {"method": method, "var_kinds": plan.get("kinds"),
              "level_labels": plan.get("level_labels")}
     base = replace(cfg, **_opts) if cfg is not None else SegmentationConfig(**_opts)
