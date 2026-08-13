@@ -3,6 +3,40 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.21.0] — 2026-08-13
+
+### Fixed
+
+- **The command line clustered a wide best-worst export as if it were ratings.** The app has
+  refused these since 1.6.2; the command line never got the same guard. Measured on a 90-person
+  Qualtrics-shaped export: `segment_kmeans.py wide_export.csv` ran to completion, recommended two
+  segments and wrote a full report — having clustered the response *codes* (1, 2, 3) as though they
+  were scores. It hedged, with Hopkins at 0.58 and prediction strength 0.53, but a hedge is not a
+  refusal and the numbers being clustered were meaningless.
+
+  Same shape as the method bug in 1.19.0: a guard on one path and not the other.
+
+### Added
+
+- **`--best-code` reads a wide export instead of refusing it.** Qualtrics and Sawtooth write MaxDiff
+  one row per person, a column per (screen, item), holding a small code. The layout is recoverable;
+  the **polarity is not** — whether 3 means best or 1 means best is a fact about how the survey was
+  built, not about the data. So it is asked rather than guessed:
+
+      segment-kmeans wide_export.csv --best-code 3
+
+  The "worst" code is worked out from the file — a best-worst block holds three values, and the
+  most common is the "merely shown" one, so naming the best is enough.
+
+  **Why it must be asked** is the whole finding, and the test keeps it: stating the polarity
+  backwards does not fail, it silently inverts the entire ranking. Against a planted truth,
+  Spearman **+1.000** stated correctly and **−1.000** stated the wrong way round, with nothing in
+  the output looking wrong either time.
+
+  Until now the refusal told the reader to pivot twelve task blocks by hand in a spreadsheet, in a
+  tool whose premise is that its user does not do that kind of thing. It now names the flag first
+  and keeps the manual instructions as the fallback.
+
 ## [1.20.0] — 2026-08-13
 
 ### Fixed

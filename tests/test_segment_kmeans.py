@@ -7581,3 +7581,85 @@ def test_a_numeric_demographic_is_profiled_rather_than_dropped_in_silence():
     assert medians, "the direction of the difference was not reported"
     assert not any("e+0" in line for line in medians), (
         f"a median came out in scientific notation: {medians}")
+
+
+def _wide_export(seed=5, n_people=90):
+    """A best-worst study written the way Qualtrics and Sawtooth write it: one row per PERSON,
+    a column per (task, item), and a small code — 3 best, 1 worst, 2 merely shown."""
+    d = pytest.importorskip("design")
+    names = ["Free delivery", "Lower prices", "Longer returns", "Loyalty points", "Live chat",
+             "Sustainable packaging", "Faster checkout", "Wider range", "Gift wrap"]
+    truth = np.array([2.2, 1.6, 0.9, 0.3, -0.1, -0.5, -1.1, -1.6, -2.0])
+    built, _ = d.make_design(len(names), 4, 8, n_people, seed=seed)
+    rng = np.random.default_rng(seed + 2)
+    wide = {}
+    for person, tasks in enumerate(built):
+        personal = truth + rng.normal(0, 0.7, len(names))
+        for task_number, task in enumerate(tasks, start=1):
+            values = personal[task] + rng.gumbel(0, 1, len(task))
+            best, worst = task[int(np.argmax(values))], task[int(np.argmin(values))]
+            for item in task:
+                code = 3 if item == best else (1 if item == worst else 2)
+                wide.setdefault(f"Q{task_number}_{names[item]}", {})[person] = code
+    frame = pd.DataFrame(wide)
+    frame.insert(0, "ResponseId", [f"R{i:04d}" for i in range(len(frame))])
+    return frame, names, truth
+
+
+def test_a_wide_best_worst_export_is_read_once_the_polarity_is_stated():
+    """The layout is recoverable; the polarity is not, so it is stated and then the file is read.
+
+    Until now the tool detected these and refused with instructions to pivot twelve task blocks by
+    hand in a spreadsheet — a real chore, in a tool whose premise is that its user does not do that.
+
+    The reason it must be asked rather than guessed is in this test: stating it backwards does not
+    fail, it silently inverts the entire ranking. Spearman +1.000 stated correctly, −1.000 stated
+    the wrong way round.
+    """
+    md = pytest.importorskip("maxdiff")
+    from scipy.stats import spearmanr
+    frame, names, truth = _wide_export()
+
+    assert md.looks_like_wide_best_worst(frame) >= 2, "the fixture is not a wide export"
+    codes = dict(md.wide_codes_seen(frame))
+    assert set(codes) == {1.0, 2.0, 3.0}
+    assert codes[2.0] > codes[3.0], "the 'merely shown' code should be the most common"
+
+    for best, expected in ((3, 1.0), (1, -1.0)):
+        tidy = md.read_wide_best_worst(frame, best_code=best)
+        assert list(tidy.columns) == ["respondent_id", "set", "item", "choice"]
+        with contextlib.redirect_stdout(io.StringIO()):
+            est = md.utilities_from_export(tidy)
+        order = [names.index(i) for i in est.ranking()["item"]]
+        rho = spearmanr(order, np.argsort(-truth)).statistic
+        assert rho == pytest.approx(expected, abs=0.05), (
+            f"best_code={best} gave Spearman {rho:+.3f} against the planted order")
+
+
+def test_the_command_line_refuses_a_wide_export_rather_than_clustering_its_codes():
+    """The guard the app has had since 1.6.2, which the command line never got.
+
+    Measured before the fix: `segment_kmeans.py wide_export.csv` ran to completion, recommended two
+    segments and wrote a full report — having clustered the response CODES (1, 2, 3) as if they
+    were ratings. It hedged, with Hopkins at 0.58 and prediction strength 0.53, but a hedge is not
+    a refusal and the numbers being clustered were meaningless.
+    """
+    md = pytest.importorskip("maxdiff")
+    frame, _, _ = _wide_export()
+    assert not md.looks_like_maxdiff(frame), "the fixture would be caught by the tidy detector"
+
+    explained = sk._explain_run_error(f"_MAXDIFF_WIDE:{md.looks_like_wide_best_worst(frame)}")
+    assert "one row per PERSON" in explained
+    # The refusal has to name the way out, or it sends the reader to a spreadsheet for an hour.
+    assert "--best-code" in explained, "the refusal does not mention the flag that fixes it"
+
+
+@pytest.mark.parametrize("sentinel,expect", [
+    ("_MAXDIFF_NOT_WIDE", "nothing for --best-code to reshape"),
+    ("_MAXDIFF_SAME_CODE", "cannot be the same number"),
+    ("_MAXDIFF_CODES_UNCLEAR", "which code means 'worst'"),
+])
+def test_the_wide_reader_explains_its_refusals(sentinel, expect):
+    explained = sk._explain_run_error(sentinel)
+    assert expect in explained
+    assert "_MAXDIFF" not in explained, "an internal sentinel reached the reader"

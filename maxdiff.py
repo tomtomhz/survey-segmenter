@@ -482,6 +482,97 @@ def looks_like_wide_best_worst(df):
     return matching if matching >= 2 else 0
 
 
+def wide_codes_seen(df):
+    """The distinct codes used inside the task blocks of a wide export, most common first.
+
+    Offered to the reader so they can point at the one that means "best" instead of remembering it:
+    the codes are in the file, only their MEANING is not.
+    """
+    import pandas as pd
+    groups = {}
+    for c in df.columns:
+        m = _TASK_KEY.match(str(c).strip())
+        if m:
+            groups.setdefault(m.group(1).lower(), []).append(c)
+    groups = {k: v for k, v in groups.items() if 3 <= len(v) <= 12}
+    counts = {}
+    for cols in groups.values():
+        block = df[cols].apply(pd.to_numeric, errors="coerce")
+        for value, n in block.stack().value_counts().items():
+            counts[float(value)] = counts.get(float(value), 0) + int(n)
+    return sorted(counts.items(), key=lambda kv: -kv[1])
+
+
+def read_wide_best_worst(df, best_code, worst_code=None, item_names=None):
+    """Reshape a one-row-per-person MaxDiff export into the tidy long table the estimator reads.
+
+    The layout is recoverable from the file; the POLARITY is not, which is why the two codes are
+    arguments rather than guesses. Whether 3 means best or 1 means best is a property of how the
+    survey was built, and choosing wrong inverts every ranking the tool goes on to produce without
+    anything looking amiss. `choicetools` makes the analyst state it for the same reason.
+
+    Until this existed the tool detected these files and refused them with instructions to pivot by
+    hand in a spreadsheet — a real chore on a twelve-task study, in a tool whose whole premise is
+    that its user does not do that kind of thing.
+
+    Column names are read as `<task><separator><item>`: `Q1_3`, `MD2.5`, `task3-1`. The item part
+    becomes the item name unless `item_names` maps it to something a reader recognises.
+
+    Returns a tidy DataFrame with respondent_id / set / item / choice, ready for `read_maxdiff`.
+    """
+    import pandas as pd
+    if worst_code is None:
+        # A best-worst block holds exactly three kinds of value: the top pick, the bottom pick, and
+        # everything merely shown — and the "merely shown" code is by far the most common, because
+        # it covers every item that was neither. So naming the best code is enough: the worst is
+        # the remaining one. Asking for both would be asking for something the file already knows.
+        seen = [code for code, _ in wide_codes_seen(df)]
+        shown = seen[0] if seen else None
+        rest = [c for c in seen if c != float(best_code) and c != shown]
+        if not rest:
+            raise ValueError("_MAXDIFF_CODES_UNCLEAR")
+        worst_code = rest[0]
+    if float(best_code) == float(worst_code):
+        raise ValueError("_MAXDIFF_SAME_CODE")
+
+    groups = {}
+    for c in df.columns:
+        m = _TASK_KEY.match(str(c).strip())
+        if m:
+            groups.setdefault(m.group(1).lower(), []).append(c)
+    groups = {k: v for k, v in groups.items() if 3 <= len(v) <= 12}
+    if len(groups) < 2:
+        raise ValueError("_MAXDIFF_NOT_WIDE")
+
+    # An id column if the file has one, otherwise the row number. A wide export routinely carries
+    # ResponseId or similar, and losing it would make the per-person utilities untraceable.
+    id_col = next((c for c in df.columns
+                   if str(c).strip().lower() in ("respondent_id", "response_id", "responseid",
+                                                 "id", "sys_respnum", "uid", "panelist")), None)
+    ids = (df[id_col].astype(str) if id_col is not None
+           else pd.Series([f"R{i + 1:04d}" for i in range(len(df))], index=df.index))
+
+    rows = []
+    for task, cols in sorted(groups.items()):
+        block = df[cols].apply(pd.to_numeric, errors="coerce")
+        for position, col in enumerate(cols):
+            raw = str(col).strip()
+            item = raw[_TASK_KEY.match(raw).end():] if _TASK_KEY.match(raw) else raw
+            item = (item_names or {}).get(item, item) or f"item {position + 1}"
+            values = block[col]
+            for idx in df.index:
+                v = values.get(idx)
+                if pd.isna(v):
+                    continue          # not shown to this person on this screen
+                choice = ("best" if float(v) == float(best_code) else
+                          "worst" if float(v) == float(worst_code) else "")
+                rows.append({"respondent_id": ids.get(idx), "set": task,
+                             "item": item, "choice": choice})
+    if not rows:
+        raise ValueError("_MAXDIFF_NOT_WIDE")
+    return pd.DataFrame(rows)
+
+
 def read_maxdiff(df):
     """Tidy long MaxDiff table -> (design, best_pos, worst_pos, item_names, respondent_ids).
 

@@ -170,7 +170,7 @@ for _m in ("divide by zero encountered in matmul", "overflow encountered in matm
            "invalid value encountered in matmul"):
     warnings.filterwarnings("ignore", message=_m, category=RuntimeWarning)
 
-__version__ = "1.20.0"    # keep in sync with pyproject.toml
+__version__ = "1.21.0"    # keep in sync with pyproject.toml
 
 # Optional "ask Claude about your segments" add-on. Imported here (not lazily) so the packaged app
 # bundles it; wrapped so a missing file/SDK never stops the core segmentation tool from loading.
@@ -3926,7 +3926,10 @@ def _explain_run_error(msg):
                 "code means 'best'. Some tools write 3 for the best item and 1 for the worst, "
                 "others the other way round, and choosing wrong would turn the whole ranking "
                 "upside down without either of us noticing.\n\n"
-                "Reshape it to one row per item SHOWN, with four columns:\n\n"
+                "**The quickest fix: tell me which code means best.** If 3 is the top pick, add "
+                "`--best-code 3` (in the app, answer the question it asks) and I will reshape the "
+                "file myself — the 'worst' code is worked out from the rest.\n\n"
+                "Or reshape it yourself to one row per item SHOWN, with four columns:\n\n"
                 "    respondent_id, task, item, choice\n"
                 "    P001, 1, Fast delivery, best\n"
                 "    P001, 1, Low price, worst\n"
@@ -3935,6 +3938,17 @@ def _explain_run_error(msg):
                 "The last column can be the words best and worst (or most and least), or numbers: "
                 "1 for best, -1 for worst, 0 for the rest. Any spreadsheet can do this with a "
                 "pivot, and it is the point where YOU tell me which pick was which.")
+    if msg.startswith("_MAXDIFF_NOT_WIDE"):
+        return ("That file is not laid out one row per person with a block of columns per screen, "
+                "so there is nothing for --best-code to reshape.\n\n"
+                "If it is already one row per item shown, drop the flag and run it as it is.")
+    if msg.startswith("_MAXDIFF_SAME_CODE"):
+        return ("The code for 'best' and the code for 'worst' cannot be the same number — one "
+                "screen has to be able to tell them apart.")
+    if msg.startswith("_MAXDIFF_CODES_UNCLEAR"):
+        return ("I could not work out which code means 'worst' from this file. A best-worst block "
+                "normally holds three values — best, worst, and everything merely shown — and this "
+                "one does not, so state the worst code explicitly as well.")
     if msg.startswith("_MAXDIFF_DIVERGED"):
         # Never seen in practice — the sampler is checked for this rather than trusted not to do
         # it. Written out anyway, because a sentinel that reaches a reader is the failure mode this
@@ -4005,6 +4019,26 @@ def run_auto(path, args, parser):
     except Exception as e:
         _friendly_fail(parser, f"I could not read '{path}' as a spreadsheet.\nMake sure it is a .csv "
                        f"file exported from your survey tool. (Technical detail: {e})")
+    # A best-worst export written one row per PERSON, with the polarity stated. Reshaped here,
+    # before detection, so everything downstream sees the tidy long table it already understands.
+    best_code = getattr(args, "best_code", None)
+    if best_code is not None and _maxdiff is not None:
+        try:
+            df = _maxdiff.read_wide_best_worst(df, best_code=best_code)
+        except ValueError as e:
+            _friendly_fail(parser, _explain_run_error(str(e)))
+        print(f"Reading this as a best-worst export saved one row per person, with {best_code:g} "
+              f"meaning the item picked best.\n")
+    elif _maxdiff is not None and not _maxdiff.looks_like_maxdiff(df):
+        # The same guard the app has had since 1.6.2, which the command line never got. Without it
+        # a wide best-worst export was read as an ordinary rating grid and its response CODES were
+        # clustered as though they were scores: measured on a 90-person export, a completed run
+        # recommending two segments, a full report, and nothing anywhere saying the file was a
+        # preference exercise. The report hedged — Hopkins 0.58, prediction strength 0.53 — but a
+        # hedge is not a refusal, and the numbers being clustered were meaningless.
+        _wide = _maxdiff.looks_like_wide_best_worst(df)
+        if _wide:
+            _friendly_fail(parser, _explain_run_error(f"_MAXDIFF_WIDE:{_wide}"))
     try:
         clean, method, id_col, items, plan = auto_prepare(df, args.id_col)
     except ValueError as e:
@@ -4272,7 +4306,7 @@ _METHOD_REASON = {
 }
 
 
-def run_analysis(data, cfg=None, force_items=None):
+def run_analysis(data, cfg=None, force_items=None, best_code=None, worst_code=None):
     """Raw survey (bytes or a path) -> a dict with everything the web app and the AI layer need:
     the title, the report as an HTML fragment (auto-detection notes on top), and a plain-text
     `digest` (the same content as Markdown) that is safe to hand to Claude for interpretation.
@@ -4298,8 +4332,14 @@ def run_analysis(data, cfg=None, force_items=None):
     # data, and guessing it would invert every ranking silently.
     if _maxdiff is not None and not _maxdiff.looks_like_maxdiff(df):
         _wide = _maxdiff.looks_like_wide_best_worst(df)
-        if _wide:
+        if _wide and best_code is None:
             raise ValueError(f"_MAXDIFF_WIDE:{_wide}")
+        if _wide:
+            # The polarity has been stated, so the layout can be recovered and the study read.
+            # Reshaping here rather than asking the user to pivot twelve task blocks by hand in a
+            # spreadsheet, which is what the refusal above used to tell them to do.
+            df = _maxdiff.read_wide_best_worst(df, best_code=best_code,
+                                               worst_code=worst_code)
     if _maxdiff is not None and _maxdiff.looks_like_maxdiff(df):
         est = maxdiff_est = _maxdiff.utilities_from_export(df)
         df = est.as_frame().reset_index().rename(columns={"index": "respondent_id"})
@@ -4887,6 +4927,11 @@ def _cli():
     p.add_argument("--app", action="store_true",
                    help="run as the desktop app (like --serve, but picks a free port automatically)")
     p.add_argument("--port", type=int, default=8000, help="port for --serve (default 8000)")
+    p.add_argument("--best-code", type=float, default=None, metavar="N",
+                   help="for a best-worst export saved one row per PERSON (Qualtrics, Sawtooth): "
+                        "the code that means the item was picked BEST, usually 3 or 1. The file "
+                        "cannot say which, so it has to be stated; the 'worst' code is worked out "
+                        "from the rest")
     p.add_argument("--design", metavar="ITEMS_FILE", default=None,
                    help="build a best-worst (MaxDiff) questionnaire: give a text file with one "
                         "item per line and it writes the design a survey platform can field. "

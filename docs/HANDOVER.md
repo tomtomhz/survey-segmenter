@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.20.0**, 284 Python + 161 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.21.0**, 289 Python + 161 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.20.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.20.0** — verified by unpacking the zip that is actually sitting there and
+**Released: v1.5.1 → v1.21.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.21.0** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
@@ -752,9 +752,13 @@ Not a survey, but 17,000 real rows through the whole pipeline on 2026-07-31
 
 ## Next candidates, roughly by value
 
-1. **Read a real Qualtrics/Sawtooth wide export.** Its shape is recognised and refused with
-   instructions rather than silently misread, which was the dangerous behaviour. Reading one
-   properly is blocked on having a real file: the code polarity cannot be inferred from the data.
+1. **Confirm the wide-export reader against a REAL Qualtrics or Sawtooth file.** 1.21.0 built the
+   reader and validated it against synthetic exports end to end (Spearman +1.000 recovering a
+   planted order, −1.000 when the polarity is stated backwards — which is why it is asked rather
+   than guessed). What a real file would still confirm is narrower than it was: that the column
+   naming `Q1_item`, `MD2.5`, `task3-1` matches what those platforms actually emit. Ten anonymised
+   rows are enough; the polarity has to come from whoever built the survey, since no file states
+   it.
 2. ~~**Resolving overlapping segments**~~ — **answered in 1.19.0, and the answer is to leave it
    alone.** Merging IS the honest answer: on planted overlapping spherical groups the Gaussian
    mixture, which the README offered as the remedy, never beat k-means at any separation tried, and
