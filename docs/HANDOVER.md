@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.19.0**, 281 Python + 161 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.19.1**, 283 Python + 161 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08/09 (read this first)
 
-**Released: v1.5.1 → v1.19.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.19.0** — verified by unpacking the zip that is actually sitting there and
+**Released: v1.5.1 → v1.19.1.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.19.1** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
@@ -464,7 +464,7 @@ retired, which removes that qualification.
   at 2.5 GB; the defective code peaks at 2.39 GB and would have sailed through.
 - **Measure the fix before adopting it.** Four plausible improvements were rejected on measurement
   this session, including two that made things actively worse.
-- **Re-run `python3 references/kbench.py` after touching `recommend_k`.** The documented accuracy
+- **Re-run `python3 references/kbench.py` after touching `recommend_k` OR the confidence light.** Re-run 2026-08-13: the 19-of-21 headline held, but two confidence columns in `ONBOARDING.md` had drifted toward more caution than documented — the guards added to the light since are why. Correct the table from the run rather than reasoning about it. The documented accuracy
   table goes stale silently otherwise.
 
 ### What is genuinely left

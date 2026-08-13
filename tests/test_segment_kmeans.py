@@ -7457,3 +7457,78 @@ def test_the_gaussian_mixture_helps_where_it_is_meant_to_and_over_splits_where_i
     assert gmm_ari > kmeans_ari, (
         f"the mixture no longer helps on the shape it is recommended for: {gmm_ari:.3f} against "
         f"{kmeans_ari:.3f} — if this is a deliberate change, re-measure the table in the docstring")
+
+
+def test_demographics_cannot_influence_the_grouping_they_are_used_to_profile():
+    """The report says demographics were not used to form the segments. If that were untrue, every
+    demographic difference it goes on to report would be circular — the tool would have grouped
+    people by age and then announced that the groups differ by age.
+
+    Checked with a decoy: a demographic that separates people PERFECTLY, along a completely
+    different split from the one in the answers. A leak of any size pulls the result towards it.
+    """
+    rng = np.random.default_rng(0)
+    n = 300
+    answer_group = rng.integers(0, 2, n)
+    decoy = rng.integers(0, 3, n)
+    ratings = np.where(answer_group[:, None] == 0, 2, 6) + rng.normal(0, 1, (n, 5))
+    frame = pd.DataFrame(np.clip(np.round(ratings), 1, 7).astype(int),
+                         columns=[f"q{i + 1}" for i in range(5)])
+    frame.insert(0, "id", range(n))
+    frame["age_group"] = pd.Series(decoy).map({0: "18-24", 1: "25-34", 2: "35+"})
+    frame["region"] = pd.Series(decoy).map({0: "North", 1: "South", 2: "West"})
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        result = sk.run_analysis(frame.to_csv(index=False).encode(),
+                                 cfg=sk.SegmentationConfig(k_min=2, k_max=5, **FAST))
+    labels = pd.read_csv(io.StringIO(result["files"]["segment_assignments.csv"]))
+    found = labels["segment" if "segment" in labels.columns else "class"].to_numpy()
+
+    assert result["columns"]["age_group"] != "used"
+    assert result["columns"]["region"] != "used"
+    assert adjusted_rand_score(answer_group, found) > 0.9, (
+        "the structure that IS in the answers was not recovered, so this test proves nothing")
+    assert abs(adjusted_rand_score(decoy, found)) < 0.1, (
+        "the grouping tracks a demographic the report claims it never saw")
+
+
+def test_a_survey_weight_projects_the_sizes_without_forming_the_groups():
+    """Cluster unweighted, report the sizes both ways. Getting this backwards is subtle and costly.
+
+    A post-stratification weight says how much each respondent stands for in the population. It
+    must NOT shape the clustering — weighting the distance calculation would let a handful of
+    heavily-weighted people drag a segment centre around — but it must reach the reported sizes,
+    because "this segment is 19% of our customers" is the number that goes in a plan, and in a
+    deliberately unbalanced sample the unweighted share is not that number.
+
+    Checked with a sample that is 81% one group and weights that say the population is 79% the
+    other: both figures have to appear, and be right.
+    """
+    rng = np.random.default_rng(0)
+    n = 300
+    group = (rng.random(n) < 0.2).astype(int)
+    ratings = np.where(group[:, None] == 0, 2, 6) + rng.normal(0, 0.8, (n, 5))
+    frame = pd.DataFrame(np.clip(np.round(ratings), 1, 7).astype(int),
+                         columns=[f"q{i + 1}" for i in range(5)])
+    frame.insert(0, "id", range(n))
+    frame["weight"] = np.where(group == 1, 16.0, 1.0)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        result = sk.run_analysis(frame.to_csv(index=False).encode(),
+                                 cfg=sk.SegmentationConfig(k_min=2, k_max=4, **FAST))
+
+    assert result["columns"]["weight"] != "used", "the weight was clustered on"
+    assert result["k"] == 2, "the two planted groups were not recovered, so the shares mean nothing"
+
+    weights = np.where(group == 1, 16.0, 1.0)
+    expected_population = pd.Series(weights).groupby(group).sum() / weights.sum()
+    expected_sample = pd.Series(group).value_counts(normalize=True).sort_index()
+
+    digest = result["digest"]
+    assert "population_share" in digest, "the weighted size never reached the report"
+    shares = [float(x) for x in re.findall(r"\|\s+(0\.\d{3})\s+\|", digest)]
+    assert shares, "no share figures found in the size table"
+    # Both the sample share and the projected share must be present, to two decimals.
+    for wanted in (round(float(expected_sample.max()), 2), round(float(expected_population.max()), 2)):
+        assert any(abs(s - wanted) < 0.02 for s in shares), (
+            f"{wanted} appears nowhere among the reported shares {shares}")

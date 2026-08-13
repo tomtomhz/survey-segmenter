@@ -3,6 +3,32 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.19.1] — 2026-08-13
+
+### Verified
+
+Three claims the tool makes about itself, checked against a known truth rather than re-read. All
+three hold; the point of the exercise is that they are now tests instead of sentences.
+
+- **The k-selection benchmark still scores 19 of 21**, re-run because the handover warns this table
+  goes stale silently. Two of its *confidence* columns had drifted, both toward more caution than
+  documented: overlapping k=3 was written up as "high when right" and is now moderate on all three
+  runs including the correct one, and the two elongated bands as "high" and are now high once,
+  moderate twice. `ONBOARDING.md` is the first document a new reader is pointed at and it was
+  overstating how confident the tool is, so it has been corrected and dated.
+
+- **Demographics genuinely cannot influence the grouping they are used to profile.** If they could,
+  every demographic difference in the report would be circular — grouping people by age and then
+  announcing the groups differ by age. Checked with a decoy demographic that separates people
+  perfectly along a *different* split from the one in the answers: agreement with the real
+  structure 1.000, with the decoy −0.003.
+
+- **A survey weight projects the segment sizes without shaping the segments.** Getting this
+  backwards is subtle and expensive: weighting the distances would let a few heavily-weighted
+  people drag a segment centre around, while leaving the weight out of the sizes would report
+  "19% of our customers" for a group that is 79% of them. On a sample that is 81% one group with
+  weights saying the population is 79% the other, both figures appear and both are right.
+
 ## [1.19.0] — 2026-08-13
 
 ### Fixed
