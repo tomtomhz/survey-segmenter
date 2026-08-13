@@ -229,13 +229,22 @@ Keep this distinction — it is the project's habit and its main defence against
 | Well-separated, k=3 | 3/3 | high |
 | Sizes 80 / 15 / 5 | 3/3 | high, moderate |
 | 3 real questions + 5 that separate nobody | 3/3 | high |
-| Two elongated bands (k-means' worst case) | 3/3 | high |
+| Two elongated bands (k-means' worst case) | 3/3 | high once, moderate twice |
 | k=5 | 3/3 | high |
 | Pure noise | 3/3 **correctly refused** | low |
-| Overlapping, k=3 | **1/3** | high when right, moderate when wrong |
+| Overlapping, k=3 | **1/3** | moderate, including the run it got right |
 
-**19 of 21.** Both misses merged two overlapping segments into k=2 and dropped to "moderate" both
-times.
+**19 of 21.** Both misses merged two overlapping segments into k=2, and the light was "moderate"
+on all three overlapping runs — it never claimed high on data that overlapping, even when it had
+the answer right.
+
+*Re-measured 2026-08-13 and the total is unchanged. Two of the confidence columns had drifted since
+they were written: overlapping was documented as "high when right", and the elongated bands as
+"high", and the tool is now more cautious than that in both. The guards added to the confidence
+light between those two dates are why, so the drift is the light working — but the table said the
+tool was more confident than it is, which is the direction that matters. Re-run
+`python3 references/kbench.py` and correct this table, rather than trusting it, whenever the light
+or `recommend_k` is touched.*
 
 Mixed questionnaires (4 ratings + 2 pick-any, true k = 3):
 
