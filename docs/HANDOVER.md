@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-14 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.23.0**, 290 Python + 165 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-14 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.23.1**, 290 Python + 170 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08 to 08-14 (read this first)
 
-**Released: v1.5.1 → v1.23.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.23.0** — verified by unpacking the zip that is actually sitting there and
+**Released: v1.5.1 → v1.23.1.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.23.1** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
@@ -433,6 +433,25 @@ Two rules came out of it and are in the code:
 * **Every reply that hands out the list also carries `total`.** Four endpoints return the project
   list; if one of them forgot, the "showing 60 of 162" line would go stale the moment you renamed
   or deleted something.
+
+### What the headless browser cannot verify, and what to do instead
+
+Three separate mechanisms have now failed to be observable in the browser used for visual checks,
+each costing time before the instrument rather than the code turned out to be at fault. Check this
+list before debugging anything that "does not work" only there:
+
+| Mechanism | What happens | Verify with |
+|---|---|---|
+| React `onKeyDown` / `onKeyUp` | The `computer` key action does not reach React's root listener; typing still updates the field, which makes it look like a real bug | a `KeyboardEvent` dispatched from `javascript_tool`, or a component test |
+| `IntersectionObserver` | Delivers **no** callbacks at all — a fresh observer on a real element logs not even its initial entry | a component test that calls the observer callback by hand |
+| Scroll events | Programmatic `scrollTo` moves the content but dispatches no `scroll` event | the same — drive the handler directly |
+
+The layout consequences of scrolling *are* observable (`getBoundingClientRect` is honest, and the
+element really does move), so measuring geometry is fine. It is only the **events** that never
+arrive. Clicks work; so do form inputs via `form_input`.
+
+The general rule: **when something works in a component test and not in the browser, suspect the
+browser first.** Every time so far it has been the browser.
 
 ### The projects list, and a trap in verifying UI
 

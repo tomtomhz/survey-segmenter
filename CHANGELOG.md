@@ -3,6 +3,32 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.23.1] — 2026-08-14
+
+### Added
+
+- **The answer stays in view while you read the report.** A full statistical report is long, and
+  the three facts a reader keeps checking against — how many groups, out of how many people, and
+  whether to believe it — scrolled off the top with no way back except scrolling up. Once the
+  result tiles go by, the same three facts pin themselves in one line at the top of the thread.
+
+  It watches the tiles rather than the scroll position, so it cannot drift out of step with the
+  layout and needs no measurement. It appears only when the tiles have gone *up* — scrolled back
+  from below, the answer is about to come into view anyway and restating it would be noise. Hidden
+  from screen readers, since it repeats what is already in the document, and hidden in print.
+
+### Note for whoever works on this next
+
+This is the first feature in the project whose behaviour **could not be verified in the browser at
+all.** The headless browser used for visual checks delivers no `IntersectionObserver` callbacks and
+no `scroll` events from programmatic scrolling — a fresh observer on a real element logs not even
+its initial entry. Layout is still observable; only the events never arrive.
+
+It is verified instead by a component test that drives the observer callback by hand, which is now
+the only place its behaviour is checked. `docs/HANDOVER.md` carries the full list of what that
+browser cannot exercise, after three separate mechanisms each cost time before the instrument
+rather than the code turned out to be at fault.
+
 ## [1.23.0] — 2026-08-14
 
 ### Added

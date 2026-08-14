@@ -199,6 +199,16 @@ header .sp{flex:1}
    each tile became a 380px box holding a two-digit number, which reads as something missing
    rather than something summarised. */
 .msg.wide .stats{max-width:820px}
+/* The result in one line, pinned while the tiles are off screen. Sticky to the thread's own
+   scroller rather than the window, so it sits under the app header and not over it. */
+.statbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:7px;flex-wrap:wrap;
+ margin:0 0 4px;padding:8px 14px;font-size:.82rem;color:var(--ink-soft);
+ background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);
+ box-shadow:var(--shadow-sm)}
+.statbar b{color:var(--ink)}
+.statbar .sep{color:var(--muted)}
+.statbar .pill{font-size:.74rem;padding:1px 8px}
+@media print{.statbar{display:none}}
 .msg.wide .note{max-width:82ch}
 .msg{display:flex;gap:13px}
 .msg .av{width:25px;height:25px;border-radius:7px;flex:none;display:flex;align-items:center;
