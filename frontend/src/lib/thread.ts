@@ -6,7 +6,7 @@
  * had to reconstruct the same nodes by a different path. Here the thread is a list of values and
  * rendering is a function of it.
  */
-import type { Analysis } from '../api/types'
+import type { Analysis, WideCode } from '../api/types'
 
 export type Message =
   /** Something the user said or did. */
@@ -21,6 +21,10 @@ export type Message =
   | { id: number; kind: 'result'; result: Analysis }
   /** The starter questions offered after the first interpretation. */
   | { id: number; kind: 'suggestions' }
+  /** A wide best-worst export needs one fact before it can be read: which code means "best".
+   *  Its own kind rather than a note, because a note is rendered from HTML and this needs real
+   *  buttons — and because the file has to travel with the question to be re-sent with the answer. */
+  | { id: number; kind: 'polarity'; codes: WideCode[]; file: File; note: string }
 
 let nextId = 0
 export function messageId(): number {

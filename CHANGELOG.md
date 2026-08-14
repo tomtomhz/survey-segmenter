@@ -3,6 +3,35 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.23.0] — 2026-08-14
+
+### Added
+
+- **The app asks which code means "best" instead of refusing the file.** 1.21.0 taught the tool to
+  read a one-row-per-person MaxDiff export (the shape Qualtrics and Sawtooth write) but only from
+  the command line — the third time this project has shipped a capability CLI-first, after the
+  planner and the designer, and the argument against it has not changed: someone holding a
+  Qualtrics export is exactly the person who does not use a command line.
+
+  Drop the file in and the app now comes back with **the codes that are actually in it**, most
+  common first, and asks which one means the item was picked best. Click it and the same file is
+  re-read — nothing to re-upload, nothing to pivot in a spreadsheet.
+
+  The counts are shown beside each code because they are the hint that answers the question: the
+  most common code is almost always "shown but not picked", since it covers every item that was
+  neither. And the panel says plainly that a wrong answer turns the ranking upside down rather than
+  failing, which is measured (Spearman −1.000) and the whole reason the question is asked at all.
+
+  Nothing is parked server-side waiting for the answer: the browser already holds the file, so it
+  simply sends it again with the code attached.
+
+### Fixed
+
+- **A test double had a fixed signature and broke on an unrelated change.** The endpoint test
+  stubs `run_analysis` to stay fast and offline, and the stub named every parameter — so adding
+  `best_code` made it raise, the handler caught the error, and the failure surfaced as a completely
+  unrelated endpoint returning `ok: false`. It takes `**_` now.
+
 ## [1.22.0] — 2026-08-13
 
 ### Changed

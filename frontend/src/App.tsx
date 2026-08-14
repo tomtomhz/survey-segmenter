@@ -194,10 +194,14 @@ export function App() {
   )
 
   const analyse = useCallback(
-    async (file: File) => {
+    async (file: File, bestCode?: number) => {
       if (running.current) return
       const problem = fileProblem(file)
-      append({ id: messageId(), kind: 'you', text: `Analyse my survey: ${file.name || 'file'}` })
+      // On the second attempt the file is already named in the transcript; saying it again reads
+      // as a second upload rather than an answer to the question just asked.
+      if (bestCode == null) {
+        append({ id: messageId(), kind: 'you', text: `Analyse my survey: ${file.name || 'file'}` })
+      }
       if (problem) {
         append({
           id: messageId(), kind: 'note', tone: 'error',
@@ -212,14 +216,17 @@ export function App() {
         label: 'Crunching the numbers — clustering and validating. This can take up to a minute…',
       })
       setWorking(true)
-      const reply = await api.analyze(file)
+      const reply = await api.analyze(file, bestCode)
       setWorking(false)
       if (isFailure(reply)) {
-        setMessages((current) =>
-          replace(current, placeholder, {
-            id: placeholder, kind: 'note', tone: 'error', html: escapeHtml(reply.error),
-          }),
-        )
+        // A wide best-worst export is answerable rather than broken: ask which code means "best"
+        // and keep the file to hand, instead of ending in an error the reader can only act on by
+        // reshaping a spreadsheet.
+        const replacement: Message =
+          reply.needs_polarity && reply.codes?.length
+            ? { id: placeholder, kind: 'polarity', codes: reply.codes, file, note: reply.error }
+            : { id: placeholder, kind: 'note', tone: 'error', html: escapeHtml(reply.error) }
+        setMessages((current) => replace(current, placeholder, replacement))
         return
       }
       if (present(reply, placeholder)) void ask(null, true, reply.session_id)
@@ -412,6 +419,7 @@ export function App() {
             regroupError={regroupError}
             onRegroup={(items) => void regroup(items)}
             onNeedsKey={() => openSettings()}
+            onPolarity={(file, code) => void analyse(file, code)}
             onAsk={(question) => void ask(question, false)}
             footer={
               // Only before there is a result. Once an analysis exists these questions have been

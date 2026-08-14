@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-13 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.22.0**, 289 Python + 161 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-14 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.23.0**, 290 Python + 165 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
-## Session state — 2026-08-08 to 08-13 (read this first)
+## Session state — 2026-08-08 to 08-14 (read this first)
 
-**Released: v1.5.1 → v1.22.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.22.0** — verified by unpacking the zip that is actually sitting there and
+**Released: v1.5.1 → v1.23.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.23.0** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
@@ -278,6 +278,31 @@ cleanly planted groups.
 Two things to carry forward. **Quote the dataset with any timing**, or the number becomes a trap for
 whoever re-measures it. And when a benchmark looks like a regression, A/B the same fixture against
 the old tag before believing it — `git worktree add /tmp/old <tag>` costs a minute and settles it.
+
+### v1.23.0 — the app asks the question the command line took as a flag
+
+`--best-code` shipped CLI-only in 1.21.0, which was the **third** time this project has done that
+after the planner and the designer. The pattern is worth naming because it keeps recurring: work
+starts on the command line because that is where it is easiest to test, and the app is treated as a
+follow-up that sometimes does not come. Someone holding a Qualtrics export is precisely the person
+who does not use a terminal.
+
+The interaction turned out small. `/analyze` returns `needs_polarity` with the codes actually in
+the file — `wide_codes_seen` was already there from 1.21.0 — and the page asks which one means
+"best". **Nothing is parked server-side waiting for the answer:** the browser still holds the File,
+so it re-sends it with `?best_code=`. That is worth copying for any other "ask, then retry" flow
+here; a pending-upload store would have been the obvious design and it would have needed eviction,
+timeouts and a key.
+
+The counts travel with the codes because they answer the question: the most common code is almost
+always "shown but not picked", covering every item that was neither. And the panel states that a
+wrong answer inverts the ranking rather than failing, which is the measured fact (Spearman −1.000)
+that justifies asking at all.
+
+**One test-hygiene lesson.** The endpoint test stubs `run_analysis` to stay offline, and the stub
+named every parameter — so adding `best_code` made it raise, the handler caught the error, and the
+failure surfaced as an unrelated endpoint returning `ok: false`. A double that names every argument
+breaks on every signature change and points somewhere else when it does. It takes `**_` now.
 
 ### v1.22.0 — the layout is a content grid now, and why prose did not follow it
 
@@ -811,17 +836,7 @@ Not a survey, but 17,000 real rows through the whole pipeline on 2026-07-31
    naming `Q1_item`, `MD2.5`, `task3-1` matches what those platforms actually emit. Ten anonymised
    rows are enough; the polarity has to come from whoever built the survey, since no file states
    it.
-2. **Put `--best-code` in the app.** 1.21.0 added it to the command line only, which is the third
-   time this project has shipped a capability CLI-first — the planner (fixed in 1.9.0) and the
-   designer (1.12.0) were both the same shape, and the argument against it has not changed: this
-   tool exists for people who do not use a command line, and someone with a Qualtrics export is
-   exactly that person. The app currently still refuses those files outright.
-
-   The interaction is small and does not need server state: on detection, return the codes found
-   (`wide_codes_seen` already produces them) and let the page ask *"which number means the item
-   they liked most?"*, then re-upload the same File with `best_code` set. The browser already holds
-   the file, so nothing has to be parked server-side.
-3. **Duplicate a project** to re-run the same file with a different set of questions. Partly
+2. **Duplicate a project** to re-run the same file with a different set of questions. Partly
    covered already by the column picker's re-group, which is why it is third rather than first.
 
 **Settled — do not reopen without reading why.** **Resolving overlapping segments** was answered in

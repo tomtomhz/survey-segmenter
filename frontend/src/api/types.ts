@@ -17,10 +17,21 @@ export type ColumnRole = 'used' | 'background' | 'choice' | 'rating' | 'skipped'
 /** Which failure it was, so the UI can offer Settings when a key is the actual problem. */
 export type ErrorKind = 'nokey' | 'nosdk' | 'auth' | string
 
+/** One code found inside a wide best-worst export, and how often it appears. */
+export interface WideCode {
+  code: number
+  times: number
+}
+
 export interface Failure {
   ok: false
   error: string
   kind?: ErrorKind
+  /** A best-worst export saved one row per person: readable, but only once someone says which
+   *  code means "best". The server sends the codes actually present so the page can ask rather
+   *  than leaving the reader to pivot the file by hand. */
+  needs_polarity?: boolean
+  codes?: WideCode[]
 }
 
 export type ChartId = 'map' | 'fit' | 'k' | 'profiles' | 'heatmap' | 'gorge'

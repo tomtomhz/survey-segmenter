@@ -549,10 +549,37 @@ def serve(port=8000):
             if not data:
                 self._json({"ok": False, "error": "Please choose a .csv or .xlsx file first."})
                 return
+            # A best-worst export saved one row per person cannot be read until someone says which
+            # code means "best" — see maxdiff.read_wide_best_worst. Rather than a dead-end error
+            # telling the reader to pivot the file by hand, the refusal comes back with the codes
+            # that are actually in their file so the page can ask, and the answer arrives here.
+            from urllib.parse import parse_qs, urlparse
+            asked = parse_qs(urlparse(self.path).query).get("best_code", [None])[0]
             try:
-                r = sk.run_analysis(data)
+                best_code = float(asked) if asked not in (None, "") else None
+            except ValueError:
+                self._json({"ok": False, "error": "That is not one of the codes in your file."})
+                return
+            try:
+                r = sk.run_analysis(data, best_code=best_code)
             except Exception as e:
-                self._json({"ok": False, "error": sk._explain_run_error(str(e))})
+                message = str(e)
+                if message.startswith("_MAXDIFF_WIDE:"):
+                    codes = []
+                    try:
+                        import maxdiff as _md
+                        frame = sk._read_table(io.BytesIO(data))
+                        # Most common first: the "merely shown" code dominates, because it covers
+                        # every item that was neither picked. Offered so the reader recognises the
+                        # numbers rather than having to remember how the survey was built.
+                        codes = [{"code": code, "times": n}
+                                 for code, n in _md.wide_codes_seen(frame)]
+                    except Exception:
+                        codes = []
+                    self._json({"ok": False, "error": sk._explain_run_error(message),
+                                "needs_polarity": True, "codes": codes})
+                    return
+                self._json({"ok": False, "error": sk._explain_run_error(message)})
                 return
             sid = uuid.uuid4().hex
             # Keep the raw upload so the user can re-group on different questions without

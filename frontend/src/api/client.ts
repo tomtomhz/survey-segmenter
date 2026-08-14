@@ -67,7 +67,13 @@ function upload<T extends { ok: true }>(url: string, file: File): Promise<Result
 }
 
 export const api = {
-  analyze: (file: File) => upload<Analysis>('/analyze', file),
+  /** `bestCode` is only sent on the second attempt, after the page has asked which code in a
+   *  wide best-worst export means the item was picked best. */
+  analyze: (file: File, bestCode?: number) =>
+    upload<Analysis>(
+      bestCode == null ? '/analyze' : `/analyze?best_code=${encodeURIComponent(bestCode)}`,
+      file,
+    ),
 
   score: (sessionId: string, file: File) =>
     upload<ScoreResult>(`/score?session_id=${encodeURIComponent(sessionId)}`, file),

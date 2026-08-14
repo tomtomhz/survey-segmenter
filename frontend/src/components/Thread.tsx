@@ -17,6 +17,7 @@ export function Thread({
   regroupError,
   onRegroup,
   onNeedsKey,
+  onPolarity,
   onAsk,
   footer,
 }: {
@@ -26,6 +27,8 @@ export function Thread({
   regroupError: string | null
   onRegroup: (items: string[]) => void
   onNeedsKey: () => void
+  /** Answer to "which code means best" for a wide best-worst export. */
+  onPolarity: (file: File, code: number) => void
   onAsk: (question: string) => void
   /**
    * Rendered after the messages, inside the scrolling area. Used for the study planner, which
@@ -119,6 +122,36 @@ export function Thread({
                 )}
                 {message.kind === 'ai' && (
                   <div dangerouslySetInnerHTML={{ __html: message.html }} />
+                )}
+                {message.kind === 'polarity' && (
+                  <div className="note">
+                    <p style={{ margin: '0 0 10px' }}>{message.note.split('\n\n')[0]}</p>
+                    <p style={{ margin: '0 0 10px' }}>
+                      <b>Which of these numbers means the item they liked most?</b> It is in your
+                      file {message.codes.length} times over — I can see the codes, just not what
+                      they were meant to mean.
+                    </p>
+                    <div className="chips">
+                      {message.codes.map((c) => (
+                        <button
+                          key={c.code}
+                          type="button"
+                          className="chip"
+                          onClick={() => onPolarity(message.file, c.code)}
+                        >
+                          {c.code} means best
+                          <span style={{ color: 'var(--muted)' }}>
+                            {' '}· appears {c.times.toLocaleString()} times
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="hint" style={{ margin: '10px 0 0', textAlign: 'left' }}>
+                      The most common code is usually the one for &ldquo;shown but not picked&rdquo;,
+                      since it covers every item that was neither. Pick wrong and the ranking comes
+                      out upside down, so it is worth checking how your survey was set up.
+                    </p>
+                  </div>
                 )}
                 {message.kind === 'result' && (
                   /* Per card, not just per app: a result that cannot be drawn should cost the

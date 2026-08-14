@@ -1992,7 +1992,11 @@ def test_web_server_endpoints_end_to_end(monkeypatch):
     import time
     import urllib.request
 
-    monkeypatch.setattr(sk, "run_analysis", lambda data, cfg=None, force_items=None: {
+    # `**_` rather than naming every parameter: this double stands in for run_analysis only to
+    # keep the endpoint test fast and offline, and it should not fail the moment the real function
+    # gains an argument. It did exactly that when `best_code` was added — the stub raised, the
+    # handler caught it, and the failure surfaced as `ok: False` from a completely unrelated test.
+    monkeypatch.setattr(sk, "run_analysis", lambda data, cfg=None, force_items=None, **_: {
         "title": "Segmentation report",
         "report_html": "<h2>In plain language</h2><p>Three groups.</p>",
         "digest": "# Report\n- three groups", "k": 3, "n_people": 2,
@@ -7663,3 +7667,62 @@ def test_the_wide_reader_explains_its_refusals(sentinel, expect):
     explained = sk._explain_run_error(sentinel)
     assert expect in explained
     assert "_MAXDIFF" not in explained, "an internal sentinel reached the reader"
+
+
+def test_the_app_asks_which_code_means_best_instead_of_refusing(monkeypatch, tmp_path):
+    """A wide best-worst export is answerable, not broken, so the app asks rather than ending.
+
+    Until now `/analyze` returned a dead-end error telling the reader to pivot twelve blocks of
+    columns by hand in a spreadsheet. It now comes back with `needs_polarity` and the codes that
+    are actually in their file — most common first, since that one is the "shown but not picked"
+    code — and the answer arrives as `?best_code=`.
+
+    The codes travel because the reader should not have to remember how their survey was built to
+    recognise the numbers; only the MEANING is missing, and the file already contains the rest.
+    """
+    import json as _json
+    import socket
+    import threading
+    import time
+    import urllib.request
+
+    monkeypatch.setenv("SURVEY_SEGMENTER_PROJECTS", str(tmp_path / "projects"))
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: None)
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    threading.Thread(target=sk.serve, kwargs={"port": port}, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(80):
+        try:
+            urllib.request.urlopen(base + "/", timeout=5).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+
+    frame, names, _ = _wide_export(n_people=60)
+    blob = frame.to_csv(index=False).encode()
+
+    def upload(query=""):
+        boundary = "----t"
+        body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; '
+                f'filename="wide.csv"\r\nContent-Type: text/csv\r\n\r\n').encode() + blob + \
+            f"\r\n--{boundary}--\r\n".encode()
+        request = urllib.request.Request(base + "/analyze" + query, data=body, method="POST",
+                                         headers={"Content-Type":
+                                                  f"multipart/form-data; boundary={boundary}"})
+        return _json.loads(urllib.request.urlopen(request, timeout=900).read().decode())
+
+    asked = upload()
+    assert asked["ok"] is False
+    assert asked["needs_polarity"] is True, "the app ended in an error instead of asking"
+    codes = {c["code"]: c["times"] for c in asked["codes"]}
+    assert set(codes) == {1.0, 2.0, 3.0}
+    assert asked["codes"][0]["code"] == 2.0, "the most common code should come first"
+
+    answered = upload("?best_code=3")
+    assert answered["ok"] is True, answered.get("error")
+    assert [r["item"] for r in answered["ranking"][:3]] == names[:3], (
+        "the answered run did not recover the planted order")
+
+    # A code that is not a number must not reach the reshaper.
+    nonsense = upload("?best_code=banana")
+    assert nonsense["ok"] is False and "not one of the codes" in nonsense["error"]
