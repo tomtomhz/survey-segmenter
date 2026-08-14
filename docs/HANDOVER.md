@@ -8,11 +8,11 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-09 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.21.0**, 289 Python + 161 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-13 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.21.0**, 289 Python + 161 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
-## Session state — 2026-08-08/09 (read this first)
+## Session state — 2026-08-08 to 08-13 (read this first)
 
 **Released: v1.5.1 → v1.21.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
 the team)/` is on **1.21.0** — verified by unpacking the zip that is actually sitting there and
@@ -21,10 +21,11 @@ trusting that the copy succeeded.
 
 ### Every claim that has been checked against an outside truth
 
-This file has grown to twenty-seven sections and the evidence is scattered through all of them.
-This is the index. **"Outside truth" means a fact the tool did not produce** — planted structure,
-a known population, a held-out sample — because comparing the tool's numbers to each other cannot
-detect a number that is measuring the wrong quantity, which is how most of these were found.
+This file is long and the evidence is scattered through all of it; this is the index.
+
+**"Outside truth" means a fact the tool did not produce** — planted structure, a known population,
+a held-out sample. Comparing the tool's numbers to each other cannot detect a number that is
+measuring the wrong quantity, which is how most of these were found.
 
 | Claim the tool makes | What it measured | Held by |
 |---|---|---|
@@ -42,12 +43,13 @@ detect a number that is measuring the wrong quantity, which is how most of these
 | HB beats counting even when its assumptions are wrong | +0.147 to +0.189, widest under the worst violation | `test_hb_still_beats_counting_when_its_assumptions_are_wrong` |
 | The questionnaire designer closes the loop | Spearman 1.000 from planted utilities and back | the design tests |
 | k-selection accuracy | 19 of 21 | `python3 references/kbench.py` |
+| A wide export is read correctly once the polarity is stated | Spearman +1.000 stated right, −1.000 stated backwards | `test_a_wide_best_worst_export_is_read_once_the_polarity_is_stated` |
 | Every text colour clears WCAG AA | all pairs ≥ 4.5:1 in both themes | `test_every_text_colour_in_the_interface_clears_wcag_aa` |
 
-**Four of those started as defects rather than confirmations** — TURF gave up three, the demographics
-profiler one — and in three of the four the statistics were right and the *presentation* was wrong.
-That is the pattern to expect: this codebase computes well and has historically described itself
-carelessly.
+**Five of those started as defects rather than confirmations** — TURF gave up three, the
+demographics profiler one, the wide-export path one — and in most of them the statistics were right
+and the *presentation* was wrong. That is the pattern to expect: this codebase computes well and has
+historically described itself carelessly.
 
 ### The workflow now covers the whole loop
 
@@ -276,6 +278,37 @@ cleanly planted groups.
 Two things to carry forward. **Quote the dataset with any timing**, or the number becomes a trap for
 whoever re-measures it. And when a benchmark looks like a regression, A/B the same fixture against
 the old tag before believing it — `git worktree add /tmp/old <tag>` costs a minute and settles it.
+
+### v1.21.0 — the wide-export gap, and a guard that was only on one path
+
+This was the last item the handover carried as "blocked on having a real file", and most of it was
+not blocked at all.
+
+**What was built.** `--best-code` reshapes a one-row-per-person MaxDiff export (the shape Qualtrics
+and Sawtooth write) into the tidy long table the estimator already reads. The layout is recoverable
+from the file; the **polarity is not** — whether 3 means best or 1 means best is a fact about how
+the survey was built. So it is stated, and the "worst" code is inferred from the rest of the file,
+since a best-worst block holds three values and the most common is the "merely shown" one.
+
+**Why it is asked rather than guessed, in one number.** Stating the polarity backwards does not
+fail. Against a planted truth the recovered ranking was Spearman **+1.000** stated correctly and
+**−1.000** stated backwards — perfectly inverted, with nothing in the output looking wrong either
+time. That is the entire argument for the flag, and the test holds it.
+
+**The bug underneath.** The refusal for these files has existed since 1.6.2 — *in the app only*. On
+the command line the same export ran to completion, recommended two segments and wrote a full
+report, having clustered the response codes 1/2/3 as if they were ratings. It hedged (Hopkins 0.58,
+prediction strength 0.53) but a hedge is not a refusal.
+
+**That is the second time in three releases that a guard existed on one path and not the other** —
+1.19.0 was `run_analysis` discarding a requested method the CLI honoured, this is the CLI missing a
+check the app had. **When you find a guard in this codebase, check every entry point has it.** The
+two paths are `_cli()` (auto_prepare + Segmenter directly) and `run_analysis()` (the app); they
+overlap but are not the same code, which is exactly how this keeps happening.
+
+**What a real Qualtrics file would still add** is now narrow: confirmation that the column naming
+(`Q1_item`, `MD2.5`, `task3-1`) matches what those platforms actually emit. Ten anonymised rows are
+enough. The polarity has to come from whoever built the survey — no file states it.
 
 ### The demographics section was silent about every number in it
 
@@ -759,20 +792,28 @@ Not a survey, but 17,000 real rows through the whole pipeline on 2026-07-31
    naming `Q1_item`, `MD2.5`, `task3-1` matches what those platforms actually emit. Ten anonymised
    rows are enough; the polarity has to come from whoever built the survey, since no file states
    it.
-2. ~~**Resolving overlapping segments**~~ — **answered in 1.19.0, and the answer is to leave it
-   alone.** Merging IS the honest answer: on planted overlapping spherical groups the Gaussian
-   mixture, which the README offered as the remedy, never beat k-means at any separation tried, and
-   was notably worse at the separation where k-means starts to recover the third group. The
-   mixture's real strength is elliptical clusters (0.954 against 0.872), and it degrades badly on
-   unequal spreads by over-splitting. Do not reopen this without new evidence of a *different*
-   kind — the property being protected is that the tool is never confidently wrong, and every
-   attempt to sharpen overlapping segments trades against it.
+2. **Put `--best-code` in the app.** 1.21.0 added it to the command line only, which is the third
+   time this project has shipped a capability CLI-first — the planner (fixed in 1.9.0) and the
+   designer (1.12.0) were both the same shape, and the argument against it has not changed: this
+   tool exists for people who do not use a command line, and someone with a Qualtrics export is
+   exactly that person. The app currently still refuses those files outright.
+
+   The interaction is small and does not need server state: on detection, return the codes found
+   (`wide_codes_seen` already produces them) and let the page ask *"which number means the item
+   they liked most?"*, then re-upload the same File with `best_code` set. The browser already holds
+   the file, so nothing has to be parked server-side.
 3. **Duplicate a project** to re-run the same file with a different set of questions. Partly
    covered already by the column picker's re-group, which is why it is third rather than first.
 
-Three former entries are settled and should not be reopened without reading why: a **second
-cluster-tendency test** shipped (Hartigan's dip, alongside Hopkins); **sparse k-means** was built,
-measured and deliberately rejected (see `references/sparse_kmeans.py` and `STATE-OF-THE-ART.md`);
+**Settled — do not reopen without reading why.** **Resolving overlapping segments** was answered in
+1.19.0 and the answer is to leave it alone: merging IS the honest answer, and the Gaussian mixture
+the README offered as the remedy never beat k-means on overlapping spherical groups at any
+separation tried. Its real strength is elliptical clusters (0.954 against 0.872) and it degrades
+badly on unequal spreads by over-splitting. The property being protected is that the tool is never
+confidently wrong, and every attempt to sharpen overlapping segments trades against it. Also
+settled: a **second cluster-tendency test** shipped (Hartigan's dip, alongside Hopkins);
+**sparse k-means** was built, measured and deliberately rejected (see `references/sparse_kmeans.py`
+and `STATE-OF-THE-ART.md`);
 and the assistant memory file **`segment-kmeans-tool.md` has been consolidated** — it had reached
 58 KB of appended paragraphs and had gone stale enough to point at the pre-move directory and claim
 49 tests when there were 279. It is now 3 KB that points here instead. **Do not let it grow back:**
