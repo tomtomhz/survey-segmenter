@@ -90,7 +90,11 @@ export function Thread({
             )
           }
           return (
-            <div className="msg ai" key={message.id}>
+            // A finished result is a dashboard, not prose: stat tiles, charts and downloads are
+            // scanned, and they were being held inside a 780px reading measure that left a third
+            // of a laptop screen empty. It takes the full width; the long statistical report
+            // inside it keeps the measure, because that part genuinely is prose.
+            <div className={`msg ai${message.kind === 'result' ? ' wide' : ''}`} key={message.id}>
               <div className="av">✦</div>
               <div className="bubble">
                 {message.kind === 'thinking' && (

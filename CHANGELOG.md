@@ -3,6 +3,31 @@
 Notable changes to Survey Segmenter. Versions follow [semantic versioning](https://semver.org/);
 the version is set in `pyproject.toml` and stamped into every report footer.
 
+## [1.22.0] — 2026-08-13
+
+### Changed
+
+- **The charts get the width they were always worth.** Everything sat in a single 780px column,
+  which is the right measure for prose — roughly the line length people read comfortably — and the
+  wrong one for charts, which are scanned. Measured on a 1440px laptop: **410px of the window was
+  empty** while the segment map, the one picture that can falsify the whole result, rendered at
+  642px. It is 1052px now, a 64% gain, with no horizontal scrolling at any width.
+
+  The layout is a content grid rather than a fixed column: a middle track holds the reading
+  measure and everything lands there by default, and a finished result spans the full width up to
+  1180px. The tracks are `min()`-based, so it degrades continuously down to a phone with no
+  breakpoint where anything jumps.
+
+  **Widening the container widened the prose with it**, which was the mistake worth catching: a
+  chart caption came out at 1074px — about 150 characters a line, where the eye loses its place
+  returning to the left edge. So the container is wide and the text inside it is not. The
+  statistical report, the caption under each chart and the standing notes all keep a measure set in
+  `ch` rather than pixels, because what matters is characters per line.
+
+  The summary strip is capped too. Stretched across the full width, each of its three tiles became
+  a 380px box holding a two-digit number, which reads as something missing rather than something
+  summarised.
+
 ## [1.21.0] — 2026-08-13
 
 ### Fixed

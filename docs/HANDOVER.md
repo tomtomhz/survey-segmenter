@@ -8,14 +8,14 @@
 Working state for whoever picks this up next, human or AI. `README.md` says what the tool is;
 this says where it stands, what was decided and why, and what to do next.
 
-**Last updated:** 2026-08-13 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.21.0**, 289 Python + 161 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
+**Last updated:** 2026-08-13 · repo `github.com/tomtomhz/survey-segmenter` (public) · `main` @ **v1.22.0**, 289 Python + 161 frontend tests green locally on Python 3.9 **and** 3.12, and green in CI on Ubuntu and macOS
 
 ---
 
 ## Session state — 2026-08-08 to 08-13 (read this first)
 
-**Released: v1.5.1 → v1.21.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
-the team)/` is on **1.21.0** — verified by unpacking the zip that is actually sitting there and
+**Released: v1.5.1 → v1.22.0.** Tree clean. The team copy at `~/Desktop/Survey Segmenter (app for
+the team)/` is on **1.22.0** — verified by unpacking the zip that is actually sitting there and
 reading the version out of the bundle, plus `codesign --verify --deep --strict`, rather than
 trusting that the copy succeeded.
 
@@ -278,6 +278,25 @@ cleanly planted groups.
 Two things to carry forward. **Quote the dataset with any timing**, or the number becomes a trap for
 whoever re-measures it. And when a benchmark looks like a regression, A/B the same fixture against
 the old tag before believing it — `git worktree add /tmp/old <tag>` costs a minute and settles it.
+
+### v1.22.0 — the layout is a content grid now, and why prose did not follow it
+
+`.wrap` was one 780px column. That is the right measure for reading and the wrong one for charts:
+on a 1440px window it left 410px empty while the segment map rendered at 642px. It is now a grid —
+`1fr min(780px, 100% - 40px) 1fr` — where everything lands in the middle track by default and a
+`.wide` child spans all three, up to 1180px. `min()` throughout, so there is no width at which the
+layout jumps.
+
+**The part worth remembering is the correction, not the change.** Widening the container widened
+the prose inside it, and a chart caption came out at 1074px — roughly 150 characters a line, which
+is past the point where the eye reliably finds the next line. Measured, not eyeballed. So the
+container is wide and the text is not: `.rep`, `.ccap` and `.note` each keep a measure, set in `ch`
+because the unit that matters is characters per line rather than pixels.
+
+**If you add a new block to a result, decide which it is.** Scanned (a chart, a table, a tile row)
+belongs at full width; read (anything with sentences in it) needs a `max-width` in `ch`. The
+default is the wide container, so prose that forgets to say so will silently be too wide — which is
+exactly what happened here.
 
 ### v1.21.0 — the wide-export gap, and a guard that was only on one path
 
